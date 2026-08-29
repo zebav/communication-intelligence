@@ -1,0 +1,9 @@
+project_id = "communication-intelligence"
+
+[auth]
+enable_signup = false
+site_url = "http://localhost:3000"
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
