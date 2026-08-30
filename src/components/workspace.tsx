@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, Inbox, LayoutDashboard, Link2, Mail, MessageCircle, MoreHorizontal, Network, Search, Settings, Sparkles, Users, WandSparkles } from "lucide-react";
+import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Settings, Sparkles, Users, WandSparkles } from "lucide-react";
 import { actionLabels, type Conversation } from "@/lib/domain";
 import { cleanups, conversations, followUps, people } from "@/lib/mock-data";
+import { signOut } from "@/app/auth/actions";
 
 type View = "today" | "inbox" | "people" | "followups" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
@@ -11,7 +12,7 @@ const navigation: { id: View; label: string; icon: typeof Inbox; count?: number 
 ];
 const sources = [{ name: "Email", count: 8 }, { name: "Instagram", count: 2 }, { name: "WhatsApp", count: 2 }, { name: "Messenger" }, { name: "Tinder" }, { name: "TikTok" }, { name: "LinkedIn" }];
 
-export function Workspace() {
+export function Workspace({ userEmail }: { userEmail: string }) {
   const [view, setView] = useState<View>("today");
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
@@ -23,7 +24,7 @@ export function Workspace() {
       {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}><item.icon size={15} />{item.label}{item.count && <span className="count">{item.count}</span>}</button>)}
       <div className="nav-label">Sources</div>
       {sources.map((source) => <button key={source.name} className="nav-button" onClick={() => setView("inbox")}><MessageCircle size={14} />{source.name}{source.count && <span className="count">{source.count}</span>}</button>)}
-      <div className="user-chip"><div className="avatar">ZV</div><div><strong>Zebastian</strong><br /><span className="muted">Private workspace</span></div></div>
+      <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
     <main className="main">{view === "today" && <Today onOpenInbox={() => setView("inbox")} />}{view === "inbox" && <InboxView />}{view === "people" && <People />}{view === "followups" && <FollowUps />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence />}{view === "connections" && <Connections />}{view === "settings" && <SettingsView />}</main>
     <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><item.icon size={17} />{item.label}</button>)}<button onClick={() => setView("settings")}><MoreHorizontal size={17} />More</button></nav>

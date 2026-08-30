@@ -5,6 +5,7 @@
 - Production access requires Cloudflare Access and Supabase Auth.
 - Public signup is disabled; the owner is manually provisioned and TOTP MFA is mandatory.
 - All user-owned database records carry `owner_id` and are protected by RLS.
+- Application routes require a validated Supabase session and database policies require an MFA-verified `aal2` JWT.
 - OAuth and provider credentials are server-only and must be encrypted before database storage.
 - No autonomous external send, delete, unsubscribe, or identity merge is permitted.
 - Every consequential action must write an audit event.
