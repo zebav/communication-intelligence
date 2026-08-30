@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Secure authentication
+
+- Added cookie-based Supabase authentication for Next.js.
+- Added protected application routes and explicit sign-out.
+- Added mandatory TOTP enrollment and verification.
+- Added automatic owner profile provisioning and AAL2-enforced RLS policies.
+
 ## 0.1.0 — Milestone 1 foundation
 
 - Added responsive product shell and core screens.

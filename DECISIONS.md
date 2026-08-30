@@ -15,3 +15,7 @@ Accepted. External sending and destructive cleanup actions require explicit appr
 ## ADR-004 — Supabase as system of record
 
 Accepted. PostgreSQL, Auth, Storage, and RLS remain within Supabase. No separate vector database is introduced in V1.
+
+## ADR-005 — MFA enforcement at the application and database boundaries
+
+Accepted. The application redirects every authenticated AAL1 session to TOTP verification. RLS additionally rejects application-data access unless the Supabase JWT carries `aal2`, preventing UI bypass from weakening authorization.
