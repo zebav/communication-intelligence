@@ -14,4 +14,6 @@ Initial and incremental mailbox synchronization use Microsoft Graph message delt
 
 The capability definition in `src/lib/connectors/microsoft-graph.ts` is authoritative for the current implementation boundary. Sending is always subject to explicit user approval. Permanent deletion and automatic unsubscribe remain disabled.
 
-The OAuth callback and live mailbox synchronization are not enabled until a Microsoft Entra app registration, redirect URIs, encrypted token storage, and sandbox mailboxes for both supported account types have been configured.
+The OAuth start and callback routes enforce a validated Supabase owner session and MFA assurance. OAuth uses state validation and PKCE. Access and refresh tokens are encrypted with AES-256-GCM before storage; plaintext tokens are never written to the database or browser.
+
+Live mailbox synchronization remains disabled until the connection migration has been applied and sandbox mailboxes for both supported account types have completed an end-to-end OAuth test.
