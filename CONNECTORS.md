@@ -2,14 +2,16 @@
 
 Connectors expose capabilities instead of a lowest-common-denominator API. Planned operations include connection validation, synchronization, fetch, draft, send, archive, delete, mark-read, unsubscribe, webhook registration, and webhook processing. Unsupported operations must be declared false and never inferred.
 
-Milestone 1 uses realistic mock and manual-capture data only. Gmail is the next provider milestone; Outlook follows. Meta and other provider capabilities require an official API audit before implementation. Closed platforms use user-reviewed paste or screenshot capture.
+Milestone 1 uses realistic mock and manual-capture data only. Outlook and Microsoft 365 are the next provider milestone; Gmail follows. Meta and other provider capabilities require an official API audit before implementation. Closed platforms use user-reviewed paste or screenshot capture.
 
-## Gmail foundation
+## Outlook and Microsoft 365 foundation
 
-The Gmail connector uses Google's OAuth 2.0 web-server flow. Authorization codes, access tokens, and refresh tokens must only be handled server-side. Tokens will be encrypted before persistence and retrieved through the future centralized `CredentialService`.
+The Outlook connector uses the Microsoft identity platform OAuth 2.0 authorization-code flow and Microsoft Graph. The app registration must support accounts in any organizational directory and personal Microsoft accounts. The `/common` authority is used so both Microsoft 365 work or school accounts and private Outlook.com, Hotmail, and Live accounts can connect.
 
-Initial synchronization uses Gmail's full synchronization flow. Subsequent synchronization uses `history.list` with the last durable history ID. A history ID outside Gmail's available range requires a new full synchronization. Push notifications use `users.watch`; the watch must be renewed before its expiration.
+Authorization codes, access tokens, and refresh tokens must only be handled server-side. Tokens will be encrypted before persistence and retrieved through the future centralized `CredentialService`. Delegated access requests `offline_access`, `User.Read`, `Mail.ReadWrite`, and `Mail.Send`.
 
-The capability definition in `src/lib/connectors/gmail.ts` is authoritative for the current implementation boundary. Sending is always subject to explicit user approval. Permanent deletion and automatic unsubscribe remain disabled.
+Initial and incremental mailbox synchronization use Microsoft Graph message delta queries. Delta links are stored per mail folder. Change notifications are capability-declared but remain disabled until webhook validation, subscription renewal, and safe processing are implemented.
 
-The OAuth callback and live mailbox synchronization are not enabled until Google Cloud credentials, redirect URIs, encrypted token storage, and a sandbox mailbox have been configured.
+The capability definition in `src/lib/connectors/microsoft-graph.ts` is authoritative for the current implementation boundary. Sending is always subject to explicit user approval. Permanent deletion and automatic unsubscribe remain disabled.
+
+The OAuth callback and live mailbox synchronization are not enabled until a Microsoft Entra app registration, redirect URIs, encrypted token storage, and sandbox mailboxes for both supported account types have been configured.
