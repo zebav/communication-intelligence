@@ -1,5 +1,12 @@
 # Changelog
 
+## Milestone 2 — communication cases
+
+- Added a private form for capturing a person, subject, source, and incoming communication.
+- Persisted cases across the existing Supabase people, conversations, and messages tables.
+- Added a live list of saved cases with owner-scoped, MFA-protected access.
+- Reused existing people by name to avoid unnecessary duplicate contacts.
+
 ## Unreleased — Secure authentication
 
 - Added cookie-based Supabase authentication for Next.js.
