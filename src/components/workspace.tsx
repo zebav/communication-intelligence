@@ -2,17 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Settings, Sparkles, Users, WandSparkles } from "lucide-react";
-import { actionLabels, type Conversation } from "@/lib/domain";
+import { actionLabels, type CommunicationCase, type Conversation } from "@/lib/domain";
 import { cleanups, conversations, followUps, people } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
+import { CommunicationCaseForm } from "@/components/communication-case-form";
 
-type View = "today" | "inbox" | "people" | "followups" | "cleanup" | "intelligence" | "connections" | "settings";
+type View = "today" | "cases" | "inbox" | "people" | "followups" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
-  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "inbox", label: "Inbox", icon: Inbox, count: 12 }, { id: "people", label: "People", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3, count: 3 }, { id: "cleanup", label: "Clean Up", icon: Archive, count: 25 }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
+  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox, count: 12 }, { id: "people", label: "People", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3, count: 3 }, { id: "cleanup", label: "Clean Up", icon: Archive, count: 25 }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
 const sources = [{ name: "Email", count: 8 }, { name: "Instagram", count: 2 }, { name: "WhatsApp", count: 2 }, { name: "Messenger" }, { name: "Tinder" }, { name: "TikTok" }, { name: "LinkedIn" }];
 
-export function Workspace({ userEmail }: { userEmail: string }) {
+export function Workspace({ userEmail, communicationCases }: { userEmail: string; communicationCases: CommunicationCase[] }) {
   const [view, setView] = useState<View>("today");
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
@@ -26,9 +27,18 @@ export function Workspace({ userEmail }: { userEmail: string }) {
       {sources.map((source) => <button key={source.name} className="nav-button" onClick={() => setView("inbox")}><MessageCircle size={14} />{source.name}{source.count && <span className="count">{source.count}</span>}</button>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
-    <main className="main">{view === "today" && <Today onOpenInbox={() => setView("inbox")} />}{view === "inbox" && <InboxView />}{view === "people" && <People />}{view === "followups" && <FollowUps />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence />}{view === "connections" && <Connections />}{view === "settings" && <SettingsView />}</main>
+    <main className="main">{view === "today" && <Today onOpenInbox={() => setView("inbox")} />}{view === "cases" && <CommunicationCases cases={communicationCases} />}{view === "inbox" && <InboxView />}{view === "people" && <People />}{view === "followups" && <FollowUps />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence />}{view === "connections" && <Connections />}{view === "settings" && <SettingsView />}</main>
     <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><item.icon size={17} />{item.label}</button>)}<button onClick={() => setView("settings")}><MoreHorizontal size={17} />More</button></nav>
     {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setView(next); setCommandOpen(false); }} />}
+  </div>;
+}
+
+function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
+  return <div className="page"><PageHeader eyebrow="Supabase workspace" title="Communication cases" subtitle="Capture an important communication and keep it securely in your private workspace." />
+    <div className="section-title"><MessageCircle size={14} color="#34d399" /> Create a new case</div>
+    <CommunicationCaseForm />
+    <div className="section-title">Saved cases <span className="count">{cases.length}</span></div>
+    {cases.length === 0 ? <div className="empty-card">No cases saved yet. Use the form above to create the first one.</div> : <div className="case-list">{cases.map((item) => <article className="case-item" key={item.id}><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><div className="case-title"><strong>{item.title}</strong><span className="tag">{item.source}</span></div><span className="case-person">{item.personName} · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</span><p>{item.message}</p></div></article>)}</div>}
   </div>;
 }
 
