@@ -7,6 +7,7 @@
 - All user-owned database records carry `owner_id` and are protected by RLS.
 - Application routes require a validated Supabase session and database policies require an MFA-verified `aal2` JWT.
 - OAuth and provider credentials are server-only and must be encrypted before database storage.
+- Microsoft OAuth uses state validation, PKCE, short-lived HTTP-only cookies, and AES-256-GCM credential encryption.
 - No autonomous external send, delete, unsubscribe, or identity merge is permitted.
 - Every consequential action must write an audit event.
 - Security headers are configured centrally in `next.config.ts`.
