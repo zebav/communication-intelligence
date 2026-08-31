@@ -18,6 +18,7 @@ export interface ConnectorDefinition {
   displayName: string;
   source: "email";
   authorization: "oauth2-web-server";
+  accountAudience: "work-school-and-personal";
   scopes: readonly string[];
   capabilities: ConnectorCapabilities;
 }
