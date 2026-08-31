@@ -23,10 +23,13 @@ export async function createCommunicationCase(_: CreateCaseState, formData: Form
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (!assurance || assurance.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
 
-  const { data: existingPerson, error: lookupError } = await supabase.from("people").select("id").ilike("display_name", parsed.data.personName).limit(1).maybeSingle();
-  if (lookupError) return { error: "The person could not be checked." };
+  const { data: matchingPeople, error: lookupError } = await supabase.from("people").select("id").ilike("display_name", parsed.data.personName).limit(1);
+  if (lookupError) {
+    console.error("Communication case person lookup failed", { code: lookupError.code, message: lookupError.message });
+    return { error: "The person could not be checked." };
+  }
 
-  let person = existingPerson;
+  let person = matchingPeople?.[0];
   let createdPerson = false;
   if (!person) {
     const { data: newPerson, error: personError } = await supabase.from("people").insert({ owner_id: user.id, display_name: parsed.data.personName }).select("id").single();
