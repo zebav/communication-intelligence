@@ -7,6 +7,15 @@ export interface Person { id: string; name: string; initials: string; role: stri
 export interface Message { id: string; direction: "in" | "out"; body: string; timestamp: string; source: Source }
 export interface Conversation { id: string; person: Person; subject: string; preview: string; timestamp: string; unread: boolean; messages: Message[]; attention: AttentionAnalysis; action: RecommendedAction; actionReason: string; draft?: string; openLoop?: string }
 
+export interface CommunicationCase {
+  id: string;
+  personName: string;
+  title: string;
+  source: Source;
+  message: string;
+  createdAt: string;
+}
+
 export function calculateAttention(dimensions: ScoreDimension[]): number {
   const total = 5 + dimensions.reduce((sum, item) => sum + item.value, 0);
   return Math.round(Math.min(10, Math.max(1, total)) * 10) / 10;
