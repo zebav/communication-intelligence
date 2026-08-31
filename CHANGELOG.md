@@ -5,6 +5,8 @@
 - Reduced the password-to-MFA path by redirecting successful password sign-in directly to MFA.
 - Loaded independent MFA status checks concurrently.
 - Added a capability-aware Microsoft Graph connector definition for personal Outlook and Microsoft 365 accounts, server-side OAuth, delta synchronization, change notifications, and approval-gated sending.
+- Added a PKCE- and state-protected Microsoft OAuth flow with encrypted server-side credential storage.
+- Added the first Connect Outlook entry point and minimum MFA-protected database grant for connection records.
 - Kept permanent deletion and automatic unsubscribe explicitly disabled.
 
 ## Milestone 2 — communication cases
