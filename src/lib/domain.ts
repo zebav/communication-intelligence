@@ -18,6 +18,7 @@ export interface CommunicationCase {
 
 export interface SyncedEmailConversation {
   id: string;
+  messageId: string;
   personName: string;
   title: string;
   preview: string;

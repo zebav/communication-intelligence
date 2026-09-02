@@ -7,12 +7,15 @@ import { actionLabels, type CommunicationCase, type Conversation, type Recommend
 import { cleanups, conversations, followUps, people } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
 import { CommunicationCaseForm } from "@/components/communication-case-form";
+import { correctEmailClassification } from "@/app/inbox/actions";
+import { emailDashboardSummary, prioritizeEmails } from "@/lib/email-intelligence";
 
 type View = "today" | "cases" | "inbox" | "people" | "followups" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
-  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox, count: 12 }, { id: "people", label: "People", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3, count: 3 }, { id: "cleanup", label: "Clean Up", icon: Archive, count: 25 }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
+  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "People", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
-const sources = [{ name: "Email", count: 8 }, { name: "Instagram", count: 2 }, { name: "WhatsApp", count: 2 }, { name: "Messenger" }, { name: "Tinder" }, { name: "TikTok" }, { name: "LinkedIn" }];
+const sources = ["Email", "Instagram", "WhatsApp", "Messenger", "Tinder", "TikTok", "LinkedIn"];
+const EMAIL_CATEGORIES = ["All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
 type MicrosoftConnection = {
   account_name: string | null;
@@ -25,6 +28,7 @@ type MicrosoftConnection = {
 export function Workspace({ userEmail, communicationCases, microsoftConnection, syncedEmails }: { userEmail: string; communicationCases: CommunicationCase[]; microsoftConnection: MicrosoftConnection; syncedEmails: SyncedEmailConversation[] }) {
   const router = useRouter();
   const automaticSyncStarted = useRef(false);
+  const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>("today");
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
@@ -34,12 +38,12 @@ export function Workspace({ userEmail, communicationCases, microsoftConnection, 
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication<br />Intelligence</span></div>
       <button className="command-button" onClick={() => setCommandOpen(true)}><Search size={13} /> Search or command <kbd>⌘K</kbd></button>
       <div className="nav-label">Workspace</div>
-      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}><item.icon size={15} />{item.label}{item.count && <span className="count">{item.count}</span>}</button>)}
+      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
       <div className="nav-label">Sources</div>
-      {sources.map((source) => <button key={source.name} className="nav-button" onClick={() => setView("inbox")}><MessageCircle size={14} />{source.name}{source.count && <span className="count">{source.count}</span>}</button>)}
+      {sources.map((source) => <button key={source} className="nav-button" onClick={() => setView("inbox")}><MessageCircle size={14} />{source}{source === "Email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
-    <main className="main">{view === "today" && <Today onOpenInbox={() => setView("inbox")} />}{view === "cases" && <CommunicationCases cases={communicationCases} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} />}{view === "people" && <People />}{view === "followups" && <FollowUps />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence />}{view === "connections" && <Connections microsoftConnection={microsoftConnection} />}{view === "settings" && <SettingsView />}</main>
+    <main className="main">{view === "today" && <Today emails={syncedEmails} onOpenInbox={() => setView("inbox")} />}{view === "cases" && <CommunicationCases cases={communicationCases} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} />}{view === "people" && <People />}{view === "followups" && <FollowUps />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence />}{view === "connections" && <Connections microsoftConnection={microsoftConnection} />}{view === "settings" && <SettingsView />}</main>
     <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><item.icon size={17} />{item.label}</button>)}<button onClick={() => setView("settings")}><MoreHorizontal size={17} />More</button></nav>
     {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setView(next); setCommandOpen(false); }} />}
   </div>;
@@ -54,20 +58,28 @@ function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
   </div>;
 }
 
-function Today({ onOpenInbox }: { onOpenInbox: () => void }) {
-  return <div className="page"><span className="eyebrow">Saturday, 29 August</span><h1>Good evening, Zebastian</h1><p className="subtitle">You have <strong style={{color:"white"}}>6 conversations</strong> worth your attention.</p>
-    <div className="summary-bar"><div className="summary-stat"><strong>73</strong><span>new communications</span></div><div className="summary-stat"><strong>6</strong><span>worth attention</span></div><div className="summary-stat"><strong>3</strong><span>drafts ready</span></div><div className="summary-grow"><div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><span>Today&apos;s communication load</span><span className="muted">~12 min focused</span></div><div className="progress"><span /></div></div></div>
-    <div className="section-title"><Bell size={14} color="#fb7185" /> Critical & decisions <span className="count">1</span></div><div className="cards"><ConversationCard conversation={conversations[0]} onClick={onOpenInbox} /></div>
-    <div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">2</span></div><div className="cards">{conversations.slice(1,3).map((conversation) => <ConversationCard key={conversation.id} conversation={conversation} onClick={onOpenInbox} />)}</div>
-    <div className="section-title"><Archive size={14} color="#8b939f" /> Can ignore <span className="count">1</span></div><div className="cards"><ConversationCard conversation={conversations[3]} onClick={onOpenInbox} /></div>
+function Today({ emails, onOpenInbox }: { emails: SyncedEmailConversation[]; onOpenInbox: () => void }) {
+  const ordered = prioritizeEmails(emails);
+  const summary = emailDashboardSummary(emails);
+  const critical = ordered.filter((email) => email.classification === "Critical");
+  const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical");
+  const lowAttention = ordered.filter((email) => email.priorityScore < 4);
+  return <div className="page"><span className="eyebrow">Live Outlook intelligence</span><h1>Your communication today</h1><p className="subtitle">{emails.length > 0 ? <>You have <strong style={{color:"white"}}>{summary.needsResponse} conversations</strong> that may need a response.</> : "Import Outlook messages to replace the empty dashboard with live communication."}</p>
+    <div className="summary-bar"><div className="summary-stat"><strong>{summary.unread}</strong><span>unread</span></div><div className="summary-stat"><strong>{summary.needsResponse}</strong><span>may need response</span></div><div className="summary-stat"><strong>{summary.critical}</strong><span>critical</span></div><div className="summary-stat"><strong>{summary.lowAttention}</strong><span>low attention</span></div></div>
+    {emails.length === 0 && <div className="empty-card">No synchronized Outlook messages yet. Open Connections and run the first import.</div>}
+    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#fb7185" /> Critical <span className="count">{critical.length}</span></div><div className="cards">{critical.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">{respond.length}</span></div><div className="cards">{respond.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Low attention <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
   </div>;
 }
+
+function LiveEmailCard({ email, onClick }: { email: SyncedEmailConversation; onClick: () => void }) { const action = actionLabels[email.recommendedAction as RecommendedAction] ?? email.recommendedAction; return <button className="card" onClick={onClick} style={{textAlign:"left",cursor:"pointer"}}><div className="card-top"><span>{email.title}</span><span className="score">{email.priorityScore}</span></div><div className="card-person"><div className="avatar">{email.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{email.personName}</strong><span>{email.classification}</span></div></div><p>{email.preview}</p><span className="pill">{action} <ChevronRight size={10} /></span></button> }
 
 function ConversationCard({ conversation, onClick }: { conversation: Conversation; onClick: () => void }) { return <button className="card" onClick={onClick} style={{textAlign:"left",cursor:"pointer"}}><div className="card-top"><span>{conversation.subject}</span><span className="score">{conversation.attention.score}</span></div><div className="card-person"><div className="avatar">{conversation.person.initials}</div><div><strong>{conversation.person.name}</strong><span>{conversation.person.organization ?? conversation.person.role}</span></div></div><p>{conversation.preview}</p><span className="pill">{actionLabels[conversation.action]} <ChevronRight size={10} /></span></button> }
 
 function InboxView({ syncedEmails }: { syncedEmails: SyncedEmailConversation[] }) {
   if (syncedEmails.length > 0) return <SyncedInbox emails={syncedEmails} />;
-  return <MockInbox />;
+  return <div className="page"><PageHeader eyebrow="Live Outlook inbox" title="Inbox" subtitle="Synchronized Outlook conversations will appear here." /><div className="empty-card">No Outlook messages have been synchronized yet. Open Connections and run the first import.</div></div>;
 }
 
 function MockInbox() {
@@ -79,10 +91,17 @@ function MockInbox() {
 }
 
 function SyncedInbox({ emails }: { emails: SyncedEmailConversation[] }) {
+  const router = useRouter();
+  const [category, setCategory] = useState("All categories");
   const [selectedId, setSelectedId] = useState(emails[0].id);
-  const selected = emails.find((email) => email.id === selectedId) ?? emails[0];
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
+  const filtered = prioritizeEmails(category === "All categories" ? emails : emails.filter((email) => email.classification === category));
+  const selected = filtered.find((email) => email.id === selectedId) ?? filtered[0];
+  if (!selected) return <div className="page"><PageHeader eyebrow="Live Outlook inbox" title="Inbox" subtitle="Filter synchronized messages by category." /><div className="inbox-head"><select className="filter" aria-label="Email category" value={category} onChange={(event) => setCategory(event.target.value)}>{EMAIL_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></div><div className="empty-card">No messages match this category.</div></div>;
   const action = actionLabels[selected.recommendedAction as RecommendedAction] ?? selected.recommendedAction;
-  return <div className="inbox"><section className="inbox-col"><div className="inbox-head"><h1>Inbox</h1><span className="pill">Outlook · {emails.length}</span></div>{emails.map((email) => <div key={email.id} className={`conversation-row ${selected.id === email.id ? "selected" : ""}`} onClick={() => setSelectedId(email.id)}><div className="avatar">{email.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{email.personName}{email.unread ? " · New" : ""}</strong><p>{email.title}</p></div><div className="row-meta">{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(email.receivedAt))}<div className="row-score">{email.priorityScore}</div></div></div>)}</section><section className="inbox-col thread"><div className="thread-head"><strong>{selected.personName}</strong><span>{selected.title} · Outlook</span></div><div className="messages"><div className="message"><div className="message-bubble">{selected.preview || "No text preview is available for this message."}</div><div className="message-meta">Outlook · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(selected.receivedAt))}</div></div></div></section><aside className="intel"><h2>Communication Intelligence</h2><div className="intel-section"><div className="intel-label">Initial category</div><span className="pill">{selected.classification}</span></div><div className="intel-section"><div className="intel-label">Priority</div><strong style={{color:"#86efc2"}}>{selected.priorityScore}/10</strong></div><div className="intel-section"><div className="intel-label">Recommended action</div><span className="pill">{action}</span></div><div className="intel-section"><p>Initial categories use transparent rules. AI refinement and feedback learning are added in a later phase.</p></div></aside></div>;
+  const saveCategory = async (classification: string) => { setSavingCategory(true); setCategoryError(""); const result = await correctEmailClassification({ messageId: selected.messageId, conversationId: selected.id, classification }); if (result.error) setCategoryError(result.error); else router.refresh(); setSavingCategory(false); };
+  return <div className="inbox"><section className="inbox-col"><div className="inbox-head"><h1>Inbox</h1><select className="filter" aria-label="Email category" value={category} onChange={(event) => setCategory(event.target.value)}>{EMAIL_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></div>{filtered.map((email) => <div key={email.id} className={`conversation-row ${selected.id === email.id ? "selected" : ""}`} onClick={() => setSelectedId(email.id)}><div className="avatar">{email.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{email.personName}{email.unread ? " · New" : ""}</strong><p>{email.title}</p></div><div className="row-meta">{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(email.receivedAt))}<div className="row-score">{email.priorityScore}</div></div></div>)}</section><section className="inbox-col thread"><div className="thread-head"><strong>{selected.personName}</strong><span>{selected.title} · Outlook</span></div><div className="messages"><div className="message"><div className="message-bubble">{selected.preview || "No text preview is available for this message."}</div><div className="message-meta">Outlook · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(selected.receivedAt))}</div></div></div></section><aside className="intel"><h2>Communication Intelligence</h2><div className="intel-section"><div className="intel-label">Category</div><select className="filter" aria-label="Correct email category" value={selected.classification} disabled={savingCategory} onChange={(event) => void saveCategory(event.target.value)}>{EMAIL_CATEGORIES.slice(1).map((item) => <option key={item}>{item}</option>)}</select>{categoryError && <p className="negative">{categoryError}</p>}</div><div className="intel-section"><div className="intel-label">Priority</div><strong style={{color:"#86efc2"}}>{selected.priorityScore}/10</strong></div><div className="intel-section"><div className="intel-label">Recommended action</div><span className="pill">{action}</span></div><div className="intel-section"><p>Categories use transparent rules. Your manual correction is saved as the authoritative category.</p></div></aside></div>;
 }
 
 function PageHeader({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) { return <><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="subtitle">{subtitle}</p></> }
