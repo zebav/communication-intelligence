@@ -27,6 +27,7 @@ export interface SyncedEmailConversation {
   priorityScore: number;
   recommendedAction: string;
   unread: boolean;
+  analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number } };
 }
 
 export function calculateAttention(dimensions: ScoreDimension[]): number {
