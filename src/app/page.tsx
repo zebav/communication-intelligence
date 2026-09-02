@@ -44,7 +44,7 @@ export default async function Home() {
       ? (row.recommended_action as { action?: string }).action
       : undefined;
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata)
-      ? latestMessage.metadata as { is_read?: boolean }
+      ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"] }
       : {};
     return {
       id: row.id,
@@ -57,6 +57,7 @@ export default async function Home() {
       priorityScore: Number(row.priority_score ?? latestMessage?.importance_score ?? 0),
       recommendedAction: recommendation ?? "RESPOND_LATER",
       unread: metadata.is_read === false,
+      analysis: metadata.ai_analysis,
     };
   });
 
