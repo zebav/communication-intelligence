@@ -19,6 +19,16 @@ export default async function Home() {
     .order("created_at", { ascending: false })
     .limit(50);
 
+  const { data: microsoftConnection } = await supabase
+    .from("connections")
+    .select("account_name,account_identifier,status,health_status")
+    .eq("owner_id", user.id)
+    .eq("provider", "microsoft-graph")
+    .eq("status", "connected")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const communicationCases: CommunicationCase[] = (rows ?? []).map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
     const messages = Array.isArray(row.messages) ? row.messages : [];
@@ -26,5 +36,9 @@ export default async function Home() {
     return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at };
   });
 
-  return <Workspace userEmail={user.email ?? "Private owner"} communicationCases={communicationCases} />;
+  return <Workspace
+    userEmail={user.email ?? "Private owner"}
+    communicationCases={communicationCases}
+    microsoftConnection={microsoftConnection}
+  />;
 }
