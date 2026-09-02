@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Settings, Sparkles, Users, WandSparkles } from "lucide-react";
 import { actionLabels, type CommunicationCase, type Conversation, type RecommendedAction, type SyncedEmailConversation } from "@/lib/domain";
@@ -19,12 +19,16 @@ type MicrosoftConnection = {
   account_identifier: string | null;
   status: string;
   health_status: string;
+  last_sync_at: string | null;
 } | null;
 
 export function Workspace({ userEmail, communicationCases, microsoftConnection, syncedEmails }: { userEmail: string; communicationCases: CommunicationCase[]; microsoftConnection: MicrosoftConnection; syncedEmails: SyncedEmailConversation[] }) {
+  const router = useRouter();
+  const automaticSyncStarted = useRef(false);
   const [view, setView] = useState<View>("today");
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
+  useEffect(() => { if (!microsoftConnection || automaticSyncStarted.current) return; const lastSync = microsoftConnection.last_sync_at ? new Date(microsoftConnection.last_sync_at).getTime() : 0; if (Date.now() - lastSync < 5 * 60 * 1000) return; automaticSyncStarted.current = true; void fetch("/api/connectors/microsoft/sync", { method: "POST", headers: { "x-sync-trigger": "automatic" } }).then((response) => { if (response.ok) router.refresh(); }).catch(() => undefined); }, [microsoftConnection, router]);
   return <div className="workspace">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication<br />Intelligence</span></div>
