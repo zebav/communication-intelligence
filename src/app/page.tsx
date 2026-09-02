@@ -21,7 +21,7 @@ export default async function Home() {
 
   const { data: microsoftConnection } = await supabase
     .from("connections")
-    .select("account_name,account_identifier,status,health_status")
+    .select("account_name,account_identifier,status,health_status,last_sync_at")
     .eq("owner_id", user.id)
     .eq("provider", "microsoft-graph")
     .eq("status", "connected")

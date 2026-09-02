@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
+import { validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -9,6 +10,7 @@ type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType
 type GraphAddress = { emailAddress?: { name?: string; address?: string } };
 type GraphMessage = {
   id: string;
+  "@removed"?: { reason?: string };
   conversationId?: string;
   internetMessageId?: string;
   subject?: string;
@@ -21,7 +23,7 @@ type GraphMessage = {
   isRead?: boolean;
   hasAttachments?: boolean;
 };
-type GraphMessagesResponse = { value?: GraphMessage[] };
+type GraphMessagesResponse = { value?: GraphMessage[]; "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
 
 function jsonError(message: string, status = 500) {
@@ -66,10 +68,13 @@ export async function POST(request: NextRequest) {
   if (assurance?.currentLevel !== "aal2") return jsonError("Two-factor authentication is required.", 403);
 
   const { data: connection, error: connectionError } = await supabase.from("connections")
-    .select("id,encrypted_credentials,token_metadata")
+    .select("id,encrypted_credentials,token_metadata,last_sync_at")
     .eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected")
     .order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (connectionError || !connection?.encrypted_credentials) return jsonError("Connect Outlook before importing messages.", 409);
+  if (request.headers.get("x-sync-trigger") === "automatic" && connection.last_sync_at && Date.now() - new Date(connection.last_sync_at).getTime() < 5 * 60 * 1000) {
+    return NextResponse.json({ imported: 0, skipped: true, syncedAt: connection.last_sync_at });
+  }
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!encryptionKey) return jsonError("The server encryption key is not configured.");
 
@@ -85,10 +90,10 @@ export async function POST(request: NextRequest) {
       if (error) throw new Error("credential_update_failed");
     }
 
-    const url = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages");
-    url.searchParams.set("$top", "25");
-    url.searchParams.set("$orderby", "receivedDateTime desc");
-    url.searchParams.set("$select", "id,conversationId,internetMessageId,subject,bodyPreview,from,receivedDateTime,sentDateTime,importance,inferenceClassification,isRead,hasAttachments");
+    const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
+      ? connection.token_metadata as Record<string, unknown>
+      : {};
+    const url = validatedInboxDeltaUrl(metadata.inbox_sync_url);
     const graphResponse = await fetch(url, {
       headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' },
       signal: AbortSignal.timeout(20_000),
@@ -99,6 +104,7 @@ export async function POST(request: NextRequest) {
     let imported = 0;
 
     for (const message of graph.value ?? []) {
+      if (message["@removed"]) continue;
       const address = message.from?.emailAddress?.address?.trim().toLowerCase();
       if (!message.id || !address) continue;
       const displayName = message.from?.emailAddress?.name?.trim() || address;
@@ -151,8 +157,20 @@ export async function POST(request: NextRequest) {
     }
 
     const syncedAt = new Date().toISOString();
-    await supabase.from("connections").update({ last_sync_at: syncedAt, health_status: "healthy", updated_at: syncedAt }).eq("id", connection.id);
-    return NextResponse.json({ imported, syncedAt });
+    const nextSyncUrl = graph["@odata.nextLink"] ?? graph["@odata.deltaLink"];
+    const { error: connectionUpdateError } = await supabase.from("connections").update({
+      last_sync_at: syncedAt,
+      health_status: "healthy",
+      token_metadata: {
+        ...metadata,
+        expires_at: token.credentials.expiresAt,
+        inbox_sync_url: nextSyncUrl,
+        inbox_delta_ready: Boolean(graph["@odata.deltaLink"]),
+      },
+      updated_at: syncedAt,
+    }).eq("id", connection.id);
+    if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
+    return NextResponse.json({ imported, syncedAt, incremental: Boolean(metadata.inbox_sync_url), moreAvailable: Boolean(graph["@odata.nextLink"]) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Microsoft mailbox sync failed", { reason });
