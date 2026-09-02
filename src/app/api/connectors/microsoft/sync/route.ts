@@ -102,8 +102,9 @@ export async function POST(request: NextRequest) {
       const address = message.from?.emailAddress?.address?.trim().toLowerCase();
       if (!message.id || !address) continue;
       const displayName = message.from?.emailAddress?.name?.trim() || address;
-      const { data: identity } = await supabase.from("identities").select("id,person_id")
+      const { data: identity, error: identityLookupError } = await supabase.from("identities").select("id,person_id")
         .eq("owner_id", user.id).eq("source", "email").eq("external_identifier", address).maybeSingle();
+      if (identityLookupError) throw new Error(`identity_lookup_failed_${identityLookupError.code}`);
       let personId = identity?.person_id;
       let identityId = identity?.id;
       if (!personId) {
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
           owner_id: user.id, person_id: personId, source: "email", external_identifier: address,
           metadata: { provider: microsoftGraphConnector.id }, verified_match: true, confidence: 1,
         }).select("id").single();
-        if (identityError || !newIdentity) throw new Error("identity_insert_failed");
+        if (identityError || !newIdentity) throw new Error(`identity_insert_failed_${identityError?.code ?? "unknown"}`);
         identityId = newIdentity.id;
       }
 
