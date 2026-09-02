@@ -22,14 +22,16 @@ export function MfaGate() {
     let active = true;
     async function prepare() {
       const supabase = createClient();
-      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      const [{ data: assurance }, { data: factors, error: factorsError }] = await Promise.all([
+        supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+        supabase.auth.mfa.listFactors(),
+      ]);
+      if (!active) return;
       if (assurance?.currentLevel === "aal2") {
         router.replace("/");
         return;
       }
 
-      const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();
-      if (!active) return;
       if (factorsError) {
         setError("MFA setup could not be loaded. Please sign in again.");
         setMode("verify");

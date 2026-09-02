@@ -23,7 +23,9 @@ export async function login(_: LoginState, formData: FormData): Promise<LoginSta
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) return { error: "The email or password is incorrect." };
 
-  redirect("/");
+  // A password sign-in is only AAL1. Go straight to the required MFA step
+  // instead of loading the protected home page just to be redirected again.
+  redirect("/auth/mfa");
 }
 
 export async function signOut() {
