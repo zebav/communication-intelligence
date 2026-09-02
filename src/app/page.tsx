@@ -15,7 +15,7 @@ export default async function Home() {
 
   const { data: rows } = await supabase
     .from("conversations")
-    .select("id,title,source,created_at,priority_score,recommended_action,people(display_name),messages(body_text,sent_at,classification,importance_score,metadata)")
+    .select("id,title,source,created_at,priority_score,recommended_action,people(display_name),messages(id,body_text,sent_at,classification,importance_score,metadata)")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -48,6 +48,7 @@ export default async function Home() {
       : {};
     return {
       id: row.id,
+      messageId: latestMessage?.id ?? "",
       personName: person?.display_name ?? "Unknown sender",
       title: row.title ?? "(No subject)",
       preview: latestMessage?.body_text ?? "",
