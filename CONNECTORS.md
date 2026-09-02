@@ -16,4 +16,6 @@ The capability definition in `src/lib/connectors/microsoft-graph.ts` is authorit
 
 The OAuth start and callback routes enforce a validated Supabase owner session and MFA assurance. OAuth uses state validation and PKCE. Access and refresh tokens are encrypted with AES-256-GCM before storage; plaintext tokens are never written to the database or browser.
 
-Live mailbox synchronization remains disabled until the connection migration has been applied and sandbox mailboxes for both supported account types have completed an end-to-end OAuth test.
+The signed-in application performs a bounded inbox delta synchronization when the last sync is older than five minutes. The initial window covers the last 30 days in pages of at most 25 messages; subsequent calls resume Microsoft Graph's opaque next or delta link. Stored cursor URLs are restricted to the expected Microsoft Graph HTTPS endpoint before use. This session-bound approach preserves the owner's Supabase MFA/RLS boundary.
+
+Unattended synchronization while the app is closed remains disabled until a narrowly scoped server credential, scheduler policy, monitoring, and token-revocation workflow have been reviewed.
