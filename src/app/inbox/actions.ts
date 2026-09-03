@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { AIServiceNotConfiguredError, getAIService } from "@/lib/ai/service";
 import { emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
+import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
 import { createClient } from "@/lib/supabase/server";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
@@ -50,8 +51,9 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
   }
   try {
     const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
-    const profilePreferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown } : {};
-    const personaContext = profilePreferences.communication_persona ? JSON.stringify(profilePreferences.communication_persona) : "not configured";
+    const profilePreferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
+    const universalProfile = normalizeUniversalProfile(profilePreferences.universal_communication_profile, profilePreferences.communication_persona);
+    const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
     const { data: conversationReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(4);
     const { data: recentReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8);
     const styleExamples = [...(conversationReplies ?? []), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
