@@ -11,6 +11,8 @@ describe("Microsoft inbox delta URLs", () => {
   it("accepts Microsoft Graph cursors and rejects other hosts", () => {
     const valid = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=safe";
     expect(validatedInboxDeltaUrl(valid).toString()).toBe(valid);
+    const graphVariant = "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages/delta?$deltatoken=safe";
+    expect(validatedInboxDeltaUrl(graphVariant).toString()).toBe(graphVariant);
     expect(() => validatedInboxDeltaUrl("https://example.com/collect")).toThrow("invalid_delta_link");
   });
 });

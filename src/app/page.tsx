@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
-import type { CommunicationCase, Source, SyncedEmailConversation } from "@/lib/domain";
+import type { CommunicationCase, CommunicationPersona, Source, SyncedEmailConversation } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +13,13 @@ export default async function Home() {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (!assurance || assurance.currentLevel !== "aal2") redirect("/auth/mfa");
 
+  const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
+  const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: Partial<CommunicationPersona> } : {};
+  const persona: CommunicationPersona = { identitySummary: preferences.communication_persona?.identitySummary ?? "", defaultTone: preferences.communication_persona?.defaultTone ?? "Direct, warm and calm", preferredLength: preferences.communication_persona?.preferredLength ?? "2–4 short sentences", principles: preferences.communication_persona?.principles ?? "Be accurate. Do not promise anything I have not approved.", signOff: preferences.communication_persona?.signOff ?? "" };
+
   const { data: rows } = await supabase
     .from("conversations")
-    .select("id,title,source,created_at,priority_score,recommended_action,people(display_name),messages(id,body_text,sent_at,classification,importance_score,metadata)")
+    .select("id,title,source,created_at,priority_score,recommended_action,people(display_name),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -32,20 +36,21 @@ export default async function Home() {
   const communicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
     const messages = Array.isArray(row.messages) ? row.messages : [];
-    const latestMessage = [...messages].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
+    const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at };
   });
 
   const syncedEmails: SyncedEmailConversation[] = (rows ?? []).filter((row) => row.source === "email").map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
     const messages = Array.isArray(row.messages) ? row.messages : [];
-    const latestMessage = [...messages].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
+    const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     const recommendation = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action)
       ? (row.recommended_action as { action?: string }).action
       : undefined;
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata)
       ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"] }
       : {};
+    const analysis = metadata.ai_analysis && typeof metadata.ai_analysis.draftResponse === "string" ? metadata.ai_analysis : undefined;
     return {
       id: row.id,
       messageId: latestMessage?.id ?? "",
@@ -57,7 +62,7 @@ export default async function Home() {
       priorityScore: Number(row.priority_score ?? latestMessage?.importance_score ?? 0),
       recommendedAction: recommendation ?? "RESPOND_LATER",
       unread: metadata.is_read === false,
-      analysis: metadata.ai_analysis,
+      analysis,
     };
   });
 
@@ -66,5 +71,6 @@ export default async function Home() {
     communicationCases={communicationCases}
     microsoftConnection={microsoftConnection}
     syncedEmails={syncedEmails}
+    persona={persona}
   />;
 }

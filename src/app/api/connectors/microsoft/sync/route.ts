@@ -156,6 +156,35 @@ export async function POST(request: NextRequest) {
       imported += 1;
     }
 
+    // Learn the owner's writing style only from recent sent messages that belong
+    // to an already imported conversation. They are never analyzed on their own.
+    const sentUrl = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages");
+    sentUrl.searchParams.set("$top", "25");
+    sentUrl.searchParams.set("$orderby", "sentDateTime desc");
+    sentUrl.searchParams.set("$select", "id,conversationId,internetMessageId,subject,bodyPreview,sentDateTime,hasAttachments");
+    const sentResponse = await fetch(sentUrl, { headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' }, signal: AbortSignal.timeout(20_000) });
+    let styleSamples = 0;
+    if (sentResponse.ok) {
+      const sent = await sentResponse.json() as GraphMessagesResponse;
+      for (const message of sent.value ?? []) {
+        if (!message.id || !message.conversationId || !message.bodyPreview) continue;
+        const { data: matchingConversation } = await supabase.from("conversations").select("id")
+          .eq("owner_id", user.id).eq("source", "email").eq("external_conversation_id", message.conversationId).maybeSingle();
+        if (!matchingConversation) continue;
+        const sentAt = message.sentDateTime ?? new Date().toISOString();
+        const { error: sentMessageError } = await supabase.from("messages").upsert({
+          owner_id: user.id, conversation_id: matchingConversation.id, external_message_id: message.id,
+          direction: "out", source: "email", body_text: message.bodyPreview, sent_at: sentAt,
+          attachment_count: message.hasAttachments ? 1 : 0,
+          metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, style_reference: true },
+        }, { onConflict: "owner_id,source,external_message_id" });
+        if (!sentMessageError) {
+          styleSamples += 1;
+          await supabase.from("conversations").update({ last_user_message_at: sentAt }).eq("id", matchingConversation.id).eq("owner_id", user.id);
+        }
+      }
+    }
+
     const syncedAt = new Date().toISOString();
     const nextSyncUrl = graph["@odata.nextLink"] ?? graph["@odata.deltaLink"];
     const { error: connectionUpdateError } = await supabase.from("connections").update({
@@ -170,7 +199,7 @@ export async function POST(request: NextRequest) {
       updated_at: syncedAt,
     }).eq("id", connection.id);
     if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
-    return NextResponse.json({ imported, syncedAt, incremental: Boolean(metadata.inbox_sync_url), moreAvailable: Boolean(graph["@odata.nextLink"]) });
+    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: Boolean(metadata.inbox_sync_url), moreAvailable: Boolean(graph["@odata.nextLink"]) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Microsoft mailbox sync failed", { reason });
