@@ -16,6 +16,8 @@ export interface CommunicationCase {
   createdAt: string;
 }
 
+export interface CommunicationPersona { identitySummary: string; defaultTone: string; preferredLength: string; principles: string; signOff: string }
+
 export interface SyncedEmailConversation {
   id: string;
   messageId: string;

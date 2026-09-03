@@ -54,3 +54,7 @@ export function recommendedEmailAction(classification: EmailClassification) {
   if (classification === "Spam") return "SPAM";
   return "RESPOND_LATER";
 }
+
+export function isRelevantEmail(classification: string) {
+  return !["Newsletter", "Marketing", "Notification", "Spam", "Information Only", "Receipt / Invoice"].includes(classification);
+}

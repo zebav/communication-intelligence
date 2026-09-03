@@ -49,10 +49,13 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     relationshipContext = [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "known email contact";
   }
   try {
+    const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
+    const profilePreferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown } : {};
+    const personaContext = profilePreferences.communication_persona ? JSON.stringify(profilePreferences.communication_persona) : "not configured";
     const { data: conversationReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(4);
     const { data: recentReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8);
     const styleExamples = [...(conversationReplies ?? []), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
-    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, styleExamples });
+    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, styleExamples });
     const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
     const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
     const now = new Date().toISOString();

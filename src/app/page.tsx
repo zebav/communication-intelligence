@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
-import type { CommunicationCase, Source, SyncedEmailConversation } from "@/lib/domain";
+import type { CommunicationCase, CommunicationPersona, Source, SyncedEmailConversation } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +12,10 @@ export default async function Home() {
 
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (!assurance || assurance.currentLevel !== "aal2") redirect("/auth/mfa");
+
+  const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
+  const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: Partial<CommunicationPersona> } : {};
+  const persona: CommunicationPersona = { identitySummary: preferences.communication_persona?.identitySummary ?? "", defaultTone: preferences.communication_persona?.defaultTone ?? "Direct, warm and calm", preferredLength: preferences.communication_persona?.preferredLength ?? "2–4 short sentences", principles: preferences.communication_persona?.principles ?? "Be accurate. Do not promise anything I have not approved.", signOff: preferences.communication_persona?.signOff ?? "" };
 
   const { data: rows } = await supabase
     .from("conversations")
@@ -67,5 +71,6 @@ export default async function Home() {
     communicationCases={communicationCases}
     microsoftConnection={microsoftConnection}
     syncedEmails={syncedEmails}
+    persona={persona}
   />;
 }
