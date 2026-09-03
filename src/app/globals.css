@@ -79,6 +79,7 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .intel p { color: #aeb6c0; font-size: 11px; line-height: 1.5; margin: 0; }
 .dimension { display: grid; grid-template-columns: 1fr auto; gap: 5px; margin: 8px 0; font-size: 10px; }.dimension span { color: #8a939e; }.positive { color: #75dfb6; }.negative { color: #fb8799; }
 .draft { border: 1px solid #2b343d; background: #15191e; border-radius: 8px; padding: 10px; color: #c5cbd3; font-size: 11px; line-height: 1.5; }
+.intel textarea { width: 100%; min-height: 150px; resize: vertical; border: 1px solid #2b343d; background: #15191e; border-radius: 8px; padding: 10px; color: #e8edf2; font-size: 12px; line-height: 1.5; }
 .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
 .list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .list-row { display: grid; grid-template-columns: 44px 1.2fr 1.5fr 110px; gap: 12px; align-items: center; padding: 13px 15px; border-bottom: 1px solid var(--line); font-size: 12px; }.list-row:last-child { border: 0; }.list-row small { color: var(--muted); display: block; margin-top: 3px; }

@@ -13,7 +13,8 @@ export function initialInboxDeltaUrl(now = Date.now()) {
 export function validatedInboxDeltaUrl(value: unknown) {
   if (typeof value !== "string") return initialInboxDeltaUrl();
   const url = new URL(value);
-  if (url.protocol !== "https:" || url.hostname !== GRAPH_HOST || !url.pathname.startsWith(INBOX_DELTA_PATH)) {
+  const inboxDeltaPath = /^\/v1\.0\/me\/mailFolders(?:\/inbox|\(['"]inbox['"]\))\/messages\/delta$/i;
+  if (url.protocol !== "https:" || url.hostname !== GRAPH_HOST || !inboxDeltaPath.test(decodeURIComponent(url.pathname))) {
     throw new Error("invalid_delta_link");
   }
   return url;
