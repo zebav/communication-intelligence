@@ -16,7 +16,21 @@ export interface CommunicationCase {
   createdAt: string;
 }
 
-export interface CommunicationPersona { identitySummary: string; defaultTone: string; preferredLength: string; principles: string; signOff: string }
+export type CommunicationSituation = "business" | "conflict" | "followUp" | "personal" | "romantic" | "logistics" | "sensitive";
+export interface ProfileGuidance { tone: string; guidance: string }
+export interface PersonProfileGuidance extends ProfileGuidance { name: string }
+export interface UniversalCommunicationProfile {
+  identitySummary: string;
+  values: string;
+  defaultTone: string;
+  preferredLength: string;
+  principles: string;
+  signOff: string;
+  channels: Partial<Record<Source, ProfileGuidance>>;
+  situations: Partial<Record<CommunicationSituation, ProfileGuidance>>;
+  people: Record<string, PersonProfileGuidance>;
+}
+export interface CommunicationPersonOption { id: string; name: string; relationship: string; organization: string }
 
 export interface SyncedEmailConversation {
   id: string;

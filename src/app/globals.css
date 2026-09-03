@@ -46,7 +46,7 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .card-person span { color: var(--muted); font-size: 11px; }
 .card p { color: #bac1cb; font-size: 12px; line-height: 1.5; margin: 0; }
 .pill { display: inline-flex; align-items: center; gap: 5px; margin-top: 14px; color: #d5dae1; font-size: 10px; border: 1px solid #343b44; border-radius: 999px; padding: 4px 7px; }
-.inbox { display: grid; grid-template-columns: 318px minmax(380px, 1fr) 310px; min-height: 100vh; }
+.inbox { display: grid; grid-template-columns: 300px minmax(360px, 1fr) 390px; min-height: 100vh; }
 .inbox-col { border-right: 1px solid var(--line); min-width: 0; }
 .inbox-head { height: 70px; border-bottom: 1px solid var(--line); padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; }
 .inbox-head h1 { font-size: 17px; margin: 0; }
@@ -80,6 +80,15 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .dimension { display: grid; grid-template-columns: 1fr auto; gap: 5px; margin: 8px 0; font-size: 10px; }.dimension span { color: #8a939e; }.positive { color: #75dfb6; }.negative { color: #fb8799; }
 .draft { border: 1px solid #2b343d; background: #15191e; border-radius: 8px; padding: 10px; color: #c5cbd3; font-size: 11px; line-height: 1.5; }
 .intel textarea { width: 100%; min-height: 150px; resize: vertical; border: 1px solid #2b343d; background: #15191e; border-radius: 8px; padding: 10px; color: #e8edf2; font-size: 12px; line-height: 1.5; }
+.reply-section { margin: 12px -9px 0; padding: 17px 9px; border: 1px solid #315e50; border-radius: 11px; background: linear-gradient(180deg, #14241f, #101713); }
+.reply-heading { display: flex; align-items: center; justify-content: space-between; color: var(--accent); margin-bottom: 11px; }
+.reply-heading span { display: block; color: #f0fff9; font-size: 16px; font-weight: 750; letter-spacing: -.02em; }.reply-heading small { display: block; color: #94c9b6; font-size: 11px; margin-top: 3px; }
+.intel .reply-section textarea { min-height: 210px; background: #090d0b; border-color: #3a6b5b; font-size: 14px; line-height: 1.65; padding: 14px; }
+.reply-help { color: #91a79f; font-size: 10px; line-height: 1.4; margin: 8px 1px 12px; }
+.send-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: #34d399; border-color: #34d399; color: #06251a; font-weight: 750; }
+.send-button:hover { background: #6ee7b7; }.send-button-main { width: 100%; min-height: 40px; font-size: 12px; }
+.send-confirm { border: 1px solid #4b6d61; background: #0b100e; border-radius: 8px; padding: 11px; display: grid; gap: 10px; }
+.send-confirm strong { font-size: 11px; }.send-confirm > div { display: flex; justify-content: flex-end; gap: 7px; }
 .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
 .list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .list-row { display: grid; grid-template-columns: 44px 1.2fr 1.5fr 110px; gap: 12px; align-items: center; padding: 13px 15px; border-bottom: 1px solid var(--line); font-size: 12px; }.list-row:last-child { border: 0; }.list-row small { color: var(--muted); display: block; margin-top: 3px; }
@@ -91,6 +100,15 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .case-form input, .case-form select, .case-form textarea { width: 100%; border: 1px solid #303740; background: #0c0f12; color: white; border-radius: 8px; padding: 10px 11px; outline: none; }
 .case-form input:focus, .case-form select:focus, .case-form textarea:focus { border-color: #3c8c70; box-shadow: 0 0 0 3px #174d3b55; }
 .case-form textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+.profile-editor { margin-bottom: 24px; }
+.profile-tabs { display: flex; gap: 5px; margin: 14px 0 8px; overflow-x: auto; }
+.profile-tabs button { white-space: nowrap; border: 1px solid var(--line); background: #101216; color: var(--muted); border-radius: 8px; padding: 8px 12px; font-size: 11px; cursor: pointer; }
+.profile-tabs button.active { color: #09251b; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.profile-explainer { display: grid; gap: 3px; border-left: 2px solid var(--accent-strong); padding: 3px 10px; }
+.profile-explainer strong { font-size: 12px; }.profile-explainer span { color: var(--muted); font-size: 11px; }
+.profile-two, .profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.profile-card { border: 1px solid var(--line); border-radius: 9px; padding: 13px; display: grid; gap: 10px; background: #0d1013; }
+.profile-card h3 { font-size: 12px; margin: 0 0 2px; }.profile-card textarea { min-height: 78px; }
 .case-form-footer { min-height: 31px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .case-form-footer .btn { display: inline-flex; align-items: center; gap: 6px; }
 .form-message { font-size: 11px; }.form-message.error { color: #fda4b2; }.form-message.success { color: #86efc2; }
@@ -112,3 +130,4 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 @media (max-width: 1050px) { .inbox { grid-template-columns: 290px 1fr; }.intel { display: none; }.cards { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 760px) { .workspace { display: block; }.sidebar { display: none; }.main { height: auto; padding-bottom: 64px; }.page { padding: 24px 16px; }.cards { grid-template-columns: 1fr; }.summary-bar { overflow-x: auto; }.inbox { display: block; min-height: auto; }.inbox-col:first-child { border: 0; }.thread { display: none; }.mobile-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; height: 60px; border-top: 1px solid var(--line); background: #0c0e11ed; backdrop-filter: blur(12px); justify-content: space-around; z-index: 10; }.mobile-bar button { border: 0; background: none; color: #727b86; font-size: 9px; display: grid; place-items: center; gap: 2px; }.mobile-bar button.active { color: var(--accent); }.list-row { grid-template-columns: 40px 1fr auto; }.list-row > :nth-child(3) { display: none; } }
 @media (max-width: 760px) { .case-form-grid { grid-template-columns: 1fr; }.case-form-footer { align-items: stretch; flex-direction: column; }.case-form-footer .btn { justify-content: center; } }
+@media (max-width: 760px) { .profile-two, .profile-grid { grid-template-columns: 1fr; } }

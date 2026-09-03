@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
-import type { CommunicationCase, CommunicationPersona, Source, SyncedEmailConversation } from "@/lib/domain";
+import { normalizeUniversalProfile } from "@/lib/communication-profile";
+import type { CommunicationCase, CommunicationPersonOption, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,11 @@ export default async function Home() {
   if (!assurance || assurance.currentLevel !== "aal2") redirect("/auth/mfa");
 
   const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
-  const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: Partial<CommunicationPersona> } : {};
-  const persona: CommunicationPersona = { identitySummary: preferences.communication_persona?.identitySummary ?? "", defaultTone: preferences.communication_persona?.defaultTone ?? "Direct, warm and calm", preferredLength: preferences.communication_persona?.preferredLength ?? "2–4 short sentences", principles: preferences.communication_persona?.principles ?? "Be accurate. Do not promise anything I have not approved.", signOff: preferences.communication_persona?.signOff ?? "" };
+  const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: Partial<UniversalCommunicationProfile> } : {};
+  const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
+
+  const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization").eq("owner_id", user.id).order("display_name").limit(200);
+  const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "" }));
 
   const { data: rows } = await supabase
     .from("conversations")
@@ -72,5 +76,6 @@ export default async function Home() {
     microsoftConnection={microsoftConnection}
     syncedEmails={syncedEmails}
     persona={persona}
+    profilePeople={profilePeople}
   />;
 }
