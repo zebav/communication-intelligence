@@ -12,4 +12,14 @@ describe("OpenAIResponsesService", () => {
     expect(body.store).toBe(false); expect(body.model).toBe("test-model"); expect(body.text.format.type).toBe("json_schema");
     expect(body.input).not.toContain('"ownerId"'); expect(body.safety_identifier).toMatch(/^[a-f0-9]{64}$/);
   });
+
+  it("rewrites only the current draft using bounded conversation context", async () => {
+    const output = { draftResponse: "Thank you. I will review this today.", draftTone: "professional and concise" };
+    let requestBody = "";
+    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => { requestBody = String(init?.body); return new Response(JSON.stringify({ output_text: JSON.stringify(output) }), { status: 200 }); });
+    const service = new OpenAIResponsesService("test-key", "test-model", request as typeof fetch);
+    await expect(service.reviseEmailDraft({ ownerId: "owner", senderName: "A", subject: "Review", currentDraft: "Thanks, will check.", transformation: "more_professional", conversationMessages: [{ direction: "in", body: "Could you review this?" }] })).resolves.toEqual(output);
+    const body = JSON.parse(requestBody);
+    expect(body.store).toBe(false); expect(body.input).toContain("more_professional"); expect(body.input).toContain("Could you review this?");
+  });
 });

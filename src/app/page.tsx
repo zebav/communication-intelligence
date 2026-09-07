@@ -55,6 +55,7 @@ export default async function Home() {
       ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"] }
       : {};
     const analysis = metadata.ai_analysis && typeof metadata.ai_analysis.draftResponse === "string" ? metadata.ai_analysis : undefined;
+    const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at })).filter((message) => message.body);
     return {
       id: row.id,
       messageId: latestMessage?.id ?? "",
@@ -66,6 +67,7 @@ export default async function Home() {
       priorityScore: Number(row.priority_score ?? latestMessage?.importance_score ?? 0),
       recommendedAction: recommendation ?? "RESPOND_LATER",
       unread: metadata.is_read === false,
+      threadMessages,
       analysis,
     };
   });
