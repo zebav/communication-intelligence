@@ -8,6 +8,7 @@ import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { senderRelevance } from "@/lib/sender-intelligence";
 import { z } from "zod";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
@@ -157,7 +158,15 @@ export async function POST(request: NextRequest) {
       const externalConversationId = message.conversationId ?? message.id;
       const content = extractMicrosoftMessageText(message);
       const classification = classifyEmail({ subject: message.subject, preview: content.text, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
-      const priority = emailPriority(classification, message.importance);
+      const basePriority = emailPriority(classification, message.importance);
+      const { data: senderPreferences } = await supabase.from("people").select("relationship_type,manual_priority,email_handling_rule,sender_preferences_verified").eq("id", personId).eq("owner_id", userId).maybeSingle();
+      const relevance = senderRelevance({
+        basePriority,
+        relationshipType: senderPreferences?.sender_preferences_verified ? senderPreferences.relationship_type : null,
+        manualPriority: senderPreferences?.sender_preferences_verified && senderPreferences.manual_priority != null ? Number(senderPreferences.manual_priority) : null,
+        handlingRule: senderPreferences?.sender_preferences_verified ? senderPreferences.email_handling_rule : "normal",
+      });
+      const priority = relevance.score;
       const action = recommendedEmailAction(classification);
       const sentAt = message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString();
       const { data: existingConversation } = await supabase.from("conversations").select("id")
@@ -166,7 +175,7 @@ export async function POST(request: NextRequest) {
         owner_id: userId, person_id: personId, source: "email", external_conversation_id: externalConversationId,
         title: message.subject || "(No subject)", conversation_type: "email", priority_score: priority,
         last_message_at: sentAt, last_other_message_at: sentAt, summary: content.text.slice(0, 300),
-        recommended_action: { action, reason: `Initial rule-based classification: ${classification}` }, updated_at: new Date().toISOString(),
+        recommended_action: { action, reason: `Initial rule-based classification: ${classification}`, relevance_reasons: relevance.reasons }, updated_at: new Date().toISOString(),
       };
       const conversationResult = existingConversation?.id
         ? await supabase.from("conversations").update(conversationValues).eq("id", existingConversation.id).select("id").single()

@@ -6,11 +6,37 @@ import { AIServiceNotConfiguredError, getAIService, type DraftTransformation } f
 import { emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
 import { createClient } from "@/lib/supabase/server";
+import { senderRelevance } from "@/lib/sender-intelligence";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
 const analysisRequestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid() });
 const draftRevisionRequestSchema = analysisRequestSchema.extend({ currentDraft: z.string().trim().min(1).max(4000), transformation: z.enum(["shorter", "warmer", "more_direct", "more_professional", "more_diplomatic", "rewrite"]) });
+const senderPreferenceSchema = z.object({ personId: z.string().uuid(), relationshipType: z.enum(["unknown", "customer", "partner", "investor", "colleague", "supplier", "family", "friend"]), manualPriority: z.number().min(1).max(10), handlingRule: z.enum(["normal", "always_priority", "low_priority"]) });
+
+export async function saveSenderPreferences(input: { personId: string; relationshipType: string; manualPriority: number; handlingRule: string }) {
+  const parsed = senderPreferenceSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the sender settings." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
+  const { error } = await supabase.from("people").update({ relationship_type: parsed.data.relationshipType, manual_priority: parsed.data.manualPriority, email_handling_rule: parsed.data.handlingRule, sender_preferences_verified: true, updated_at: new Date().toISOString() }).eq("id", parsed.data.personId).eq("owner_id", user.id);
+  if (error) return { error: "The sender preferences could not be saved." };
+  const { data: conversations } = await supabase.from("conversations").select("id,recommended_action,messages(classification,importance_score,sent_at,direction)").eq("owner_id", user.id).eq("person_id", parsed.data.personId).eq("source", "email");
+  for (const conversation of conversations ?? []) {
+    const latest = [...(conversation.messages ?? [])].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
+    if (!latest) continue;
+    const classification = latest.classification ?? "Information Only";
+    const relevance = senderRelevance({ basePriority: emailPriority(classification), relationshipType: parsed.data.relationshipType, manualPriority: parsed.data.manualPriority, handlingRule: parsed.data.handlingRule });
+    const currentRecommendation = conversation.recommended_action && typeof conversation.recommended_action === "object" && !Array.isArray(conversation.recommended_action) ? conversation.recommended_action as Record<string, unknown> : {};
+    await supabase.from("conversations").update({ priority_score: relevance.score, recommended_action: { ...currentRecommendation, action: recommendedEmailAction(classification), relevance_reasons: relevance.reasons }, updated_at: new Date().toISOString() }).eq("id", conversation.id).eq("owner_id", user.id);
+  }
+  await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "sender.preferences_verified", object_type: "person", object_id: parsed.data.personId, source: "email", actor_type: "user", new_value: parsed.data });
+  revalidatePath("/");
+  return { success: true };
+}
 
 export async function correctEmailClassification(input: { messageId: string; conversationId: string; classification: string }) {
   const parsed = correctionSchema.safeParse(input);
@@ -22,12 +48,14 @@ export async function correctEmailClassification(input: { messageId: string; con
   if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
   const priority = emailPriority(parsed.data.classification);
   const action = recommendedEmailAction(parsed.data.classification);
+  const { data: original } = await supabase.from("messages").select("classification").eq("id", parsed.data.messageId).eq("owner_id", user.id).maybeSingle();
   const { error: messageError } = await supabase.from("messages").update({ classification: parsed.data.classification, importance_score: priority, processed_at: new Date().toISOString() })
     .eq("id", parsed.data.messageId).eq("owner_id", user.id).eq("source", "email");
   if (messageError) return { error: "The category could not be saved." };
   const { error: conversationError } = await supabase.from("conversations").update({ priority_score: priority, recommended_action: { action, reason: `Category corrected by owner: ${parsed.data.classification}` }, updated_at: new Date().toISOString() })
     .eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email");
   if (conversationError) return { error: "The recommendation could not be updated." };
+  await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "message.classification_corrected", object_type: "message", object_id: parsed.data.messageId, source: "email", actor_type: "user", previous_value: { classification: original?.classification }, new_value: { classification: parsed.data.classification } });
   revalidatePath("/");
   return { success: true };
 }
