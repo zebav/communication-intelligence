@@ -23,7 +23,7 @@ export default async function Home() {
 
   const { data: rows } = await supabase
     .from("conversations")
-    .select("id,title,source,created_at,priority_score,recommended_action,people(display_name),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
+    .select("id,title,source,created_at,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -51,6 +51,9 @@ export default async function Home() {
     const recommendation = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action)
       ? (row.recommended_action as { action?: string }).action
       : undefined;
+    const relevanceReasons = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action)
+      ? (row.recommended_action as { relevance_reasons?: unknown }).relevance_reasons
+      : undefined;
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata)
       ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"] }
       : {};
@@ -58,6 +61,7 @@ export default async function Home() {
     const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at })).filter((message) => message.body);
     return {
       id: row.id,
+      personId: person?.id ?? "",
       messageId: latestMessage?.id ?? "",
       personName: person?.display_name ?? "Unknown sender",
       title: row.title ?? "(No subject)",
@@ -67,6 +71,10 @@ export default async function Home() {
       priorityScore: Number(row.priority_score ?? latestMessage?.importance_score ?? 0),
       recommendedAction: recommendation ?? "RESPOND_LATER",
       unread: metadata.is_read === false,
+      relationshipType: person?.relationship_type ?? "unknown",
+      manualPriority: person?.manual_priority == null ? null : Number(person.manual_priority),
+      handlingRule: person?.email_handling_rule === "always_priority" || person?.email_handling_rule === "low_priority" ? person.email_handling_rule : "normal",
+      relevanceReasons: Array.isArray(relevanceReasons) ? relevanceReasons.filter((reason): reason is string => typeof reason === "string") : ["Priority currently comes from the message category."],
       threadMessages,
       analysis,
     };

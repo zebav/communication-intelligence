@@ -34,6 +34,7 @@ export interface CommunicationPersonOption { id: string; name: string; relations
 
 export interface SyncedEmailConversation {
   id: string;
+  personId?: string;
   messageId: string;
   personName: string;
   title: string;
@@ -43,6 +44,10 @@ export interface SyncedEmailConversation {
   priorityScore: number;
   recommendedAction: string;
   unread: boolean;
+  relationshipType?: string;
+  manualPriority?: number | null;
+  handlingRule?: "normal" | "always_priority" | "low_priority";
+  relevanceReasons?: string[];
   threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
   analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number } };
 }
