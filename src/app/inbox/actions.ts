@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { AIServiceNotConfiguredError, getAIService } from "@/lib/ai/service";
+import { AIServiceNotConfiguredError, getAIService, type DraftTransformation } from "@/lib/ai/service";
 import { emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
 const analysisRequestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid() });
+const draftRevisionRequestSchema = analysisRequestSchema.extend({ currentDraft: z.string().trim().min(1).max(4000), transformation: z.enum(["shorter", "warmer", "more_direct", "more_professional", "more_diplomatic", "rewrite"]) });
 
 export async function correctEmailClassification(input: { messageId: string; conversationId: string; classification: string }) {
   const parsed = correctionSchema.safeParse(input);
@@ -54,10 +55,12 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     const profilePreferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
     const universalProfile = normalizeUniversalProfile(profilePreferences.universal_communication_profile, profilePreferences.communication_persona);
     const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
-    const { data: conversationReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(4);
+    const { data: conversationHistory } = await supabase.from("messages").select("direction,body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12);
+    const conversationMessages = [...(conversationHistory ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
+    const conversationReplies = (conversationHistory ?? []).filter((item) => item.direction === "out");
     const { data: recentReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8);
     const styleExamples = [...(conversationReplies ?? []), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
-    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, styleExamples });
+    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, styleExamples, conversationMessages });
     const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
     const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
     const now = new Date().toISOString();
@@ -71,5 +74,37 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     if (error instanceof AIServiceNotConfiguredError) return { error: "OpenAI is not configured in Vercel yet." };
     console.error("Email AI analysis failed", error instanceof Error ? error.message : "Unknown error");
     return { error: "The email could not be analyzed. Try again." };
+  }
+}
+
+export async function reviseEmailDraftWithAI(input: { messageId: string; conversationId: string; currentDraft: string; transformation: DraftTransformation }) {
+  const parsed = draftRevisionRequestSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the draft and try again." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
+  const { data: conversation } = await supabase.from("conversations").select("id,title,person_id").eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle();
+  const { data: message } = await supabase.from("messages").select("id,classification").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
+  if (!conversation || !message) return { error: "The selected email could not be loaded." };
+  const { data: person } = conversation.person_id ? await supabase.from("people").select("display_name").eq("id", conversation.person_id).eq("owner_id", user.id).maybeSingle() : { data: null };
+  try {
+    const [{ data: profile }, { data: history }, { data: recentReplies }] = await Promise.all([
+      supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle(),
+      supabase.from("messages").select("direction,body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12),
+      supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
+    ]);
+    const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
+    const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
+    const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
+    const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
+    const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
+    const revised = await getAIService().reviseEmailDraft({ ownerId: user.id, senderName: person?.display_name ?? "Unknown sender", subject: conversation.title ?? "(No subject)", currentDraft: parsed.data.currentDraft, transformation: parsed.data.transformation, personaContext, styleExamples, conversationMessages });
+    return { success: true, draftResponse: revised.draftResponse, draftTone: revised.draftTone };
+  } catch (error) {
+    if (error instanceof AIServiceNotConfiguredError) return { error: "OpenAI is not configured in Vercel yet." };
+    console.error("Email draft revision failed", error instanceof Error ? error.message : "Unknown error");
+    return { error: "The reply could not be rewritten. Try again." };
   }
 }

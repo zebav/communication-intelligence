@@ -5,7 +5,7 @@ import type { SyncedEmailConversation } from "./domain";
 const email = (overrides: Partial<SyncedEmailConversation>): SyncedEmailConversation => ({
   id: "conversation", messageId: "message", personName: "Sender", title: "Subject", preview: "Preview",
   receivedAt: "2026-09-02T10:00:00Z", classification: "Business", priorityScore: 6,
-  recommendedAction: "RESPOND_LATER", unread: true, ...overrides,
+  recommendedAction: "RESPOND_LATER", unread: true, threadMessages: [], ...overrides,
 });
 
 describe("live email intelligence", () => {

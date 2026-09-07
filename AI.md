@@ -9,3 +9,5 @@ Rule-based scoring remains available before AI analysis. AI Intelligence v1 adds
 Production requires server-only `OPENAI_API_KEY`. `OPENAI_FAST_MODEL` is optional and defaults to `gpt-5.6-luna`. Never expose either variable with a `NEXT_PUBLIC_` prefix.
 
 Automatic intelligence runs one message at a time while the authenticated, MFA-verified owner has the app open. Recent sent Outlook messages are retained only when they match an imported conversation and are used as bounded writing-style examples. Generated replies are editable suggestions; sending remains a separate owner-approved action.
+
+Response Engine V2 supplies at most the 12 most recent stored messages from the selected conversation, the resolved universal communication profile, and at most six bounded owner-writing examples. The owner can request one transformation at a time: shorter, warmer, more direct, more professional, more diplomatic, or a general rewrite. Revisions use structured output, preserve facts and commitments, use `store: false`, and never send automatically.

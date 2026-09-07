@@ -85,6 +85,9 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .reply-heading span { display: block; color: #f0fff9; font-size: 16px; font-weight: 750; letter-spacing: -.02em; }.reply-heading small { display: block; color: #94c9b6; font-size: 11px; margin-top: 3px; }
 .intel .reply-section textarea { min-height: 210px; background: #090d0b; border-color: #3a6b5b; font-size: 14px; line-height: 1.65; padding: 14px; }
 .reply-help { color: #91a79f; font-size: 10px; line-height: 1.4; margin: 8px 1px 12px; }
+.revision-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.revision-tools .btn { background: #17221e; border-color: #355448; color: #c9ded6; }
+.revision-tools .btn:hover { background: #203129; border-color: #4b7968; }
 .send-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: #34d399; border-color: #34d399; color: #06251a; font-weight: 750; }
 .send-button:hover { background: #6ee7b7; }.send-button-main { width: 100%; min-height: 40px; font-size: 12px; }
 .send-confirm { border: 1px solid #4b6d61; background: #0b100e; border-radius: 8px; padding: 11px; display: grid; gap: 10px; }

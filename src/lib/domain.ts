@@ -43,6 +43,7 @@ export interface SyncedEmailConversation {
   priorityScore: number;
   recommendedAction: string;
   unread: boolean;
+  threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
   analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number } };
 }
 
