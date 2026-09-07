@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
-import { validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
+import { initialInboxDeltaUrl, validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
 import { extractMicrosoftMessageText, type MicrosoftItemBody } from "@/lib/connectors/microsoft-message";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
@@ -96,7 +96,10 @@ export async function POST(request: NextRequest) {
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
       ? connection.token_metadata as Record<string, unknown>
       : {};
-    let pageUrl = validatedInboxDeltaUrl(metadata.inbox_sync_url);
+    // Existing cursors were created before full bodies were selected. Restart
+    // once from the bounded 30-day window so existing previews are upgraded.
+    const needsFullBodyUpgrade = metadata.full_body_sync_v1 !== true;
+    let pageUrl = needsFullBodyUpgrade ? initialInboxDeltaUrl() : validatedInboxDeltaUrl(metadata.inbox_sync_url);
     let nextSyncUrl: string | undefined;
     let deltaReady = false;
     let pagesProcessed = 0;
@@ -215,11 +218,12 @@ export async function POST(request: NextRequest) {
         expires_at: token.credentials.expiresAt,
         inbox_sync_url: nextSyncUrl,
         inbox_delta_ready: deltaReady,
+        full_body_sync_v1: true,
       },
       updated_at: syncedAt,
     }).eq("id", connection.id);
     if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
-    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: Boolean(metadata.inbox_sync_url), pagesProcessed, moreAvailable: Boolean(nextSyncUrl?.includes("$skiptoken") || nextSyncUrl?.includes("%24skiptoken")) });
+    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: !needsFullBodyUpgrade && Boolean(metadata.inbox_sync_url), fullBodyUpgrade: needsFullBodyUpgrade, pagesProcessed, moreAvailable: Boolean(nextSyncUrl?.includes("$skiptoken") || nextSyncUrl?.includes("%24skiptoken")) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Microsoft mailbox sync failed", { reason });
