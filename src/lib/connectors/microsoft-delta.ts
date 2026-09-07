@@ -6,7 +6,7 @@ export function initialInboxDeltaUrl(now = Date.now()) {
   url.searchParams.set("$top", "25");
   url.searchParams.set("$orderby", "receivedDateTime desc");
   url.searchParams.set("$filter", `receivedDateTime ge ${new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()}`);
-  url.searchParams.set("$select", "id,conversationId,internetMessageId,subject,bodyPreview,from,receivedDateTime,sentDateTime,importance,inferenceClassification,isRead,hasAttachments");
+  url.searchParams.set("$select", "id,conversationId,internetMessageId,subject,body,uniqueBody,bodyPreview,from,receivedDateTime,sentDateTime,importance,inferenceClassification,isRead,hasAttachments");
   return url;
 }
 

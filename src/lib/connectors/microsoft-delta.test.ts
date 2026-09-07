@@ -6,6 +6,7 @@ describe("Microsoft inbox delta URLs", () => {
     const url = initialInboxDeltaUrl(Date.parse("2026-09-02T12:00:00Z"));
     expect(url.searchParams.get("$top")).toBe("25");
     expect(url.searchParams.get("$filter")).toContain("2026-08-03T12:00:00.000Z");
+    expect(url.searchParams.get("$select")).toContain("uniqueBody");
   });
 
   it("accepts Microsoft Graph cursors and rejects other hosts", () => {

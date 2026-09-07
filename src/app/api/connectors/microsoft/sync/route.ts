@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
-import { validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
+import { initialInboxDeltaUrl, validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
+import { extractMicrosoftMessageText, type MicrosoftItemBody } from "@/lib/connectors/microsoft-message";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -14,6 +15,8 @@ type GraphMessage = {
   conversationId?: string;
   internetMessageId?: string;
   subject?: string;
+  body?: MicrosoftItemBody;
+  uniqueBody?: MicrosoftItemBody;
   bodyPreview?: string;
   from?: GraphAddress;
   receivedDateTime?: string;
@@ -93,17 +96,29 @@ export async function POST(request: NextRequest) {
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
       ? connection.token_metadata as Record<string, unknown>
       : {};
-    const url = validatedInboxDeltaUrl(metadata.inbox_sync_url);
-    const graphResponse = await fetch(url, {
-      headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' },
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (graphResponse.status === 401) return jsonError("Outlook needs to be connected again.", 409);
-    if (!graphResponse.ok) throw new Error(`graph_${graphResponse.status}`);
-    const graph = await graphResponse.json() as GraphMessagesResponse;
+    // Existing cursors were created before full bodies were selected. Restart
+    // once from the bounded 30-day window so existing previews are upgraded.
+    const needsFullBodyUpgrade = metadata.full_body_sync_v1 !== true;
+    let pageUrl = needsFullBodyUpgrade ? initialInboxDeltaUrl() : validatedInboxDeltaUrl(metadata.inbox_sync_url);
+    let nextSyncUrl: string | undefined;
+    let deltaReady = false;
+    let pagesProcessed = 0;
     let imported = 0;
 
-    for (const message of graph.value ?? []) {
+    // Process several pages per request, while retaining Graph's opaque cursor if
+    // more pages remain. This keeps server execution bounded and makes each click
+    // progress toward a complete mailbox snapshot.
+    while (pagesProcessed < 4) {
+      const graphResponse = await fetch(pageUrl, {
+        headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (graphResponse.status === 401) return jsonError("Outlook needs to be connected again.", 409);
+      if (!graphResponse.ok) throw new Error(`graph_${graphResponse.status}`);
+      const graph = await graphResponse.json() as GraphMessagesResponse;
+      pagesProcessed += 1;
+
+      for (const message of graph.value ?? []) {
       if (message["@removed"]) continue;
       const address = message.from?.emailAddress?.address?.trim().toLowerCase();
       if (!message.id || !address) continue;
@@ -128,7 +143,8 @@ export async function POST(request: NextRequest) {
       }
 
       const externalConversationId = message.conversationId ?? message.id;
-      const classification = classifyEmail({ subject: message.subject, preview: message.bodyPreview, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
+      const content = extractMicrosoftMessageText(message);
+      const classification = classifyEmail({ subject: message.subject, preview: content.text, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
       const priority = emailPriority(classification, message.importance);
       const action = recommendedEmailAction(classification);
       const sentAt = message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString();
@@ -137,7 +153,7 @@ export async function POST(request: NextRequest) {
       const conversationValues = {
         owner_id: user.id, person_id: personId, source: "email", external_conversation_id: externalConversationId,
         title: message.subject || "(No subject)", conversation_type: "email", priority_score: priority,
-        last_message_at: sentAt, last_other_message_at: sentAt, summary: (message.bodyPreview ?? "").slice(0, 300),
+        last_message_at: sentAt, last_other_message_at: sentAt, summary: content.text.slice(0, 300),
         recommended_action: { action, reason: `Initial rule-based classification: ${classification}` }, updated_at: new Date().toISOString(),
       };
       const conversationResult = existingConversation?.id
@@ -146,37 +162,45 @@ export async function POST(request: NextRequest) {
       if (conversationResult.error || !conversationResult.data) throw new Error("conversation_save_failed");
       const { error: messageError } = await supabase.from("messages").upsert({
         owner_id: user.id, conversation_id: conversationResult.data.id, external_message_id: message.id,
-        direction: "in", sender_identity_id: identityId, source: "email", body_text: message.bodyPreview ?? "",
+        direction: "in", sender_identity_id: identityId, source: "email", body_text: content.text,
         sent_at: sentAt, classification, importance_score: priority,
         attachment_count: message.hasAttachments ? 1 : 0,
-        metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, is_read: message.isRead ?? false },
+        metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated },
         processed_at: new Date().toISOString(),
       }, { onConflict: "owner_id,source,external_message_id" });
       if (messageError) throw new Error("message_save_failed");
       imported += 1;
+      }
+
+      nextSyncUrl = graph["@odata.nextLink"] ?? graph["@odata.deltaLink"];
+      deltaReady = Boolean(graph["@odata.deltaLink"]);
+      if (!graph["@odata.nextLink"]) break;
+      pageUrl = validatedInboxDeltaUrl(graph["@odata.nextLink"]);
     }
 
     // Learn the owner's writing style only from recent sent messages that belong
     // to an already imported conversation. They are never analyzed on their own.
     const sentUrl = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages");
-    sentUrl.searchParams.set("$top", "25");
+    sentUrl.searchParams.set("$top", "100");
     sentUrl.searchParams.set("$orderby", "sentDateTime desc");
-    sentUrl.searchParams.set("$select", "id,conversationId,internetMessageId,subject,bodyPreview,sentDateTime,hasAttachments");
+    sentUrl.searchParams.set("$select", "id,conversationId,internetMessageId,subject,body,uniqueBody,bodyPreview,sentDateTime,hasAttachments");
     const sentResponse = await fetch(sentUrl, { headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' }, signal: AbortSignal.timeout(20_000) });
     let styleSamples = 0;
     if (sentResponse.ok) {
       const sent = await sentResponse.json() as GraphMessagesResponse;
       for (const message of sent.value ?? []) {
-        if (!message.id || !message.conversationId || !message.bodyPreview) continue;
+        if (!message.id || !message.conversationId) continue;
+        const content = extractMicrosoftMessageText(message);
+        if (!content.text) continue;
         const { data: matchingConversation } = await supabase.from("conversations").select("id")
           .eq("owner_id", user.id).eq("source", "email").eq("external_conversation_id", message.conversationId).maybeSingle();
         if (!matchingConversation) continue;
         const sentAt = message.sentDateTime ?? new Date().toISOString();
         const { error: sentMessageError } = await supabase.from("messages").upsert({
           owner_id: user.id, conversation_id: matchingConversation.id, external_message_id: message.id,
-          direction: "out", source: "email", body_text: message.bodyPreview, sent_at: sentAt,
+          direction: "out", source: "email", body_text: content.text, sent_at: sentAt,
           attachment_count: message.hasAttachments ? 1 : 0,
-          metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, style_reference: true },
+          metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, style_reference: true, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated },
         }, { onConflict: "owner_id,source,external_message_id" });
         if (!sentMessageError) {
           styleSamples += 1;
@@ -186,7 +210,6 @@ export async function POST(request: NextRequest) {
     }
 
     const syncedAt = new Date().toISOString();
-    const nextSyncUrl = graph["@odata.nextLink"] ?? graph["@odata.deltaLink"];
     const { error: connectionUpdateError } = await supabase.from("connections").update({
       last_sync_at: syncedAt,
       health_status: "healthy",
@@ -194,12 +217,13 @@ export async function POST(request: NextRequest) {
         ...metadata,
         expires_at: token.credentials.expiresAt,
         inbox_sync_url: nextSyncUrl,
-        inbox_delta_ready: Boolean(graph["@odata.deltaLink"]),
+        inbox_delta_ready: deltaReady,
+        full_body_sync_v1: true,
       },
       updated_at: syncedAt,
     }).eq("id", connection.id);
     if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
-    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: Boolean(metadata.inbox_sync_url), moreAvailable: Boolean(graph["@odata.nextLink"]) });
+    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: !needsFullBodyUpgrade && Boolean(metadata.inbox_sync_url), fullBodyUpgrade: needsFullBodyUpgrade, pagesProcessed, moreAvailable: Boolean(nextSyncUrl?.includes("$skiptoken") || nextSyncUrl?.includes("%24skiptoken")) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Microsoft mailbox sync failed", { reason });

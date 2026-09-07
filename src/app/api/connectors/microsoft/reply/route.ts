@@ -46,11 +46,25 @@ export async function POST(request: NextRequest) {
     if (graphResponse.status === 401 || graphResponse.status === 403) return jsonError("Outlook permission is missing. Reconnect Outlook and try again.", 409);
     if (!graphResponse.ok) throw new Error(`graph_${graphResponse.status}`);
     const sentAt = new Date().toISOString();
-    await supabase.from("messages").insert({ owner_id: user.id, conversation_id: parsed.data.conversationId, external_message_id: `local-sent-${crypto.randomUUID()}`, direction: "out", source: "email", body_text: parsed.data.body, sent_at: sentAt, processed_at: sentAt, metadata: { provider: microsoftGraphConnector.id, sent_from_suggested_reply: true } });
-    await supabase.from("conversations").update({ last_user_message_at: sentAt, updated_at: sentAt }).eq("id", parsed.data.conversationId).eq("owner_id", user.id);
+    const localMessageId = `local-sent-${crypto.randomUUID()}`;
+    const { error: persistenceError } = await supabase.from("messages").insert({ owner_id: user.id, conversation_id: parsed.data.conversationId, external_message_id: localMessageId, direction: "out", source: "email", body_text: parsed.data.body, sent_at: sentAt, processed_at: sentAt, metadata: { provider: microsoftGraphConnector.id, sent_from_suggested_reply: true, full_content: true } });
+    const { error: conversationError } = await supabase.from("conversations").update({ last_user_message_at: sentAt, updated_at: sentAt }).eq("id", parsed.data.conversationId).eq("owner_id", user.id);
+    const { error: auditError } = await supabase.from("audit_logs").insert({
+      owner_id: user.id,
+      actor_id: user.id,
+      action: "message.sent",
+      object_type: "conversation",
+      object_id: parsed.data.conversationId,
+      source: "email",
+      actor_type: "user",
+      new_value: { provider: microsoftGraphConnector.id, local_message_id: localMessageId, sent_at: sentAt },
+    });
+    // The external send has already succeeded. Never tell the user to retry and
+    // risk sending a duplicate merely because local history/audit persistence failed.
+    if (persistenceError || conversationError || auditError) console.error("Microsoft reply sent but local persistence was incomplete", { persistence: persistenceError?.code, conversation: conversationError?.code, audit: auditError?.code });
     return NextResponse.json({ success: true, sentAt });
   } catch (error) {
     console.error("Microsoft reply failed", error instanceof Error ? error.message : "unknown");
-    return jsonError("The reply could not be sent. Nothing was changed. Try again.");
+    return jsonError("The reply could not be sent. Try again.");
   }
 }
