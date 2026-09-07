@@ -5,7 +5,10 @@ import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { initialInboxDeltaUrl, validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
 import { extractMicrosoftMessageText, type MicrosoftItemBody } from "@/lib/connectors/microsoft-message";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
+import { isAuthorizedCron } from "@/lib/cron-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { z } from "zod";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type GraphAddress = { emailAddress?: { name?: string; address?: string } };
@@ -63,16 +66,25 @@ async function getAccessToken(credentials: StoredCredentials, origin: string) {
 }
 
 export async function POST(request: NextRequest) {
-  if (request.headers.get("origin") !== request.nextUrl.origin) return jsonError("Invalid request origin.", 403);
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return jsonError("Your session has expired. Sign in again.", 401);
-  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-  if (assurance?.currentLevel !== "aal2") return jsonError("Two-factor authentication is required.", 403);
+  const background = isAuthorizedCron(request.headers.get("authorization"));
+  const backgroundOwner = z.string().uuid().safeParse(request.headers.get("x-owner-id"));
+  if (background && !backgroundOwner.success) return jsonError("Missing background owner.", 400);
+  if (!background && request.headers.get("origin") !== request.nextUrl.origin) return jsonError("Invalid request origin.", 403);
+  const supabase = background ? createAdminClient() : await createClient();
+  let userId: string;
+  if (background) {
+    userId = backgroundOwner.data!;
+  } else {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return jsonError("Your session has expired. Sign in again.", 401);
+    const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (assurance?.currentLevel !== "aal2") return jsonError("Two-factor authentication is required.", 403);
+    userId = user.id;
+  }
 
   const { data: connection, error: connectionError } = await supabase.from("connections")
     .select("id,encrypted_credentials,token_metadata,last_sync_at")
-    .eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected")
+    .eq("owner_id", userId).eq("provider", microsoftGraphConnector.id).eq("status", "connected")
     .order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (connectionError || !connection?.encrypted_credentials) return jsonError("Connect Outlook before importing messages.", 409);
   if (request.headers.get("x-sync-trigger") === "automatic" && connection.last_sync_at && Date.now() - new Date(connection.last_sync_at).getTime() < 5 * 60 * 1000) {
@@ -124,18 +136,18 @@ export async function POST(request: NextRequest) {
       if (!message.id || !address) continue;
       const displayName = message.from?.emailAddress?.name?.trim() || address;
       const { data: identity, error: identityLookupError } = await supabase.from("identities").select("id,person_id")
-        .eq("owner_id", user.id).eq("source", "email").eq("external_identifier", address).maybeSingle();
+        .eq("owner_id", userId).eq("source", "email").eq("external_identifier", address).maybeSingle();
       if (identityLookupError) throw new Error(`identity_lookup_failed_${identityLookupError.code}`);
       let personId = identity?.person_id;
       let identityId = identity?.id;
       if (!personId) {
         const { data: person, error: personError } = await supabase.from("people").insert({
-          owner_id: user.id, display_name: displayName, last_contact_at: message.receivedDateTime ?? new Date().toISOString(),
+          owner_id: userId, display_name: displayName, last_contact_at: message.receivedDateTime ?? new Date().toISOString(),
         }).select("id").single();
         if (personError || !person) throw new Error("person_insert_failed");
         personId = person.id;
         const { data: newIdentity, error: identityError } = await supabase.from("identities").insert({
-          owner_id: user.id, person_id: personId, source: "email", external_identifier: address,
+          owner_id: userId, person_id: personId, source: "email", external_identifier: address,
           metadata: { provider: microsoftGraphConnector.id }, verified_match: true, confidence: 1,
         }).select("id").single();
         if (identityError || !newIdentity) throw new Error(`identity_insert_failed_${identityError?.code ?? "unknown"}`);
@@ -149,9 +161,9 @@ export async function POST(request: NextRequest) {
       const action = recommendedEmailAction(classification);
       const sentAt = message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString();
       const { data: existingConversation } = await supabase.from("conversations").select("id")
-        .eq("owner_id", user.id).eq("source", "email").eq("external_conversation_id", externalConversationId).maybeSingle();
+        .eq("owner_id", userId).eq("source", "email").eq("external_conversation_id", externalConversationId).maybeSingle();
       const conversationValues = {
-        owner_id: user.id, person_id: personId, source: "email", external_conversation_id: externalConversationId,
+        owner_id: userId, person_id: personId, source: "email", external_conversation_id: externalConversationId,
         title: message.subject || "(No subject)", conversation_type: "email", priority_score: priority,
         last_message_at: sentAt, last_other_message_at: sentAt, summary: content.text.slice(0, 300),
         recommended_action: { action, reason: `Initial rule-based classification: ${classification}` }, updated_at: new Date().toISOString(),
@@ -161,7 +173,7 @@ export async function POST(request: NextRequest) {
         : await supabase.from("conversations").insert(conversationValues).select("id").single();
       if (conversationResult.error || !conversationResult.data) throw new Error("conversation_save_failed");
       const { error: messageError } = await supabase.from("messages").upsert({
-        owner_id: user.id, conversation_id: conversationResult.data.id, external_message_id: message.id,
+        owner_id: userId, conversation_id: conversationResult.data.id, external_message_id: message.id,
         direction: "in", sender_identity_id: identityId, source: "email", body_text: content.text,
         sent_at: sentAt, classification, importance_score: priority,
         attachment_count: message.hasAttachments ? 1 : 0,
@@ -193,18 +205,18 @@ export async function POST(request: NextRequest) {
         const content = extractMicrosoftMessageText(message);
         if (!content.text) continue;
         const { data: matchingConversation } = await supabase.from("conversations").select("id")
-          .eq("owner_id", user.id).eq("source", "email").eq("external_conversation_id", message.conversationId).maybeSingle();
+          .eq("owner_id", userId).eq("source", "email").eq("external_conversation_id", message.conversationId).maybeSingle();
         if (!matchingConversation) continue;
         const sentAt = message.sentDateTime ?? new Date().toISOString();
         const { error: sentMessageError } = await supabase.from("messages").upsert({
-          owner_id: user.id, conversation_id: matchingConversation.id, external_message_id: message.id,
+          owner_id: userId, conversation_id: matchingConversation.id, external_message_id: message.id,
           direction: "out", source: "email", body_text: content.text, sent_at: sentAt,
           attachment_count: message.hasAttachments ? 1 : 0,
           metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, style_reference: true, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated },
         }, { onConflict: "owner_id,source,external_message_id" });
         if (!sentMessageError) {
           styleSamples += 1;
-          await supabase.from("conversations").update({ last_user_message_at: sentAt }).eq("id", matchingConversation.id).eq("owner_id", user.id);
+          await supabase.from("conversations").update({ last_user_message_at: sentAt }).eq("id", matchingConversation.id).eq("owner_id", userId);
         }
       }
     }
