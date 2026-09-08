@@ -4,10 +4,11 @@ import { decryptCredential, encryptCredential } from "@/lib/connectors/credentia
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
+import { draftLearning, saveLearningSuggestion } from "@/lib/learning-feedback";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
-const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000) });
+const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000), suggestedDraft: z.string().max(4000).optional(), draftTone: z.string().max(120).optional() });
 const jsonError = (message: string, status = 500) => NextResponse.json({ error: message }, { status });
 
 async function getAccessToken(credentials: StoredCredentials, origin: string) {
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return jsonError("Two-factor authentication is required.", 403);
 
-  const { data: message } = await supabase.from("messages").select("external_message_id").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
+  const { data: message } = await supabase.from("messages").select("external_message_id,conversations(person_id)").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
   if (!message?.external_message_id) return jsonError("The Outlook message could not be found.", 404);
   const { data: connection } = await supabase.from("connections").select("id,encrypted_credentials,token_metadata").eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected").order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (!connection?.encrypted_credentials) return jsonError("Connect Outlook again before sending.", 409);
@@ -59,6 +60,13 @@ export async function POST(request: NextRequest) {
       actor_type: "user",
       new_value: { provider: microsoftGraphConnector.id, local_message_id: localMessageId, sent_at: sentAt },
     });
+    if (parsed.data.suggestedDraft?.trim()) {
+      const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
+      const { data: person } = linkedConversation?.person_id ? await supabase.from("people").select("relationship_type").eq("id", linkedConversation.person_id).eq("owner_id", user.id).maybeSingle() : { data: null };
+      const learning = draftLearning(parsed.data.suggestedDraft, parsed.data.body, person?.relationship_type);
+      const { error: learningError } = await saveLearningSuggestion(supabase, { ownerId: user.id, personId: linkedConversation?.person_id, conversationId: parsed.data.conversationId, source: "email", signalType: learning.signalType, observation: learning.observation, proposedRule: learning.proposedRule, evidence: { ...learning.evidence, source_message_id: parsed.data.messageId, sent_message_id: localMessageId, draft_tone: parsed.data.draftTone }, confidence: learning.confidence });
+      if (learningError) console.error("Reply sent but learning signal could not be saved", learningError.code);
+    }
     // The external send has already succeeded. Never tell the user to retry and
     // risk sending a duplicate merely because local history/audit persistence failed.
     if (persistenceError || conversationError || auditError) console.error("Microsoft reply sent but local persistence was incomplete", { persistence: persistenceError?.code, conversation: conversationError?.code, audit: auditError?.code });

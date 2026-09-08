@@ -25,3 +25,9 @@ Response Engine V2 supplies at most the 12 most recent stored messages from the 
 Deep Analysis & Research V1 is always owner-initiated for one selected email. Private analysis does not receive a web-search tool. Web research is a separate action with a per-run confirmation, a maximum of four search calls, and visible sources. Both modes use structured output, `store: false`, MFA, owner-scoped database access, bounded conversation context, verified memories, and the universal communication profile. Results separate stated facts, interpretations, unknowns, options, risks, and strategy. They are saved with the message and audited; no generated reply is sent automatically.
 
 Deep analysis uses the optional server-only `OPENAI_REASONING_MODEL`, falling back to `OPENAI_FAST_MODEL`. Web search must never be enabled based only on model recommendation; it requires the explicit `researchApproved` value from the owner action.
+
+## Learning and feedback
+
+The Learning & Feedback Engine records bounded observations when the owner accepts or edits an AI draft, requests a rewrite style, or corrects an email category. These observations are suggestions, not automatic profile changes. They contain event metadata and length ratios rather than copies of the sent reply.
+
+Only rules explicitly approved by the owner are supplied to future email analysis, deep analysis, and draft revision. The context is limited to the 12 most recent applicable rules. The owner can edit, approve, stop using, dismiss, or permanently delete a rule from the Intelligence view. Every decision is owner-scoped, MFA-protected, and audit logged.

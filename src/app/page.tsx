@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
-import type { CommunicationCase, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
+import type { CommunicationCase, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +37,8 @@ export default async function Home() {
   const { data: identityRows } = await supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(500);
   const { data: memoryRows } = await supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);
   const { data: commitmentRows } = await supabase.from("commitments").select("id,person_id,conversation_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200);
+  const { data: learningRows } = await supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(200);
+  const learningSignals: LearningSignal[] = (learningRows ?? []).map((item) => { const person = Array.isArray(item.people) ? item.people[0] : item.people; const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations; return { id: item.id, personName: person?.display_name ?? undefined, conversationTitle: conversation?.title ?? undefined, source: item.source as Source, signalType: item.signal_type as LearningSignal["signalType"], observation: item.observation, proposedRule: item.proposed_rule, confidence: Number(item.confidence ?? 0), status: item.status as LearningSignal["status"], createdAt: item.created_at }; });
   const followUps: FollowUpCommitment[] = (commitmentRows ?? []).map((item) => {
     const person = Array.isArray(item.people) ? item.people[0] : item.people;
     const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations;
@@ -127,6 +129,7 @@ export default async function Home() {
     syncedEmails={syncedEmails}
     followUps={followUps}
     people={intelligentPeople}
+    learningSignals={learningSignals}
     persona={persona}
     profilePeople={profilePeople}
   />;
