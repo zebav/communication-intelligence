@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emailDashboardSummary, prioritizeEmails } from "./email-intelligence";
+import { emailDashboardExcerpt, emailDashboardSummary, prioritizeEmails } from "./email-intelligence";
 import type { SyncedEmailConversation } from "./domain";
 
 const email = (overrides: Partial<SyncedEmailConversation>): SyncedEmailConversation => ({
@@ -16,5 +16,12 @@ describe("live email intelligence", () => {
 
   it("derives dashboard counts from real messages", () => {
     expect(emailDashboardSummary([email({}), email({ id: "read", unread: false, classification: "Newsletter", priorityScore: 2.5, recommendedAction: "ARCHIVE" })])).toEqual({ total: 2, unread: 1, critical: 0, needsResponse: 1, lowAttention: 1 });
+  });
+
+  it("uses the AI summary and removes tracking links from fallback excerpts", () => {
+    expect(emailDashboardExcerpt(email({ analysis: { confidence: 0.9, summary: "A concise summary.", intent: "Inform", priorityReason: "Relevant", requiresReply: false, draftResponse: "", draftTone: "" } }))).toBe("A concise summary.");
+    const excerpt = emailDashboardExcerpt(email({ preview: "Important update <https://example.com/very-long-tracking-link> Read more" }));
+    expect(excerpt).toBe("Important update Read more");
+    expect(emailDashboardExcerpt(email({ preview: "x".repeat(400) })).length).toBeLessThanOrEqual(220);
   });
 });

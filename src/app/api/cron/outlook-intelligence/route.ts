@@ -4,6 +4,7 @@ import { isRelevantEmail } from "@/lib/connectors/email-classification";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { getAIService } from "@/lib/ai/service";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizeCommitmentDueAt } from "@/lib/commitments";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -51,6 +52,10 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     await supabase.from("memories").delete().eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("user_verified", false);
     const candidates = analysis.memoryCandidates.filter((candidate) => candidate.confidence >= 0.7).map((candidate) => ({ owner_id: message.owner_id, person_id: conversation.person_id, conversation_id: conversation.id, category: candidate.category, content: candidate.content, confidence: candidate.confidence, source_message_id: message.id, user_verified: false }));
     if (candidates.length) await supabase.from("memories").upsert(candidates, { onConflict: "owner_id,source_message_id,category,content", ignoreDuplicates: true });
+  }
+  await supabase.from("commitments").delete().eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("status", "suggested");
+  if (analysis.commitment.detected && analysis.commitment.confidence >= 0.7 && analysis.commitment.description.trim()) {
+    await supabase.from("commitments").upsert({ owner_id: message.owner_id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
   return true;
 }

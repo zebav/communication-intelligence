@@ -61,6 +61,18 @@ export interface PersonMemory {
   verified: boolean;
 }
 
+export interface FollowUpCommitment {
+  id: string;
+  conversationId: string;
+  personName: string;
+  conversationTitle: string;
+  description: string;
+  owner: "user" | "sender" | "unknown";
+  dueAt?: string;
+  status: "suggested" | "open" | "completed" | "dismissed";
+  confidence: number;
+}
+
 export function calculateAttention(dimensions: ScoreDimension[]): number {
   const total = 5 + dimensions.reduce((sum, item) => sum + item.value, 0);
   return Math.round(Math.min(10, Math.max(1, total)) * 10) / 10;
