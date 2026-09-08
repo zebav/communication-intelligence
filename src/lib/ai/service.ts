@@ -81,7 +81,7 @@ export class OpenAIResponsesService implements AIService {
         inferences: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, properties: { claim: { type: "string" }, basis: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 } }, required: ["claim", "basis", "confidence"] } },
         unknowns: { type: "array", maxItems: 10, items: { type: "string" } }, options: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, properties: { label: { type: "string" }, benefits: { type: "string" }, risks: { type: "string" } }, required: ["label", "benefits", "risks"] } },
         recommendedApproach: { type: "string" }, responseStrategy: { type: "string" }, suggestedReply: { type: "string" }, researchNeeded: { type: "boolean" }, researchQuestions: { type: "array", maxItems: 8, items: { type: "string" } },
-        sources: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, properties: { title: { type: "string" }, url: { type: "string" }, supports: { type: "string" } }, required: ["title", "url", "supports"] } },
+        sources: { type: "array", minItems: input.researchApproved ? 1 : 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { title: { type: "string" }, url: { type: "string" }, supports: { type: "string" } }, required: ["title", "url", "supports"] } },
       }, required: ["overview", "stakes", "facts", "inferences", "unknowns", "options", "recommendedApproach", "responseStrategy", "suggestedReply", "researchNeeded", "researchQuestions", "sources"] };
       const body: Record<string, unknown> = {
         model: this.deepModel, store: false, safety_identifier: createHash("sha256").update(input.ownerId).digest("hex"), max_output_tokens: 2200,
@@ -92,15 +92,17 @@ export class OpenAIResponsesService implements AIService {
       if (input.researchApproved) { body.tools = [{ type: "web_search" }]; body.tool_choice = "required"; body.max_tool_calls = 4; body.include = ["web_search_call.action.sources"]; }
       const response = await this.request("https://api.openai.com/v1/responses", { method: "POST", headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify(body) });
       if (!response.ok) throw new Error(`OpenAI deep analysis failed (${response.status}).`);
-      const payload = await response.json() as { output_text?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }>; action?: { sources?: Array<{ title?: string; url?: string }> } }> };
+      const payload = await response.json() as { output_text?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string; annotations?: Array<{ type?: string; title?: string; url?: string }> }>; action?: { sources?: Array<{ title?: string; url?: string }> } }> };
       const outputText = payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text;
       if (!outputText) throw new Error("OpenAI returned no deep analysis.");
       const parsed = deepAnalysisSchema.parse(JSON.parse(outputText));
       if (!input.researchApproved) return { ...parsed, sources: [] };
-      const includedSources = (payload.output ?? []).filter((item) => item.type === "web_search_call").flatMap((item) => item.action?.sources ?? []).filter((source): source is { title?: string; url: string } => typeof source.url === "string" && /^https?:\/\//.test(source.url));
+      const actionSources = (payload.output ?? []).filter((item) => item.type === "web_search_call").flatMap((item) => item.action?.sources ?? []);
+      const citationSources = (payload.output ?? []).flatMap((item) => item.content ?? []).flatMap((content) => content.annotations ?? []).filter((annotation) => annotation.type === "url_citation");
+      const includedSources = [...actionSources, ...citationSources, ...parsed.sources].filter((source): source is { title?: string; url: string; supports?: string } => typeof source.url === "string" && /^https?:\/\//.test(source.url));
       const uniqueSources = includedSources.filter((source, index, sources) => sources.findIndex((candidate) => candidate.url === source.url) === index).slice(0, 8);
       if (!uniqueSources.length) throw new Error("Web research returned no verifiable sources.");
-      return { ...parsed, sources: uniqueSources.map((source) => ({ title: source.title?.trim() || new URL(source.url).hostname, url: source.url, supports: parsed.sources.find((candidate) => candidate.url === source.url)?.supports ?? "Source used for this web research." })) };
+      return { ...parsed, sources: uniqueSources.map((source) => ({ title: source.title?.trim() || new URL(source.url).hostname, url: source.url, supports: source.supports ?? parsed.sources.find((candidate) => candidate.url === source.url)?.supports ?? "Source used for this web research." })) };
     } finally { clearTimeout(timeout); }
   }
 }
