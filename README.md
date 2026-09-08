@@ -1,5 +1,7 @@
 # Communication Intelligence
 
+The People workspace is backed by real synchronized contacts. It provides search, verified identities, owner-approved memories, open loops, editable relationship context, and a cross-channel-ready conversation timeline without exposing mock contacts.
+
 A private, personal AI-powered communication command center that helps its owner focus on the right people, conversations, and opportunities.
 
 Milestone 1 is an interactive Next.js prototype backed by a production-oriented Supabase schema. It includes Today, Inbox, a three-column conversation experience, People, Follow-ups, Clean Up, Intelligence, Connections, Settings, realistic mock data, explainable attention scoring, recommendations, and a draft service boundary.
