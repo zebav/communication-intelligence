@@ -35,3 +35,15 @@ export function emailDashboardSummary(emails: SyncedEmailConversation[]) {
     lowAttention: emails.filter((email) => email.priorityScore < 4).length,
   };
 }
+
+export function emailDashboardExcerpt(email: SyncedEmailConversation, maxLength = 220) {
+  if (email.analysis?.summary.trim()) return email.analysis.summary.trim();
+  const cleaned = email.preview
+    .replace(/<https?:\/\/[^>]+>/gi, "")
+    .replace(/\[https?:\/\/[^\]]+\]/gi, "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}

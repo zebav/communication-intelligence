@@ -9,7 +9,7 @@ import { signOut } from "@/app/auth/actions";
 import { CommunicationCaseForm } from "@/components/communication-case-form";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
 import type { DraftTransformation } from "@/lib/ai/service";
-import { emailDashboardSummary, prioritizeEmails } from "@/lib/email-intelligence";
+import { emailDashboardExcerpt, emailDashboardSummary, prioritizeEmails } from "@/lib/email-intelligence";
 import { isRelevantEmail } from "@/lib/connectors/email-classification";
 import { PersonaForm } from "@/components/persona-form";
 import { followUpSection } from "@/lib/commitments";
@@ -80,7 +80,7 @@ function Today({ emails, onOpenInbox }: { emails: SyncedEmailConversation[]; onO
   </div>;
 }
 
-function LiveEmailCard({ email, onClick }: { email: SyncedEmailConversation; onClick: () => void }) { const action = actionLabels[email.recommendedAction as RecommendedAction] ?? email.recommendedAction; return <button className="card" onClick={onClick} style={{textAlign:"left",cursor:"pointer"}}><div className="card-top"><span>{email.title}</span><span className="score">{email.priorityScore}</span></div><div className="card-person"><div className="avatar">{email.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{email.personName}</strong><span>{email.classification}</span></div></div><p>{email.preview}</p><span className="pill">{action} <ChevronRight size={10} /></span></button> }
+function LiveEmailCard({ email, onClick }: { email: SyncedEmailConversation; onClick: () => void }) { const action = actionLabels[email.recommendedAction as RecommendedAction] ?? email.recommendedAction; return <button className="card email-card" onClick={onClick}><div className="card-top"><span>{email.title}</span><span className="score">{email.priorityScore}</span></div><div className="card-person"><div className="avatar">{email.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{email.personName}</strong><span>{email.classification}</span></div></div><p>{emailDashboardExcerpt(email)}</p><span className="pill">{action} <ChevronRight size={10} /></span></button> }
 
 function ConversationCard({ conversation, onClick }: { conversation: Conversation; onClick: () => void }) { return <button className="card" onClick={onClick} style={{textAlign:"left",cursor:"pointer"}}><div className="card-top"><span>{conversation.subject}</span><span className="score">{conversation.attention.score}</span></div><div className="card-person"><div className="avatar">{conversation.person.initials}</div><div><strong>{conversation.person.name}</strong><span>{conversation.person.organization ?? conversation.person.role}</span></div></div><p>{conversation.preview}</p><span className="pill">{actionLabels[conversation.action]} <ChevronRight size={10} /></span></button> }
 
