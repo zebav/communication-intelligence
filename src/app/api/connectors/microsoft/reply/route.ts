@@ -4,7 +4,7 @@ import { decryptCredential, encryptCredential } from "@/lib/connectors/credentia
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
-import { draftLearning } from "@/lib/learning-feedback";
+import { draftLearning, saveLearningSuggestion } from "@/lib/learning-feedback";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
       const { data: person } = linkedConversation?.person_id ? await supabase.from("people").select("relationship_type").eq("id", linkedConversation.person_id).eq("owner_id", user.id).maybeSingle() : { data: null };
       const learning = draftLearning(parsed.data.suggestedDraft, parsed.data.body, person?.relationship_type);
-      const { error: learningError } = await supabase.from("learning_signals").insert({ owner_id: user.id, person_id: linkedConversation?.person_id, conversation_id: parsed.data.conversationId, source: "email", signal_type: learning.signalType, observation: learning.observation, proposed_rule: learning.proposedRule, evidence: { ...learning.evidence, source_message_id: parsed.data.messageId, sent_message_id: localMessageId, draft_tone: parsed.data.draftTone }, confidence: learning.confidence, status: "suggested" });
+      const { error: learningError } = await saveLearningSuggestion(supabase, { ownerId: user.id, personId: linkedConversation?.person_id, conversationId: parsed.data.conversationId, source: "email", signalType: learning.signalType, observation: learning.observation, proposedRule: learning.proposedRule, evidence: { ...learning.evidence, source_message_id: parsed.data.messageId, sent_message_id: localMessageId, draft_tone: parsed.data.draftTone }, confidence: learning.confidence });
       if (learningError) console.error("Reply sent but learning signal could not be saved", learningError.code);
     }
     // The external send has already succeeded. Never tell the user to retry and

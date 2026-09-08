@@ -8,7 +8,7 @@ import { normalizeUniversalProfile, resolveCommunicationProfile, situationForCla
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
-import { approvedLearningContext, toneRule } from "@/lib/learning-feedback";
+import { approvedLearningContext, saveLearningSuggestion, toneRule } from "@/lib/learning-feedback";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -125,7 +125,7 @@ export async function correctEmailClassification(input: { messageId: string; con
     .eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email");
   if (conversationError) return { error: "The recommendation could not be updated." };
   await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "message.classification_corrected", object_type: "message", object_id: parsed.data.messageId, source: "email", actor_type: "user", previous_value: { classification: original?.classification }, new_value: { classification: parsed.data.classification } });
-  if (original?.classification !== parsed.data.classification) await supabase.from("learning_signals").insert({ owner_id: user.id, person_id: correctionConversation?.person_id, conversation_id: parsed.data.conversationId, source: "email", signal_type: "category_corrected", observation: `You changed this message from ${original?.classification ?? "uncategorized"} to ${parsed.data.classification}.`, proposed_rule: `Consider ${parsed.data.classification} for similar messages in this conversation context.`, evidence: { message_id: parsed.data.messageId, previous_category: original?.classification, corrected_category: parsed.data.classification }, confidence: 0.7, status: "suggested" });
+  if (original?.classification !== parsed.data.classification) await saveLearningSuggestion(supabase, { ownerId: user.id, personId: correctionConversation?.person_id, conversationId: parsed.data.conversationId, source: "email", signalType: "category_corrected", observation: `You changed this message from ${original?.classification ?? "uncategorized"} to ${parsed.data.classification}.`, proposedRule: `Consider ${parsed.data.classification} for similar messages in this conversation context.`, evidence: { message_id: parsed.data.messageId, previous_category: original?.classification, corrected_category: parsed.data.classification }, confidence: 0.7 });
   revalidatePath("/");
   return { success: true };
 }
@@ -253,7 +253,7 @@ export async function reviseEmailDraftWithAI(input: { messageId: string; convers
     const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
     const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
     const revised = await getAIService().reviseEmailDraft({ ownerId: user.id, senderName: person?.display_name ?? "Unknown sender", subject: conversation.title ?? "(No subject)", currentDraft: parsed.data.currentDraft, transformation: parsed.data.transformation, personaContext, styleExamples, conversationMessages });
-    await supabase.from("learning_signals").insert({ owner_id: user.id, person_id: conversation.person_id, conversation_id: conversation.id, source: "email", signal_type: "tone_requested", observation: `You requested “${parsed.data.transformation.replaceAll("_", " ")}” for an AI draft.`, proposed_rule: `${toneRule[parsed.data.transformation]} in similar email conversations.`, evidence: { message_id: message.id, transformation: parsed.data.transformation }, confidence: 0.6, status: "suggested" });
+    await saveLearningSuggestion(supabase, { ownerId: user.id, personId: conversation.person_id, conversationId: conversation.id, source: "email", signalType: "tone_requested", observation: `You requested “${parsed.data.transformation.replaceAll("_", " ")}” for an AI draft.`, proposedRule: `${toneRule[parsed.data.transformation]} in similar email conversations.`, evidence: { message_id: message.id, transformation: parsed.data.transformation }, confidence: 0.6 });
     return { success: true, draftResponse: revised.draftResponse, draftTone: revised.draftTone };
   } catch (error) {
     if (error instanceof AIServiceNotConfiguredError) return { error: "OpenAI is not configured in Vercel yet." };

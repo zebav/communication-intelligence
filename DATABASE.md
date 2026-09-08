@@ -18,4 +18,4 @@ Attachments store metadata and a storage reference; binary content belongs in Su
 
 ## Learning signals
 
-`learning_signals` separates observed behavior from approved communication rules. Each row has a source, signal type, proposed rule, confidence, optional person and conversation scope, and a `suggested`, `approved`, or `dismissed` status. Row-level security and all review actions require the authenticated MFA-verified owner. Suggested or dismissed rows never influence AI prompts; only approved rows can be selected as bounded context.
+`learning_signals` separates observed behavior from approved communication rules. Each row has a source, signal type, proposed rule, confidence, optional person and conversation scope, and a `suggested`, `approved`, or `dismissed` status. Repeated pending conclusions for the same person are consolidated into one review item with an evidence count. Row-level security and all review actions require the authenticated MFA-verified owner. Suggested or dismissed rows never influence AI prompts; only approved rows can be selected as bounded context.

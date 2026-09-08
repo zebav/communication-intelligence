@@ -28,3 +28,30 @@ export const toneRule: Record<string, string> = {
 export function approvedLearningContext(items: { proposed_rule: string }[]) {
   return items.slice(0, 12).map((item) => item.proposed_rule.trim()).filter(Boolean).join("\n");
 }
+
+type LearningSuggestion = {
+  ownerId: string;
+  personId?: string | null;
+  conversationId?: string | null;
+  source: string;
+  signalType: string;
+  observation: string;
+  proposedRule: string;
+  evidence: Record<string, unknown>;
+  confidence: number;
+};
+
+export async function saveLearningSuggestion(supabase: SupabaseClient, suggestion: LearningSuggestion) {
+  let existingQuery = supabase.from("learning_signals").select("id,evidence,confidence").eq("owner_id", suggestion.ownerId).eq("source", suggestion.source).eq("signal_type", suggestion.signalType).eq("proposed_rule", suggestion.proposedRule).eq("status", "suggested");
+  existingQuery = suggestion.personId ? existingQuery.eq("person_id", suggestion.personId) : existingQuery.is("person_id", null);
+  const { data: existing } = await existingQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  if (existing) {
+    const previousEvidence = existing.evidence && typeof existing.evidence === "object" && !Array.isArray(existing.evidence) ? existing.evidence as Record<string, unknown> : {};
+    const repetitions = typeof previousEvidence.repetitions === "number" ? previousEvidence.repetitions + 1 : 2;
+    return supabase.from("learning_signals").update({ observation: suggestion.observation, conversation_id: suggestion.conversationId, evidence: { ...previousEvidence, ...suggestion.evidence, repetitions }, confidence: Math.max(Number(existing.confidence ?? 0), suggestion.confidence), updated_at: new Date().toISOString() }).eq("id", existing.id).eq("owner_id", suggestion.ownerId);
+  }
+  const result = await supabase.from("learning_signals").insert({ owner_id: suggestion.ownerId, person_id: suggestion.personId, conversation_id: suggestion.conversationId, source: suggestion.source, signal_type: suggestion.signalType, observation: suggestion.observation, proposed_rule: suggestion.proposedRule, evidence: { ...suggestion.evidence, repetitions: 1 }, confidence: suggestion.confidence, status: "suggested" });
+  if (result.error?.code === "23505") return { ...result, error: null };
+  return result;
+}
+import type { SupabaseClient } from "@supabase/supabase-js";
