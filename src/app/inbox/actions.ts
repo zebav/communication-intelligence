@@ -16,6 +16,25 @@ const draftRevisionRequestSchema = analysisRequestSchema.extend({ currentDraft: 
 const senderPreferenceSchema = z.object({ personId: z.string().uuid(), relationshipType: z.enum(["unknown", "customer", "partner", "investor", "colleague", "supplier", "family", "friend"]), manualPriority: z.number().min(1).max(10), handlingRule: z.enum(["normal", "always_priority", "low_priority"]) });
 const memoryReviewSchema = z.object({ memoryId: z.string().uuid(), decision: z.enum(["approve", "reject"]) });
 const commitmentReviewSchema = z.object({ commitmentId: z.string().uuid(), decision: z.enum(["approve", "reject", "complete"]) });
+const manualCommitmentSchema = z.object({ conversationId: z.string().uuid(), messageId: z.string().uuid(), description: z.string().trim().min(1).max(300), owner: z.enum(["user", "sender", "unknown"]), dueAt: z.string().max(40).optional() });
+
+export async function createManualCommitment(input: { conversationId: string; messageId: string; description: string; owner: "user" | "sender" | "unknown"; dueAt?: string }) {
+  const parsed = manualCommitmentSchema.safeParse(input);
+  if (!parsed.success) return { error: "Describe the follow-up in 300 characters or fewer." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
+  const { data: conversation } = await supabase.from("conversations").select("id,person_id").eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle();
+  if (!conversation) return { error: "The selected conversation could not be loaded." };
+  const dueAt = parsed.data.dueAt ? normalizeCommitmentDueAt(`${parsed.data.dueAt}T12:00:00`) : null;
+  const { data: saved, error } = await supabase.from("commitments").upsert({ owner_id: user.id, conversation_id: conversation.id, person_id: conversation.person_id, description: parsed.data.description, commitment_owner: parsed.data.owner, due_at: dueAt, status: "open", source_message_id: parsed.data.messageId, confidence: 1 }, { onConflict: "owner_id,source_message_id,description" }).select("id").single();
+  if (error || !saved) return { error: "The follow-up could not be created." };
+  await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "commitment.created_manually", object_type: "commitment", object_id: saved.id, source: "email", actor_type: "user", new_value: { description: parsed.data.description, owner: parsed.data.owner, due_at: dueAt } });
+  revalidatePath("/");
+  return { success: true };
+}
 
 export async function reviewCommitment(input: { commitmentId: string; decision: "approve" | "reject" | "complete" }) {
   const parsed = commitmentReviewSchema.safeParse(input);
