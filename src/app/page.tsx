@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 function deduplicateStoredSources(sources: DeepAnalysis["sources"] | undefined) {
   if (!Array.isArray(sources)) return [];
   const valid = sources.filter((source) => source && typeof source.url === "string" && /^https?:\/\//.test(source.url));
-  const key = (source: DeepAnalysis["sources"][number]) => { try { const url = new URL(source.url); return `${url.hostname.toLowerCase()}${(url.pathname.replace(/\/+$/, "") || "/").toLowerCase()}|${source.title?.trim().toLowerCase() ?? ""}`; } catch { return source.url; } };
+  const key = (source: DeepAnalysis["sources"][number]) => { try { return new URL(source.url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return source.url; } };
   return valid.filter((source, index) => valid.findIndex((candidate) => key(candidate) === key(source)) === index).slice(0, 8);
 }
 
