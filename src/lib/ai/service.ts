@@ -89,14 +89,18 @@ export class OpenAIResponsesService implements AIService {
         input: JSON.stringify({ analysis_date: new Date().toISOString(), sender_name: input.senderName.slice(0, 200), subject: input.subject.slice(0, 300), current_message: input.preview.slice(0, 7000), conversation_history: (input.conversationMessages ?? []).slice(-20).map((message) => ({ direction: message.direction, body: message.body.slice(0, 3500) })), relationship_context: input.relationshipContext?.slice(0, 500) ?? "unknown", verified_person_memories: (input.verifiedPersonMemories ?? []).slice(0, 16).map((value) => value.slice(0, 400)), verified_communication_profile: input.personaContext?.slice(0, 4000) ?? "not configured", owner_writing_examples: (input.styleExamples ?? []).slice(0, 8).map((value) => value.slice(0, 900)) }),
         text: { format: { type: "json_schema", name: "deep_communication_analysis", strict: true, schema } },
       };
-      if (input.researchApproved) { body.tools = [{ type: "web_search" }]; body.tool_choice = "auto"; body.max_tool_calls = 4; body.include = ["web_search_call.action.sources"]; }
+      if (input.researchApproved) { body.tools = [{ type: "web_search" }]; body.tool_choice = "required"; body.max_tool_calls = 4; body.include = ["web_search_call.action.sources"]; }
       const response = await this.request("https://api.openai.com/v1/responses", { method: "POST", headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify(body) });
       if (!response.ok) throw new Error(`OpenAI deep analysis failed (${response.status}).`);
-      const payload = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
+      const payload = await response.json() as { output_text?: string; output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }>; action?: { sources?: Array<{ title?: string; url?: string }> } }> };
       const outputText = payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text;
       if (!outputText) throw new Error("OpenAI returned no deep analysis.");
       const parsed = deepAnalysisSchema.parse(JSON.parse(outputText));
-      return input.researchApproved ? parsed : { ...parsed, sources: [] };
+      if (!input.researchApproved) return { ...parsed, sources: [] };
+      const includedSources = (payload.output ?? []).filter((item) => item.type === "web_search_call").flatMap((item) => item.action?.sources ?? []).filter((source): source is { title?: string; url: string } => typeof source.url === "string" && /^https?:\/\//.test(source.url));
+      const uniqueSources = includedSources.filter((source, index, sources) => sources.findIndex((candidate) => candidate.url === source.url) === index).slice(0, 8);
+      if (!uniqueSources.length) throw new Error("Web research returned no verifiable sources.");
+      return { ...parsed, sources: uniqueSources.map((source) => ({ title: source.title?.trim() || new URL(source.url).hostname, url: source.url, supports: parsed.sources.find((candidate) => candidate.url === source.url)?.supports ?? "Source used for this web research." })) };
     } finally { clearTimeout(timeout); }
   }
 }

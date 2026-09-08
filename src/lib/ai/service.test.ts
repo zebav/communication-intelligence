@@ -36,10 +36,10 @@ describe("OpenAIResponsesService", () => {
   it("enables bounded web research after explicit approval", async () => {
     const output = { overview: "A decision is requested.", stakes: "Cost.", facts: ["A proposal was sent."], inferences: [], unknowns: [], options: [], recommendedApproach: "Review the source.", responseStrategy: "Answer after verification.", suggestedReply: "Thank you. I reviewed the source.", researchNeeded: false, researchQuestions: [], sources: [{ title: "Primary source", url: "https://example.com/source", supports: "Current public terms." }] };
     let requestBody = "";
-    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => { requestBody = String(init?.body); return new Response(JSON.stringify({ output_text: JSON.stringify(output) }), { status: 200 }); });
+    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => { requestBody = String(init?.body); return new Response(JSON.stringify({ output_text: JSON.stringify(output), output: [{ type: "web_search_call", action: { sources: [{ title: "Primary source", url: "https://example.com/source" }] } }] }), { status: 200 }); });
     const service = new OpenAIResponsesService("test-key", "fast-model", request as typeof fetch, "deep-model");
     await expect(service.deeplyAnalyzeEmail({ ownerId: "owner", senderName: "A", subject: "Proposal", preview: "Please review.", currentClassification: "Business", researchApproved: true })).resolves.toEqual(output);
     const body = JSON.parse(requestBody);
-    expect(body.tools).toEqual([{ type: "web_search" }]); expect(body.max_tool_calls).toBe(4); expect(body.include).toContain("web_search_call.action.sources");
+    expect(body.tools).toEqual([{ type: "web_search" }]); expect(body.tool_choice).toBe("required"); expect(body.max_tool_calls).toBe(4); expect(body.include).toContain("web_search_call.action.sources");
   });
 });
