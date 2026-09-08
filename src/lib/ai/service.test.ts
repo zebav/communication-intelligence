@@ -3,7 +3,7 @@ import { OpenAIResponsesService } from "@/lib/ai/service";
 
 describe("OpenAIResponsesService", () => {
   it("requests non-retained structured analysis with minimized input", async () => {
-    const output = { category: "Action Required", confidence: 0.9, summary: "Reply requested.", intent: "Request", priorityScore: 8, priorityReason: "A response is requested today.", recommendedAction: "RESPOND_TODAY", requiresReply: true, draftResponse: "Yes, I will review it today.", draftTone: "direct and warm", commitment: { detected: false, description: "", dueAt: "", owner: "unknown", confidence: 0 } };
+    const output = { category: "Action Required", confidence: 0.9, summary: "Reply requested.", intent: "Request", priorityScore: 8, priorityReason: "A response is requested today.", recommendedAction: "RESPOND_TODAY", requiresReply: true, draftResponse: "Yes, I will review it today.", draftTone: "direct and warm", commitment: { detected: false, description: "", dueAt: "", owner: "unknown", confidence: 0 }, memoryCandidates: [] };
     let requestBody = "";
     const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => { requestBody = String(init?.body); return new Response(JSON.stringify({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }] }), { status: 200 }); });
     const service = new OpenAIResponsesService("test-key", "test-model", request as typeof fetch);

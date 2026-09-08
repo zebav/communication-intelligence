@@ -18,11 +18,12 @@ function metadataObject(value: unknown) {
 async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const { data: conversation } = await supabase.from("conversations").select("id,title,person_id").eq("id", message.conversation_id).eq("owner_id", message.owner_id).maybeSingle();
   if (!conversation) return false;
-  const [{ data: person }, { data: profile }, { data: history }, { data: recentReplies }] = await Promise.all([
+  const [{ data: person }, { data: profile }, { data: history }, { data: recentReplies }, { data: verifiedMemories }] = await Promise.all([
     conversation.person_id ? supabase.from("people").select("display_name,relationship_type,organization").eq("id", conversation.person_id).eq("owner_id", message.owner_id).maybeSingle() : Promise.resolve({ data: null }),
     supabase.from("profiles").select("preferences").eq("id", message.owner_id).maybeSingle(),
     supabase.from("messages").select("direction,body_text").eq("owner_id", message.owner_id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12),
     supabase.from("messages").select("body_text").eq("owner_id", message.owner_id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
+    conversation.person_id ? supabase.from("memories").select("content").eq("owner_id", message.owner_id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
   ]);
   const preferences = metadataObject(profile?.preferences) as { communication_persona?: unknown; universal_communication_profile?: unknown };
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
@@ -37,6 +38,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     currentClassification: message.classification ?? "Information Only",
     relationshipContext: [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "known email contact",
     personaContext,
+    verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content),
     styleExamples,
     conversationMessages,
   });
@@ -45,6 +47,11 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const { error } = await supabase.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...metadataObject(message.metadata), ai_analysis: storedAnalysis, analyzed_automatically: true } }).eq("id", message.id).eq("owner_id", message.owner_id);
   if (error) return false;
   await supabase.from("conversations").update({ priority_score: analysis.priorityScore, summary: analysis.summary, recommended_action: { action: analysis.recommendedAction, reason: analysis.priorityReason, source: "ai" }, updated_at: now }).eq("id", conversation.id).eq("owner_id", message.owner_id);
+  if (conversation.person_id) {
+    await supabase.from("memories").delete().eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("user_verified", false);
+    const candidates = analysis.memoryCandidates.filter((candidate) => candidate.confidence >= 0.7).map((candidate) => ({ owner_id: message.owner_id, person_id: conversation.person_id, conversation_id: conversation.id, category: candidate.category, content: candidate.content, confidence: candidate.confidence, source_message_id: message.id, user_verified: false }));
+    if (candidates.length) await supabase.from("memories").upsert(candidates, { onConflict: "owner_id,source_message_id,category,content", ignoreDuplicates: true });
+  }
   return true;
 }
 
