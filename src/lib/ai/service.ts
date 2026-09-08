@@ -100,7 +100,8 @@ export class OpenAIResponsesService implements AIService {
       const actionSources = (payload.output ?? []).filter((item) => item.type === "web_search_call").flatMap((item) => item.action?.sources ?? []);
       const citationSources = (payload.output ?? []).flatMap((item) => item.content ?? []).flatMap((content) => content.annotations ?? []).filter((annotation) => annotation.type === "url_citation");
       const includedSources = [...actionSources, ...citationSources, ...parsed.sources].filter((source): source is { title?: string; url: string; supports?: string } => typeof source.url === "string" && /^https?:\/\//.test(source.url));
-      const uniqueSources = includedSources.filter((source, index, sources) => sources.findIndex((candidate) => candidate.url === source.url) === index).slice(0, 8);
+      const sourceKey = (source: { title?: string; url: string }) => { const url = new URL(source.url); const path = url.pathname.replace(/\/+$/, "") || "/"; return `${url.hostname.toLowerCase()}${path.toLowerCase()}|${source.title?.trim().toLowerCase() ?? ""}`; };
+      const uniqueSources = includedSources.filter((source, index, sources) => sources.findIndex((candidate) => sourceKey(candidate) === sourceKey(source)) === index).slice(0, 8);
       if (!uniqueSources.length) throw new Error("Web research returned no verifiable sources.");
       return { ...parsed, sources: uniqueSources.map((source) => ({ title: source.title?.trim() || new URL(source.url).hostname, url: source.url, supports: source.supports ?? parsed.sources.find((candidate) => candidate.url === source.url)?.supports ?? "Source used for this web research." })) };
     } finally { clearTimeout(timeout); }
