@@ -31,3 +31,9 @@ Deep analysis uses the optional server-only `OPENAI_REASONING_MODEL`, falling ba
 The Learning & Feedback Engine records bounded observations when the owner accepts or edits an AI draft, requests a rewrite style, or corrects an email category. These observations are suggestions, not automatic profile changes. They contain event metadata and length ratios rather than copies of the sent reply.
 
 Only rules explicitly approved by the owner are supplied to future email analysis, deep analysis, and draft revision. The context is limited to the 12 most recent applicable rules. The owner can edit, approve, stop using, dismiss, or permanently delete a rule from the Intelligence view. Every decision is owner-scoped, MFA-protected, and audit logged.
+
+## Communication outcomes
+
+Replies sent from the app start a waiting outcome. Outlook synchronization can deterministically detect a later incoming message and record its response time, but it never treats a reply as proof of success. The owner controls the desired outcome, status, and successful, neutral, or unsuccessful assessment.
+
+A successful assessment can create a bounded learning suggestion based on reply length and relationship context. The wording describes correlation rather than causation. Like all learning signals, it cannot influence AI until the owner separately approves it in Intelligence.

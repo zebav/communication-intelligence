@@ -19,3 +19,7 @@ Attachments store metadata and a storage reference; binary content belongs in Su
 ## Learning signals
 
 `learning_signals` separates observed behavior from approved communication rules. Each row has a source, signal type, proposed rule, confidence, optional person and conversation scope, and a `suggested`, `approved`, or `dismissed` status. Repeated pending conclusions for the same person are consolidated into one review item with an evidence count. Row-level security and all review actions require the authenticated MFA-verified owner. Suggested or dismissed rows never influence AI prompts; only approved rows can be selected as bounded context.
+
+## Communication outcomes
+
+`communication_outcomes` links one tracked result to the outgoing message that initiated the wait and optionally the later incoming response. It stores deterministic response timing separately from the owner's assessment. Automatic synchronization can move `waiting` to `reply_received`; only an authenticated MFA-verified owner can confirm success, change the desired outcome, mark resolution or follow-up, or delete the record.

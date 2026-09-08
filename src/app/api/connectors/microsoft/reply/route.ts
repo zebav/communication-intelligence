@@ -8,7 +8,7 @@ import { draftLearning, saveLearningSuggestion } from "@/lib/learning-feedback";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
-const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000), suggestedDraft: z.string().max(4000).optional(), draftTone: z.string().max(120).optional() });
+const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000), suggestedDraft: z.string().max(4000).optional(), draftTone: z.string().max(120).optional(), desiredOutcome: z.string().trim().min(1).max(300).optional() });
 const jsonError = (message: string, status = 500) => NextResponse.json({ error: message }, { status });
 
 async function getAccessToken(credentials: StoredCredentials, origin: string) {
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     if (!graphResponse.ok) throw new Error(`graph_${graphResponse.status}`);
     const sentAt = new Date().toISOString();
     const localMessageId = `local-sent-${crypto.randomUUID()}`;
-    const { error: persistenceError } = await supabase.from("messages").insert({ owner_id: user.id, conversation_id: parsed.data.conversationId, external_message_id: localMessageId, direction: "out", source: "email", body_text: parsed.data.body, sent_at: sentAt, processed_at: sentAt, metadata: { provider: microsoftGraphConnector.id, sent_from_suggested_reply: true, full_content: true } });
+    const { data: persistedMessage, error: persistenceError } = await supabase.from("messages").insert({ owner_id: user.id, conversation_id: parsed.data.conversationId, external_message_id: localMessageId, direction: "out", source: "email", body_text: parsed.data.body, sent_at: sentAt, processed_at: sentAt, metadata: { provider: microsoftGraphConnector.id, sent_from_suggested_reply: true, full_content: true } }).select("id").single();
     const { error: conversationError } = await supabase.from("conversations").update({ last_user_message_at: sentAt, updated_at: sentAt }).eq("id", parsed.data.conversationId).eq("owner_id", user.id);
     const { error: auditError } = await supabase.from("audit_logs").insert({
       owner_id: user.id,
@@ -66,6 +66,14 @@ export async function POST(request: NextRequest) {
       const learning = draftLearning(parsed.data.suggestedDraft, parsed.data.body, person?.relationship_type);
       const { error: learningError } = await saveLearningSuggestion(supabase, { ownerId: user.id, personId: linkedConversation?.person_id, conversationId: parsed.data.conversationId, source: "email", signalType: learning.signalType, observation: learning.observation, proposedRule: learning.proposedRule, evidence: { ...learning.evidence, source_message_id: parsed.data.messageId, sent_message_id: localMessageId, draft_tone: parsed.data.draftTone }, confidence: learning.confidence });
       if (learningError) console.error("Reply sent but learning signal could not be saved", learningError.code);
+    }
+    if (persistedMessage?.id) {
+      const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
+      const { data: waitingOutcome } = await supabase.from("communication_outcomes").select("id").eq("owner_id", user.id).eq("conversation_id", parsed.data.conversationId).eq("status", "waiting").order("created_at", { ascending: false }).limit(1).maybeSingle();
+      const outcomeResult = waitingOutcome
+        ? await supabase.from("communication_outcomes").update({ trigger_message_id: persistedMessage.id, person_id: linkedConversation?.person_id, desired_outcome: parsed.data.desiredOutcome ?? "Receive a useful reply or advance the conversation", updated_at: sentAt }).eq("id", waitingOutcome.id).eq("owner_id", user.id)
+        : await supabase.from("communication_outcomes").insert({ owner_id: user.id, person_id: linkedConversation?.person_id, conversation_id: parsed.data.conversationId, trigger_message_id: persistedMessage.id, desired_outcome: parsed.data.desiredOutcome ?? "Receive a useful reply or advance the conversation", status: "waiting", evidence: { provider: microsoftGraphConnector.id, created_from: "app_reply" } });
+      if (outcomeResult.error) console.error("Reply sent but outcome tracking could not be started", outcomeResult.error.code);
     }
     // The external send has already succeeded. Never tell the user to retry and
     // risk sending a duplicate merely because local history/audit persistence failed.
