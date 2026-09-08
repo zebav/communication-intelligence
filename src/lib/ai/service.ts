@@ -19,7 +19,7 @@ export const deepAnalysisSchema = z.object({
   inferences: z.array(z.object({ claim: z.string().min(1).max(500), basis: z.string().min(1).max(500), confidence: z.number().min(0).max(1) })).max(10),
   unknowns: z.array(z.string().min(1).max(500)).max(10), options: z.array(z.object({ label: z.string().min(1).max(160), benefits: z.string().min(1).max(600), risks: z.string().min(1).max(600) })).max(6),
   recommendedApproach: z.string().min(1).max(1200), responseStrategy: z.string().min(1).max(1000), suggestedReply: z.string().max(4000), researchNeeded: z.boolean(),
-  researchQuestions: z.array(z.string().min(1).max(400)).max(8), sources: z.array(z.object({ title: z.string().min(1).max(300), url: z.string().url().max(2000), supports: z.string().min(1).max(500) })).max(8),
+  researchQuestions: z.array(z.string().min(1).max(400)).max(8), sources: z.array(z.object({ title: z.string().min(1).max(300), url: z.string().min(1).max(2000), supports: z.string().min(1).max(500) })).max(8),
 });
 export interface DeepAnalysisRequest extends EmailAnalysisRequest { researchApproved: boolean }
 export type DraftTransformation = "shorter" | "warmer" | "more_direct" | "more_professional" | "more_diplomatic" | "rewrite";
