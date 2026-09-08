@@ -7,6 +7,7 @@ import { emailPriority, recommendedEmailAction } from "@/lib/connectors/email-cl
 import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
+import { normalizeCommitmentDueAt } from "@/lib/commitments";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -14,6 +15,25 @@ const analysisRequestSchema = z.object({ messageId: z.string().uuid(), conversat
 const draftRevisionRequestSchema = analysisRequestSchema.extend({ currentDraft: z.string().trim().min(1).max(4000), transformation: z.enum(["shorter", "warmer", "more_direct", "more_professional", "more_diplomatic", "rewrite"]) });
 const senderPreferenceSchema = z.object({ personId: z.string().uuid(), relationshipType: z.enum(["unknown", "customer", "partner", "investor", "colleague", "supplier", "family", "friend"]), manualPriority: z.number().min(1).max(10), handlingRule: z.enum(["normal", "always_priority", "low_priority"]) });
 const memoryReviewSchema = z.object({ memoryId: z.string().uuid(), decision: z.enum(["approve", "reject"]) });
+const commitmentReviewSchema = z.object({ commitmentId: z.string().uuid(), decision: z.enum(["approve", "reject", "complete"]) });
+
+export async function reviewCommitment(input: { commitmentId: string; decision: "approve" | "reject" | "complete" }) {
+  const parsed = commitmentReviewSchema.safeParse(input);
+  if (!parsed.success) return { error: "Choose a valid follow-up." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
+  const { data: commitment } = await supabase.from("commitments").select("id,status,description").eq("id", parsed.data.commitmentId).eq("owner_id", user.id).maybeSingle();
+  if (!commitment) return { error: "This follow-up is no longer available." };
+  const nextStatus = parsed.data.decision === "approve" ? "open" : parsed.data.decision === "complete" ? "completed" : "dismissed";
+  const { error } = await supabase.from("commitments").update({ status: nextStatus, resolved_at: nextStatus === "open" ? null : new Date().toISOString() }).eq("id", commitment.id).eq("owner_id", user.id);
+  if (error) return { error: "The follow-up decision could not be saved." };
+  await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: `commitment.${nextStatus}`, object_type: "commitment", object_id: commitment.id, source: "email", actor_type: "user", previous_value: { status: commitment.status }, new_value: { status: nextStatus, description: commitment.description } });
+  revalidatePath("/");
+  return { success: true };
+}
 
 export async function reviewPersonMemory(input: { memoryId: string; decision: "approve" | "reject" }) {
   const parsed = memoryReviewSchema.safeParse(input);
@@ -121,6 +141,10 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
       await supabase.from("memories").delete().eq("owner_id", user.id).eq("source_message_id", message.id).eq("user_verified", false);
       const candidates = analysis.memoryCandidates.filter((candidate) => candidate.confidence >= 0.7).map((candidate) => ({ owner_id: user.id, person_id: conversation.person_id, conversation_id: conversation.id, category: candidate.category, content: candidate.content, confidence: candidate.confidence, source_message_id: message.id, user_verified: false }));
       if (candidates.length) await supabase.from("memories").upsert(candidates, { onConflict: "owner_id,source_message_id,category,content", ignoreDuplicates: true });
+    }
+    await supabase.from("commitments").delete().eq("owner_id", user.id).eq("source_message_id", message.id).eq("status", "suggested");
+    if (analysis.commitment.detected && analysis.commitment.confidence >= 0.7 && analysis.commitment.description.trim()) {
+      await supabase.from("commitments").upsert({ owner_id: user.id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
     }
     revalidatePath("/");
     return { success: true };

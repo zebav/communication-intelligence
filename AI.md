@@ -6,6 +6,10 @@ Email analysis now produces a durable conversation summary and up to three bound
 
 The AI cannot verify or silently edit person memories. Every approval or rejection is owner-initiated and recorded in the audit log.
 
+## Commitments and follow-ups
+
+Email analysis may extract one concrete promise, requested action, or unresolved follow-up. Suggestions below 70% confidence are discarded. Reliable relative dates are resolved against the analysis timestamp and stored as ISO timestamps; ambiguous dates remain empty rather than being invented. Suggestions use the `suggested` status until the owner approves or rejects them.
+
 All model use goes through `AIService`. Business logic must never name an OpenAI model directly. Fast, reasoning, and research modes are selected through server-side configuration.
 
 The Context Builder will supply only the current message, relevant recent messages, summaries, verified memories, preferences, and open commitments. Speculation is not durable memory. Attention scores remain explainable through independently visible dimensions. The interface presents concise reasoning summaries, never hidden chain-of-thought.

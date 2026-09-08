@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
-import type { CommunicationCase, CommunicationPersonOption, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
+import type { CommunicationCase, CommunicationPersonOption, FollowUpCommitment, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +28,12 @@ export default async function Home() {
     .limit(50);
 
   const { data: memoryRows } = await supabase.from("memories").select("id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);
+  const { data: commitmentRows } = await supabase.from("commitments").select("id,conversation_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200);
+  const followUps: FollowUpCommitment[] = (commitmentRows ?? []).map((item) => {
+    const person = Array.isArray(item.people) ? item.people[0] : item.people;
+    const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations;
+    return { id: item.id, conversationId: item.conversation_id, personName: person?.display_name ?? "Unknown person", conversationTitle: conversation?.title ?? "Untitled conversation", description: item.description, owner: item.commitment_owner === "user" || item.commitment_owner === "sender" ? item.commitment_owner : "unknown", dueAt: item.due_at ?? undefined, status: item.status === "open" ? "open" : "suggested", confidence: Number(item.confidence ?? 0) };
+  });
 
   const { data: microsoftConnection } = await supabase
     .from("connections")
@@ -88,6 +94,7 @@ export default async function Home() {
     communicationCases={communicationCases}
     microsoftConnection={microsoftConnection}
     syncedEmails={syncedEmails}
+    followUps={followUps}
     persona={persona}
     profilePeople={profilePeople}
   />;
