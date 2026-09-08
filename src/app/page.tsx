@@ -64,7 +64,7 @@ export default async function Home() {
       ? (row.recommended_action as { relevance_reasons?: unknown }).relevance_reasons
       : undefined;
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata)
-      ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"] }
+      ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"]; deep_analysis?: SyncedEmailConversation["deepAnalysis"] }
       : {};
     const analysis = metadata.ai_analysis && typeof metadata.ai_analysis.draftResponse === "string" ? metadata.ai_analysis : undefined;
     const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at })).filter((message) => message.body);
@@ -87,6 +87,7 @@ export default async function Home() {
       memories: (memoryRows ?? []).filter((memory) => memory.conversation_id === row.id && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: memory.user_verified })),
       threadMessages,
       analysis,
+      deepAnalysis: metadata.deep_analysis && typeof metadata.deep_analysis.overview === "string" ? metadata.deep_analysis : undefined,
     };
   });
 
