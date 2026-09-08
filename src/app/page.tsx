@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
-import type { CommunicationCase, CommunicationPersonOption, FollowUpCommitment, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
+import type { CommunicationCase, CommunicationPersonOption, FollowUpCommitment, IntelligentPerson, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -18,17 +18,18 @@ export default async function Home() {
   const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: Partial<UniversalCommunicationProfile> } : {};
   const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
 
-  const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization").eq("owner_id", user.id).order("display_name").limit(200);
+  const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("display_name").limit(200);
   const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "" }));
 
   const { data: rows } = await supabase
     .from("conversations")
-    .select("id,title,source,created_at,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
+    .select("id,title,source,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
     .order("created_at", { ascending: false })
     .limit(50);
 
-  const { data: memoryRows } = await supabase.from("memories").select("id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);
-  const { data: commitmentRows } = await supabase.from("commitments").select("id,conversation_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200);
+  const { data: identityRows } = await supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(500);
+  const { data: memoryRows } = await supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);
+  const { data: commitmentRows } = await supabase.from("commitments").select("id,person_id,conversation_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200);
   const followUps: FollowUpCommitment[] = (commitmentRows ?? []).map((item) => {
     const person = Array.isArray(item.people) ? item.people[0] : item.people;
     const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations;
@@ -89,12 +90,34 @@ export default async function Home() {
     };
   });
 
+  const intelligentPeople: IntelligentPerson[] = (personRows ?? []).map((person) => {
+    const personConversations = (rows ?? []).filter((row) => {
+      const linked = Array.isArray(row.people) ? row.people[0] : row.people;
+      return linked?.id === person.id;
+    });
+    const responseConversations = personConversations.filter((row) => {
+      const messages = Array.isArray(row.messages) ? row.messages : [];
+      const latestInbound = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
+      return latestInbound && messages.some((message) => message.direction === "out" && String(message.sent_at) > String(latestInbound.sent_at));
+    }).length;
+    const contactDates = personConversations.flatMap((row) => Array.isArray(row.messages) ? row.messages.map((message) => String(message.sent_at)) : []).filter(Boolean).sort();
+    return {
+      id: person.id, name: person.display_name ?? "Unknown person", organization: person.organization ?? "", relationshipType: person.relationship_type ?? "unknown", notes: person.notes ?? "", relationshipSummary: person.relationship_summary ?? "", manualPriority: person.manual_priority == null ? undefined : Number(person.manual_priority), overallPriority: person.overall_priority == null ? undefined : Number(person.overall_priority), firstContactAt: contactDates[0] ?? person.first_contact_at ?? undefined, lastContactAt: contactDates.at(-1) ?? person.last_contact_at ?? undefined,
+      identities: (identityRows ?? []).filter((identity) => identity.person_id === person.id).map((identity) => ({ id: identity.id, source: identity.source as Source, identifier: identity.external_identifier, verified: identity.verified_match })),
+      memories: (memoryRows ?? []).filter((memory) => memory.person_id === person.id && memory.user_verified && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: true })),
+      conversations: personConversations.map((row) => ({ id: row.id, title: row.title ?? "Untitled conversation", source: row.source as Source, lastMessageAt: (Array.isArray(row.messages) ? [...row.messages].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0]?.sent_at : undefined) ?? undefined, summary: typeof row.summary === "string" ? row.summary : "" })).sort((a, b) => String(b.lastMessageAt ?? "").localeCompare(String(a.lastMessageAt ?? ""))),
+      openLoops: (commitmentRows ?? []).filter((commitment) => commitment.person_id === person.id && commitment.status === "open").length,
+      responseRate: personConversations.length ? Math.round((responseConversations / personConversations.length) * 100) : undefined,
+    };
+  }).sort((a, b) => (b.lastContactAt ?? "").localeCompare(a.lastContactAt ?? ""));
+
   return <Workspace
     userEmail={user.email ?? "Private owner"}
     communicationCases={communicationCases}
     microsoftConnection={microsoftConnection}
     syncedEmails={syncedEmails}
     followUps={followUps}
+    people={intelligentPeople}
     persona={persona}
     profilePeople={profilePeople}
   />;

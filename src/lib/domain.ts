@@ -73,6 +73,24 @@ export interface FollowUpCommitment {
   confidence: number;
 }
 
+export interface IntelligentPerson {
+  id: string;
+  name: string;
+  organization: string;
+  relationshipType: string;
+  notes: string;
+  relationshipSummary: string;
+  manualPriority?: number;
+  overallPriority?: number;
+  firstContactAt?: string;
+  lastContactAt?: string;
+  identities: { id: string; source: Source; identifier: string; verified: boolean }[];
+  memories: PersonMemory[];
+  conversations: { id: string; title: string; source: Source; lastMessageAt?: string; summary: string }[];
+  openLoops: number;
+  responseRate?: number;
+}
+
 export function calculateAttention(dimensions: ScoreDimension[]): number {
   const total = 5 + dimensions.reduce((sum, item) => sum + item.value, 0);
   return Math.round(Math.min(10, Math.max(1, total)) * 10) / 10;
