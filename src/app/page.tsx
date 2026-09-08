@@ -2,9 +2,16 @@ import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
-import type { CommunicationCase, CommunicationPersonOption, FollowUpCommitment, IntelligentPerson, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
+import type { CommunicationCase, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
+
+function deduplicateStoredSources(sources: DeepAnalysis["sources"] | undefined) {
+  if (!Array.isArray(sources)) return [];
+  const valid = sources.filter((source) => source && typeof source.url === "string" && /^https?:\/\//.test(source.url));
+  const key = (source: DeepAnalysis["sources"][number]) => { try { return new URL(source.url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return source.url; } };
+  return valid.filter((source, index) => valid.findIndex((candidate) => key(candidate) === key(source)) === index).slice(0, 8);
+}
 
 export default async function Home() {
   const supabase = await createClient();
@@ -64,9 +71,10 @@ export default async function Home() {
       ? (row.recommended_action as { relevance_reasons?: unknown }).relevance_reasons
       : undefined;
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata)
-      ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"] }
+      ? latestMessage.metadata as { is_read?: boolean; ai_analysis?: SyncedEmailConversation["analysis"]; deep_analysis?: SyncedEmailConversation["deepAnalysis"] }
       : {};
     const analysis = metadata.ai_analysis && typeof metadata.ai_analysis.draftResponse === "string" ? metadata.ai_analysis : undefined;
+    const deepAnalysis = metadata.deep_analysis && typeof metadata.deep_analysis.overview === "string" ? { ...metadata.deep_analysis, sources: deduplicateStoredSources(metadata.deep_analysis.sources) } : undefined;
     const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at })).filter((message) => message.body);
     return {
       id: row.id,
@@ -87,6 +95,7 @@ export default async function Home() {
       memories: (memoryRows ?? []).filter((memory) => memory.conversation_id === row.id && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: memory.user_verified })),
       threadMessages,
       analysis,
+      deepAnalysis,
     };
   });
 

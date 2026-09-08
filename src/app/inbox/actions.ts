@@ -12,6 +12,7 @@ import { normalizeCommitmentDueAt } from "@/lib/commitments";
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
 const analysisRequestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid() });
+const deepAnalysisRequestSchema = analysisRequestSchema.extend({ researchApproved: z.boolean() });
 const draftRevisionRequestSchema = analysisRequestSchema.extend({ currentDraft: z.string().trim().min(1).max(4000), transformation: z.enum(["shorter", "warmer", "more_direct", "more_professional", "more_diplomatic", "rewrite"]) });
 const senderPreferenceSchema = z.object({ personId: z.string().uuid(), relationshipType: z.enum(["unknown", "customer", "partner", "investor", "colleague", "supplier", "family", "friend"]), manualPriority: z.number().min(1).max(10), handlingRule: z.enum(["normal", "always_priority", "low_priority"]) });
 const memoryReviewSchema = z.object({ memoryId: z.string().uuid(), decision: z.enum(["approve", "reject"]) });
@@ -171,6 +172,47 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     if (error instanceof AIServiceNotConfiguredError) return { error: "OpenAI is not configured in Vercel yet." };
     console.error("Email AI analysis failed", error instanceof Error ? error.message : "Unknown error");
     return { error: "The email could not be analyzed. Try again." };
+  }
+}
+
+export async function deeplyAnalyzeEmailWithAI(input: { messageId: string; conversationId: string; researchApproved: boolean }) {
+  const parsed = deepAnalysisRequestSchema.safeParse(input);
+  if (!parsed.success) return { error: "Choose a valid email." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
+  const [{ data: conversation }, { data: message }] = await Promise.all([
+    supabase.from("conversations").select("id,title,person_id").eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle(),
+    supabase.from("messages").select("id,body_text,classification,metadata").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle(),
+  ]);
+  if (!conversation || !message) return { error: "The selected email could not be loaded." };
+  try {
+    const [{ data: person }, { data: profile }, { data: history }, { data: memories }, { data: recentReplies }] = await Promise.all([
+      conversation.person_id ? supabase.from("people").select("display_name,relationship_type,organization").eq("id", conversation.person_id).eq("owner_id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+      supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle(),
+      supabase.from("messages").select("direction,body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(20),
+      conversation.person_id ? supabase.from("memories").select("content").eq("owner_id", user.id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(16) : Promise.resolve({ data: [] }),
+      supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
+    ]);
+    const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
+    const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
+    const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
+    const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
+    const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 8);
+    const analysis = await getAIService().deeplyAnalyzeEmail({ ownerId: user.id, senderName: person?.display_name ?? "Unknown sender", subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext: [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "unknown", personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples, conversationMessages, researchApproved: parsed.data.researchApproved });
+    const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
+    const deepAnalysis = { ...analysis, createdAt: new Date().toISOString(), usedWebResearch: parsed.data.researchApproved };
+    const { error } = await supabase.from("messages").update({ metadata: { ...existingMetadata, deep_analysis: deepAnalysis } }).eq("id", message.id).eq("owner_id", user.id);
+    if (error) return { error: "The deep analysis could not be saved." };
+    await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: parsed.data.researchApproved ? "message.deep_analysis_researched" : "message.deep_analysis_created", object_type: "message", object_id: message.id, source: "email", actor_type: "user", new_value: { web_research_approved: parsed.data.researchApproved, source_count: analysis.sources.length } });
+    revalidatePath("/");
+    return { success: true };
+  } catch (error) {
+    if (error instanceof AIServiceNotConfiguredError) return { error: "OpenAI is not configured in Vercel yet." };
+    console.error("Deep email analysis failed", error instanceof Error ? error.message : "Unknown error");
+    return { error: "The deep analysis could not be completed. Try again." };
   }
 }
 

@@ -51,6 +51,24 @@ export interface SyncedEmailConversation {
   memories?: PersonMemory[];
   threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
   analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number } };
+  deepAnalysis?: DeepAnalysis;
+}
+
+export interface DeepAnalysis {
+  createdAt: string;
+  usedWebResearch: boolean;
+  overview: string;
+  stakes: string;
+  facts: string[];
+  inferences: { claim: string; basis: string; confidence: number }[];
+  unknowns: string[];
+  options: { label: string; benefits: string; risks: string }[];
+  recommendedApproach: string;
+  responseStrategy: string;
+  suggestedReply: string;
+  researchNeeded: boolean;
+  researchQuestions: string[];
+  sources: { title: string; url: string; supports: string }[];
 }
 
 export interface PersonMemory {
