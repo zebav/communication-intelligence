@@ -8,6 +8,7 @@ import { normalizeUniversalProfile, resolveCommunicationProfile, situationForCla
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
+import { approvedLearningContext, toneRule } from "@/lib/learning-feedback";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -18,6 +19,11 @@ const senderPreferenceSchema = z.object({ personId: z.string().uuid(), relations
 const memoryReviewSchema = z.object({ memoryId: z.string().uuid(), decision: z.enum(["approve", "reject"]) });
 const commitmentReviewSchema = z.object({ commitmentId: z.string().uuid(), decision: z.enum(["approve", "reject", "complete"]) });
 const manualCommitmentSchema = z.object({ conversationId: z.string().uuid(), messageId: z.string().uuid(), description: z.string().trim().min(1).max(300), owner: z.enum(["user", "sender", "unknown"]), dueAt: z.string().max(40).optional() });
+
+async function loadApprovedLearning(supabase: Awaited<ReturnType<typeof createClient>>, ownerId: string, personId?: string | null) {
+  const { data } = await supabase.from("learning_signals").select("person_id,proposed_rule").eq("owner_id", ownerId).eq("source", "email").eq("status", "approved").order("updated_at", { ascending: false }).limit(40);
+  return approvedLearningContext((data ?? []).filter((item) => !item.person_id || item.person_id === personId));
+}
 
 export async function createManualCommitment(input: { conversationId: string; messageId: string; description: string; owner: "user" | "sender" | "unknown"; dueAt?: string }) {
   const parsed = manualCommitmentSchema.safeParse(input);
@@ -108,7 +114,10 @@ export async function correctEmailClassification(input: { messageId: string; con
   if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
   const priority = emailPriority(parsed.data.classification);
   const action = recommendedEmailAction(parsed.data.classification);
-  const { data: original } = await supabase.from("messages").select("classification").eq("id", parsed.data.messageId).eq("owner_id", user.id).maybeSingle();
+  const [{ data: original }, { data: correctionConversation }] = await Promise.all([
+    supabase.from("messages").select("classification").eq("id", parsed.data.messageId).eq("owner_id", user.id).maybeSingle(),
+    supabase.from("conversations").select("person_id,title").eq("id", parsed.data.conversationId).eq("owner_id", user.id).maybeSingle(),
+  ]);
   const { error: messageError } = await supabase.from("messages").update({ classification: parsed.data.classification, importance_score: priority, processed_at: new Date().toISOString() })
     .eq("id", parsed.data.messageId).eq("owner_id", user.id).eq("source", "email");
   if (messageError) return { error: "The category could not be saved." };
@@ -116,6 +125,7 @@ export async function correctEmailClassification(input: { messageId: string; con
     .eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email");
   if (conversationError) return { error: "The recommendation could not be updated." };
   await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "message.classification_corrected", object_type: "message", object_id: parsed.data.messageId, source: "email", actor_type: "user", previous_value: { classification: original?.classification }, new_value: { classification: parsed.data.classification } });
+  if (original?.classification !== parsed.data.classification) await supabase.from("learning_signals").insert({ owner_id: user.id, person_id: correctionConversation?.person_id, conversation_id: parsed.data.conversationId, source: "email", signal_type: "category_corrected", observation: `You changed this message from ${original?.classification ?? "uncategorized"} to ${parsed.data.classification}.`, proposed_rule: `Consider ${parsed.data.classification} for similar messages in this conversation context.`, evidence: { message_id: parsed.data.messageId, previous_category: original?.classification, corrected_category: parsed.data.classification }, confidence: 0.7, status: "suggested" });
   revalidatePath("/");
   return { success: true };
 }
@@ -142,7 +152,8 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
     const profilePreferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
     const universalProfile = normalizeUniversalProfile(profilePreferences.universal_communication_profile, profilePreferences.communication_persona);
-    const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
+    const learnedContext = await loadApprovedLearning(supabase, user.id, conversation.person_id);
+    const personaContext = [resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") }), learnedContext ? `Owner-approved learned rules:\n${learnedContext}` : ""].filter(Boolean).join("\n\n");
     const { data: conversationHistory } = await supabase.from("messages").select("direction,body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12);
     const { data: verifiedMemories } = conversation.person_id ? await supabase.from("memories").select("content").eq("owner_id", user.id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : { data: [] };
     const conversationMessages = [...(conversationHistory ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
@@ -198,7 +209,8 @@ export async function deeplyAnalyzeEmailWithAI(input: { messageId: string; conve
     ]);
     const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
     const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
-    const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
+    const learnedContext = await loadApprovedLearning(supabase, user.id, conversation.person_id);
+    const personaContext = [resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") }), learnedContext ? `Owner-approved learned rules:\n${learnedContext}` : ""].filter(Boolean).join("\n\n");
     const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
     const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 8);
     const analysis = await getAIService().deeplyAnalyzeEmail({ ownerId: user.id, senderName: person?.display_name ?? "Unknown sender", subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext: [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "unknown", personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples, conversationMessages, researchApproved: parsed.data.researchApproved });
@@ -236,10 +248,12 @@ export async function reviseEmailDraftWithAI(input: { messageId: string; convers
     ]);
     const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
     const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
-    const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
+    const learnedContext = await loadApprovedLearning(supabase, user.id, conversation.person_id);
+    const personaContext = [resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") }), learnedContext ? `Owner-approved learned rules:\n${learnedContext}` : ""].filter(Boolean).join("\n\n");
     const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
     const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
     const revised = await getAIService().reviseEmailDraft({ ownerId: user.id, senderName: person?.display_name ?? "Unknown sender", subject: conversation.title ?? "(No subject)", currentDraft: parsed.data.currentDraft, transformation: parsed.data.transformation, personaContext, styleExamples, conversationMessages });
+    await supabase.from("learning_signals").insert({ owner_id: user.id, person_id: conversation.person_id, conversation_id: conversation.id, source: "email", signal_type: "tone_requested", observation: `You requested “${parsed.data.transformation.replaceAll("_", " ")}” for an AI draft.`, proposed_rule: `${toneRule[parsed.data.transformation]} in similar email conversations.`, evidence: { message_id: message.id, transformation: parsed.data.transformation }, confidence: 0.6, status: "suggested" });
     return { success: true, draftResponse: revised.draftResponse, draftTone: revised.draftTone };
   } catch (error) {
     if (error instanceof AIServiceNotConfiguredError) return { error: "OpenAI is not configured in Vercel yet." };

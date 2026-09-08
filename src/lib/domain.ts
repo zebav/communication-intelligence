@@ -109,6 +109,19 @@ export interface IntelligentPerson {
   responseRate?: number;
 }
 
+export interface LearningSignal {
+  id: string;
+  personName?: string;
+  conversationTitle?: string;
+  source: Source;
+  signalType: "draft_accepted" | "draft_edited" | "tone_requested" | "category_corrected";
+  observation: string;
+  proposedRule: string;
+  confidence: number;
+  status: "suggested" | "approved" | "dismissed";
+  createdAt: string;
+}
+
 export function calculateAttention(dimensions: ScoreDimension[]): number {
   const total = 5 + dimensions.reduce((sum, item) => sum + item.value, 0);
   return Math.round(Math.min(10, Math.max(1, total)) * 10) / 10;
