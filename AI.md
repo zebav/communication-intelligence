@@ -1,5 +1,11 @@
 # AI
 
+## Person memory and conversation summaries
+
+Email analysis now produces a durable conversation summary and up to three bounded person-memory candidates. Candidates must be explicitly supported by the conversation, exclude sensitive information, and meet a 70% confidence threshold before they are shown. They remain unverified until the owner approves them. Rejected candidates are deleted, while verified memories become limited context for future analyses and reply drafts.
+
+The AI cannot verify or silently edit person memories. Every approval or rejection is owner-initiated and recorded in the audit log.
+
 All model use goes through `AIService`. Business logic must never name an OpenAI model directly. Fast, reasoning, and research modes are selected through server-side configuration.
 
 The Context Builder will supply only the current message, relevant recent messages, summaries, verified memories, preferences, and open commitments. Speculation is not durable memory. Attention scores remain explainable through independently visible dimensions. The interface presents concise reasoning summaries, never hidden chain-of-thought.

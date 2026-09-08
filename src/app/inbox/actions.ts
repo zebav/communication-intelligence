@@ -13,6 +13,26 @@ const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId
 const analysisRequestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid() });
 const draftRevisionRequestSchema = analysisRequestSchema.extend({ currentDraft: z.string().trim().min(1).max(4000), transformation: z.enum(["shorter", "warmer", "more_direct", "more_professional", "more_diplomatic", "rewrite"]) });
 const senderPreferenceSchema = z.object({ personId: z.string().uuid(), relationshipType: z.enum(["unknown", "customer", "partner", "investor", "colleague", "supplier", "family", "friend"]), manualPriority: z.number().min(1).max(10), handlingRule: z.enum(["normal", "always_priority", "low_priority"]) });
+const memoryReviewSchema = z.object({ memoryId: z.string().uuid(), decision: z.enum(["approve", "reject"]) });
+
+export async function reviewPersonMemory(input: { memoryId: string; decision: "approve" | "reject" }) {
+  const parsed = memoryReviewSchema.safeParse(input);
+  if (!parsed.success) return { error: "Choose a valid memory suggestion." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Your session has expired. Sign in again." };
+  const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
+  const { data: memory } = await supabase.from("memories").select("id,person_id,category,content,user_verified").eq("id", parsed.data.memoryId).eq("owner_id", user.id).maybeSingle();
+  if (!memory || memory.user_verified) return { error: "This memory suggestion is no longer available." };
+  const { error } = parsed.data.decision === "approve"
+    ? await supabase.from("memories").update({ user_verified: true }).eq("id", memory.id).eq("owner_id", user.id)
+    : await supabase.from("memories").delete().eq("id", memory.id).eq("owner_id", user.id);
+  if (error) return { error: "The memory decision could not be saved." };
+  await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: `memory.${parsed.data.decision}d`, object_type: "memory", object_id: memory.id, source: "email", actor_type: "user", previous_value: { verified: false }, new_value: { decision: parsed.data.decision, category: memory.category, content: memory.content } });
+  revalidatePath("/");
+  return { success: true };
+}
 
 export async function saveSenderPreferences(input: { personId: string; relationshipType: string; manualPriority: number; handlingRule: string }) {
   const parsed = senderPreferenceSchema.safeParse(input);
@@ -84,11 +104,12 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     const universalProfile = normalizeUniversalProfile(profilePreferences.universal_communication_profile, profilePreferences.communication_persona);
     const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
     const { data: conversationHistory } = await supabase.from("messages").select("direction,body_text").eq("owner_id", user.id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12);
+    const { data: verifiedMemories } = conversation.person_id ? await supabase.from("memories").select("content").eq("owner_id", user.id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : { data: [] };
     const conversationMessages = [...(conversationHistory ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
     const conversationReplies = (conversationHistory ?? []).filter((item) => item.direction === "out");
     const { data: recentReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8);
     const styleExamples = [...(conversationReplies ?? []), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
-    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, styleExamples, conversationMessages });
+    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content), styleExamples, conversationMessages });
     const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
     const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
     const now = new Date().toISOString();
@@ -96,6 +117,11 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     if (updateMessageError) return { error: "The AI analysis could not be saved." };
     const { error: updateConversationError } = await supabase.from("conversations").update({ priority_score: analysis.priorityScore, summary: analysis.summary, recommended_action: { action: analysis.recommendedAction, reason: analysis.priorityReason, source: "ai" }, updated_at: now }).eq("id", conversation.id).eq("owner_id", user.id);
     if (updateConversationError) return { error: "The AI recommendation could not be saved." };
+    if (conversation.person_id) {
+      await supabase.from("memories").delete().eq("owner_id", user.id).eq("source_message_id", message.id).eq("user_verified", false);
+      const candidates = analysis.memoryCandidates.filter((candidate) => candidate.confidence >= 0.7).map((candidate) => ({ owner_id: user.id, person_id: conversation.person_id, conversation_id: conversation.id, category: candidate.category, content: candidate.content, confidence: candidate.confidence, source_message_id: message.id, user_verified: false }));
+      if (candidates.length) await supabase.from("memories").upsert(candidates, { onConflict: "owner_id,source_message_id,category,content", ignoreDuplicates: true });
+    }
     revalidatePath("/");
     return { success: true };
   } catch (error) {

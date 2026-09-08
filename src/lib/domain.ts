@@ -48,8 +48,17 @@ export interface SyncedEmailConversation {
   manualPriority?: number | null;
   handlingRule?: "normal" | "always_priority" | "low_priority";
   relevanceReasons?: string[];
+  memories?: PersonMemory[];
   threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
   analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number } };
+}
+
+export interface PersonMemory {
+  id: string;
+  category: "relationship" | "fact" | "preference" | "context";
+  content: string;
+  confidence: number;
+  verified: boolean;
 }
 
 export function calculateAttention(dimensions: ScoreDimension[]): number {

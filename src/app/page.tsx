@@ -27,6 +27,8 @@ export default async function Home() {
     .order("created_at", { ascending: false })
     .limit(50);
 
+  const { data: memoryRows } = await supabase.from("memories").select("id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);
+
   const { data: microsoftConnection } = await supabase
     .from("connections")
     .select("account_name,account_identifier,status,health_status,last_sync_at")
@@ -75,6 +77,7 @@ export default async function Home() {
       manualPriority: person?.manual_priority == null ? null : Number(person.manual_priority),
       handlingRule: person?.email_handling_rule === "always_priority" || person?.email_handling_rule === "low_priority" ? person.email_handling_rule : "normal",
       relevanceReasons: Array.isArray(relevanceReasons) ? relevanceReasons.filter((reason): reason is string => typeof reason === "string") : ["Priority currently comes from the message category."],
+      memories: (memoryRows ?? []).filter((memory) => memory.conversation_id === row.id && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: memory.user_verified })),
       threadMessages,
       analysis,
     };
