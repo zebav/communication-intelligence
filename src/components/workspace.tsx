@@ -19,6 +19,7 @@ import { deleteCommunicationOutcome, reviewCommunicationOutcome } from "@/app/ou
 import { formatResponseTime, outcomeAgeDays } from "@/lib/outcomes";
 import { connectorCatalog } from "@/lib/connectors/catalog";
 import { ConversationImportForm } from "@/components/conversation-import-form";
+import { accountDisplayLabel } from "@/lib/connectors/account-label";
 
 type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
@@ -230,25 +231,39 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
   const [syncing, setSyncing] = useState("");
   const [syncError, setSyncError] = useState("");
   const [syncResult, setSyncResult] = useState("");
-  const syncOutlook = async (connectionId: string) => {
-    setSyncing(connectionId); setSyncError(""); setSyncResult("");
+  const importAccount = async (connection: ChannelConnection) => {
+    const response = await fetch(`/api/connectors/microsoft/sync?connectionId=${connection.id}`, { method: "POST" });
+    const result = await response.json() as { imported?: number; error?: string };
+    if (!response.ok) throw new Error(result.error ?? "The import failed.");
+    return result.imported ?? 0;
+  };
+  const syncOutlook = async (connection: ChannelConnection) => {
+    setSyncing(connection.id); setSyncError(""); setSyncResult("");
     try {
-      const response = await fetch(`/api/connectors/microsoft/sync?connectionId=${connectionId}`, { method: "POST" });
-      const result = await response.json() as { imported?: number; error?: string };
-      if (!response.ok) throw new Error(result.error ?? "The import failed.");
-      setSyncResult(`${result.imported ?? 0} Outlook messages imported. Open Inbox to review them.`);
+      const imported = await importAccount(connection);
+      setSyncResult(imported > 0 ? `${accountDisplayLabel(connection)}: ${imported} Outlook messages imported.` : `${accountDisplayLabel(connection)} is up to date. No new or changed messages were found.`);
       router.refresh();
-    } catch (error) { setSyncError(error instanceof Error ? error.message : "The import failed."); }
+    } catch (error) { setSyncError(`${accountDisplayLabel(connection)}: ${error instanceof Error ? error.message : "The import failed."}`); }
     finally { setSyncing(""); }
+  };
+  const syncAllOutlook = async (accounts: ChannelConnection[]) => {
+    setSyncing("all"); setSyncError(""); setSyncResult("");
+    const results: string[] = []; const errors: string[] = []; let total = 0;
+    for (const account of accounts) {
+      try { const imported = await importAccount(account); total += imported; results.push(`${accountDisplayLabel(account)}: ${imported}`); }
+      catch (error) { errors.push(`${accountDisplayLabel(account)}: ${error instanceof Error ? error.message : "Import failed"}`); }
+    }
+    setSyncResult(`All ${accounts.length} accounts checked · ${total} messages imported. ${results.join(" · ")}`);
+    setSyncError(errors.join(" · "));
+    router.refresh(); setSyncing("");
   };
   const capabilityLabels = { fullSync: "History", incrementalSync: "New messages", pushNotifications: "Live updates", sendWithApproval: "Approved sending" } as const;
   return <div className="page"><PageHeader eyebrow="Universal Communication Connector Foundation V1" title="Connections" subtitle="Every channel now enters the same communication model. A channel is enabled only through an approved connector or manual capture." />{syncResult && <div className="empty-card">{syncResult}</div>}<div className="list">{connectorCatalog.map((connector) => {
     const matchingConnections = connections.filter((item) => item.provider === connector.id);
     const connection = matchingConnections[0];
     const connected = connection?.status === "connected";
-    const account = connection?.accountName ?? connection?.accountIdentifier;
     const lastSync = connection?.lastSyncAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connection.lastSyncAt)) : "Not synchronized yet";
-    return <div className="list-row" key={connector.id}><div className="avatar"><Link2 size={14} /></div><div><strong>{connector.displayName}</strong><small>{account ?? connector.description}</small>{connector.id === "microsoft-graph" && matchingConnections.slice(1).map((item) => <small key={item.id}>Also connected: {item.accountName ?? item.accountIdentifier}</small>)}</div><div className="muted">{connected ? `Connected · Last sync: ${lastSync}` : connector.setupNote}<small>{Object.entries(capabilityLabels).filter(([key]) => connector.capabilities[key as keyof typeof capabilityLabels]).map(([, label]) => label).join(" · ") || "Manual only"}</small>{connector.id === "microsoft-graph" && syncError && <small className="negative">{syncError}</small>}</div><div>{connected && connector.id === "microsoft-graph" ? <div className="connector-actions">{matchingConnections.map((item) => <button className="btn" key={item.id} onClick={() => void syncOutlook(item.id)} disabled={Boolean(syncing)}>{syncing === item.id ? "Importing…" : `Import ${item.accountName ?? "account"}`}</button>)}<a className="btn" href="/api/connectors/microsoft/start">Add another account</a></div> : connector.id === "microsoft-graph" ? <a className="btn" href="/api/connectors/microsoft/start">Connect Outlook</a> : connector.availability === "available" ? <span className="pill"><CheckCircle2 size={11} /> Manual import</span> : <button className="btn" disabled>Planned</button>}</div></div>;
+    return <div className="list-row" key={connector.id}><div className="avatar"><Link2 size={14} /></div><div><strong>{connector.displayName}</strong>{connector.id === "microsoft-graph" && matchingConnections.length > 0 ? matchingConnections.map((item) => <small key={item.id}>{accountDisplayLabel(item)} · {item.status === "connected" ? "Connected" : item.status}</small>) : <small>{connector.description}</small>}</div><div className="muted">{connected ? `Connected · Last sync: ${lastSync}` : connector.setupNote}<small>{Object.entries(capabilityLabels).filter(([key]) => connector.capabilities[key as keyof typeof capabilityLabels]).map(([, label]) => label).join(" · ") || "Manual only"}</small>{connector.id === "microsoft-graph" && syncError && <small className="negative">{syncError}</small>}</div><div>{connected && connector.id === "microsoft-graph" ? <div className="connector-actions">{matchingConnections.length > 1 && <button className="btn primary" onClick={() => void syncAllOutlook(matchingConnections)} disabled={Boolean(syncing)}>{syncing === "all" ? "Importing all…" : "Import all accounts"}</button>}{matchingConnections.map((item) => <button className="btn" key={item.id} onClick={() => void syncOutlook(item)} disabled={Boolean(syncing)}>{syncing === item.id ? "Importing…" : `Import ${accountDisplayLabel(item)}`}</button>)}<a className="btn" href="/api/connectors/microsoft/start">Add another account</a></div> : connector.id === "microsoft-graph" ? <a className="btn" href="/api/connectors/microsoft/start">Connect Outlook</a> : connector.availability === "available" ? <span className="pill"><CheckCircle2 size={11} /> Manual import</span> : <button className="btn" disabled>Planned</button>}</div></div>;
   })}</div></div>;
 }
 function SettingsView({ persona, people }: { persona: UniversalCommunicationProfile; people: CommunicationPersonOption[] }) { return <div className="page"><PageHeader eyebrow="Private workspace" title="Universal communication profile" subtitle="One profile for how you communicate across people, situations and apps." /><div className="section-title"><Sparkles size={14} /> Your verified communication rules</div><p className="subtitle">You control every saved fact. Priority: person and situation first, then channel, then your core profile.</p><PersonaForm initial={persona} people={people} /><div className="cards"><div className="card"><CircleUserRound size={17} /><h3>Account & security</h3><p>Supabase Auth architecture with manual provisioning and mandatory TOTP MFA.</p><span className="pill">MFA required</span></div><div className="card"><Sparkles size={17} /><h3>AI & privacy</h3><p>Only the relevant channel, situation and person profile is sent for the active message.</p><span className="pill">Minimal context</span></div><div className="card"><CheckCircle2 size={17} /><h3>Profile control</h3><p>AI can use your profile but cannot change it or turn an inference into a saved fact.</p><span className="pill">Owner verified</span></div></div></div> }
