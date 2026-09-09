@@ -3,11 +3,21 @@ import { microsoftGraphConnector } from "./microsoft-graph";
 
 export const MICROSOFT_OAUTH_COOKIE_PATH = "/api/connectors/microsoft";
 
+export function microsoftRedirectUri(
+  origin: string,
+  environment?: { MICROSOFT_REDIRECT_URI?: string; VERCEL_PROJECT_PRODUCTION_URL?: string },
+) {
+  const configuredEnvironment = environment ?? process.env;
+  if (configuredEnvironment.MICROSOFT_REDIRECT_URI) return configuredEnvironment.MICROSOFT_REDIRECT_URI;
+  if (configuredEnvironment.VERCEL_PROJECT_PRODUCTION_URL) return `https://${configuredEnvironment.VERCEL_PROJECT_PRODUCTION_URL}/api/connectors/microsoft/callback`;
+  return `${origin}/api/connectors/microsoft/callback`;
+}
+
 export function microsoftConfig(origin: string) {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
   const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
   const tenant = process.env.MICROSOFT_TENANT ?? "common";
-  const redirectUri = process.env.MICROSOFT_REDIRECT_URI ?? `${origin}/api/connectors/microsoft/callback`;
+  const redirectUri = microsoftRedirectUri(origin);
   if (!clientId || !clientSecret) throw new Error("Microsoft OAuth is not configured.");
   if (!/^[a-zA-Z0-9.-]+$/.test(tenant)) throw new Error("Invalid Microsoft tenant configuration.");
   return { clientId, clientSecret, tenant, redirectUri };

@@ -28,6 +28,8 @@ Each connector declares exactly what it can do. Reading history, incremental syn
 
 Each connection represents one specific account, not merely one provider. Multiple Microsoft 365 companies, personal Outlook/Hotmail accounts, Gmail accounts, and manual social identities remain separate through `connection_id` and the owner-supplied account label.
 
+Microsoft OAuth always starts and returns on the stable production domain. Requests initiated from a temporary Vercel Preview are first redirected to production so PKCE/state cookies and the Entra redirect URI remain on the same host.
+
 Conversation screenshots are sent to the configured OpenAI API only after explicit confirmation, with storage disabled, to extract visible text. The image itself is not persisted by the application. Extracted text must be reviewed before database import.
 
 Pasted text, exported files, and screenshots use the same automatic import analysis. It infers the likely channel, participants, topic, intent, priority, recommended action, and an editable reply. Channels without an approved sending API expose Copy reply rather than pretending to send externally.
