@@ -56,8 +56,8 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
 }
 
 function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
-  return <div className="page"><PageHeader eyebrow="Manual & Imported Conversation Connector V1" title="Import conversations" subtitle="Bring communication from any channel into the same intelligence system. You review everything before it is saved." />
-    <div className="section-title"><FileUp size={14} color="#34d399" /> Import a conversation or exported file</div>
+  return <div className="page"><PageHeader eyebrow="Manual & Imported Conversation Connector V1" title="Analyze a conversation" subtitle="Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply." />
+    <div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div>
     <ConversationImportForm />
     <div className="section-title"><MessageCircle size={14} color="#34d399" /> Save one important message</div>
     <CommunicationCaseForm />

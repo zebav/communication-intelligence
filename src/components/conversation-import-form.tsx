@@ -1,47 +1,28 @@
 "use client";
 
-import { useActionState, useMemo, useRef, useState } from "react";
-import { FileUp, LoaderCircle } from "lucide-react";
+import { useActionState, useRef, useState } from "react";
+import { CheckCircle2, Clipboard, FileText, FileUp, Image as ImageIcon, LoaderCircle, Sparkles } from "lucide-react";
 import { importConversation } from "@/app/import/actions";
-import { parseImportedConversation } from "@/lib/connectors/manual-import";
-
-const channels = [["email", "Email / Gmail / Hotmail / Microsoft 365"], ["imessage", "iMessage"], ["linkedin", "LinkedIn"], ["tiktok", "TikTok"], ["instagram", "Instagram"], ["whatsapp", "WhatsApp"], ["messenger", "Messenger"], ["tinder", "Tinder"], ["manual", "Other"]] as const;
+import type { ImportedConversationAnalysis } from "@/lib/connectors/import-analysis";
 
 export function ConversationImportForm() {
   const [state, action, pending] = useActionState(importConversation, undefined);
-  const [transcript, setTranscript] = useState("");
-  const [fileError, setFileError] = useState("");
-  const [image, setImage] = useState<File>();
-  const [imageConsent, setImageConsent] = useState(false);
-  const [readingImage, setReadingImage] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const messages = useMemo(() => parseImportedConversation(transcript), [transcript]);
-  const readFile = async (file?: File) => {
-    setFileError(""); if (!file) return;
-    if (file.size > 500_000) return setFileError("Choose a text, CSV, or JSON export smaller than 500 KB.");
-    if (!/\.(txt|csv|json)$/i.test(file.name)) return setFileError("This first version accepts .txt, .csv, and .json files.");
-    setTranscript(await file.text());
-  };
-  const readScreenshot = async () => {
-    if (!image || !imageConsent) return;
-    setReadingImage(true); setFileError("");
-    try {
-      const form = new FormData(); form.set("image", image); form.set("consent", "yes");
-      const response = await fetch("/api/import/screenshot", { method: "POST", body: form });
-      const result = await response.json() as { transcript?: string; error?: string };
-      if (!response.ok || !result.transcript) throw new Error(result.error ?? "The screenshot could not be read.");
-      setTranscript(result.transcript);
-    } catch (error) { setFileError(error instanceof Error ? error.message : "The screenshot could not be read."); }
-    finally { setReadingImage(false); }
-  };
-  return <form action={action} className="case-form import-form">
-    <div className="case-form-grid"><label>Channel<select name="source" defaultValue="imessage">{channels.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Which of your accounts?<input name="accountLabel" required maxLength={120} placeholder="Microsoft 365 — Company A" /></label><label>Other person<input name="participantName" required maxLength={120} placeholder="Name of the person" /></label><label>Your name in the export<input name="ownerName" required maxLength={120} defaultValue="Me" /></label><label>Conversation title<input name="title" required maxLength={200} placeholder="What is this about?" /></label></div>
-    <div className="import-file"><input ref={fileRef} type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" onChange={(event) => void readFile(event.target.files?.[0])} /><button type="button" className="btn" onClick={() => fileRef.current?.click()}><FileUp size={13} /> Choose exported file</button><span>or paste below</span></div>
-    <div className="screenshot-import"><strong>Import from screenshot</strong><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setImage(event.target.files?.[0])} /><label className="import-confirm"><input type="checkbox" checked={imageConsent} onChange={(event) => setImageConsent(event.target.checked)} /> Send this image temporarily to OpenAI to extract visible text. The image is not saved by this app.</label><button type="button" className="btn" disabled={!image || !imageConsent || readingImage} onClick={() => void readScreenshot()}>{readingImage ? <LoaderCircle className="spin" size={13} /> : <FileUp size={13} />} {readingImage ? "Reading image…" : "Read screenshot"}</button></div>
-    {fileError && <span className="form-message error">{fileError}</span>}
-    <label>Conversation<textarea name="transcript" required maxLength={500000} value={transcript} onChange={(event) => setTranscript(event.target.value)} placeholder={'[2026-09-09 10:00] Anna: Hello\n[2026-09-09 10:02] Me: Hi Anna'} /></label>
-    {messages.length > 0 && <div className="import-preview"><strong>Review before saving · {messages.length} message(s) found</strong>{messages.slice(0, 3).map((message, index) => <div key={index}><span>{message.sender}</span><p>{message.body}</p></div>)}{messages.length > 3 && <small>First 3 messages shown.</small>}</div>}
-    <label className="import-confirm"><input type="checkbox" name="confirmed" value="yes" required /> I reviewed the channel, account, person, and message directions.</label>
-    <div className="case-form-footer"><div aria-live="polite">{state?.error && <span className="form-message error">{state.error}</span>}{state?.success && <span className="form-message success">{state.success}</span>}</div><button className="btn primary" type="submit" disabled={pending || !transcript.trim()}>{pending ? <LoaderCircle className="spin" size={13} /> : <FileUp size={13} />} {pending ? "Importing…" : "Import reviewed conversation"}</button></div>
+  const [raw, setRaw] = useState(""); const [analysis, setAnalysis] = useState<ImportedConversationAnalysis>();
+  const [working, setWorking] = useState(false); const [error, setError] = useState(""); const [copied, setCopied] = useState(false);
+  const textFile = useRef<HTMLInputElement>(null); const imageFile = useRef<HTMLInputElement>(null);
+  const acceptAnalysis = (result: ImportedConversationAnalysis) => { setAnalysis(result); setRaw(result.transcript); };
+  const analyzeText = async (text = raw) => { if (!text.trim()) return; setWorking(true); setError(""); setAnalysis(undefined); try { const response = await fetch("/api/import/analyze", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ transcript: text }) }); const result = await response.json() as ImportedConversationAnalysis & { error?: string }; if (!response.ok) throw new Error(result.error); acceptAnalysis(result); } catch (cause) { setError(cause instanceof Error ? cause.message : "The conversation could not be analyzed."); } finally { setWorking(false); } };
+  const analyzeImage = async (file?: File) => { if (!file) return; setWorking(true); setError(""); setAnalysis(undefined); try { const form = new FormData(); form.set("image", file); form.set("consent", "yes"); const response = await fetch("/api/import/screenshot", { method: "POST", body: form }); const result = await response.json() as ImportedConversationAnalysis & { error?: string }; if (!response.ok) throw new Error(result.error); acceptAnalysis(result); } catch (cause) { setError(cause instanceof Error ? cause.message : "The screenshot could not be analyzed."); } finally { setWorking(false); } };
+  const chooseTextFile = async (file?: File) => { if (!file) return; if (file.size > 500_000) return setError("Choose a TXT, CSV, or JSON file smaller than 500 KB."); const text = await file.text(); setRaw(text); await analyzeText(text); };
+  const copyReply = async () => { if (!analysis?.draftResponse) return; await navigator.clipboard.writeText(analysis.draftResponse); setCopied(true); setTimeout(() => setCopied(false), 1800); };
+  return <form action={action} className="case-form import-form simple-import">
+    <div className="import-choice"><input ref={textFile} hidden type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" onChange={(event) => void chooseTextFile(event.target.files?.[0])} /><input ref={imageFile} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void analyzeImage(event.target.files?.[0])} /><button type="button" className="import-choice-button" onClick={() => imageFile.current?.click()}><ImageIcon size={18} /><strong>Upload screenshot</strong><span>PNG, JPEG or WebP</span></button><button type="button" className="import-choice-button" onClick={() => textFile.current?.click()}><FileText size={18} /><strong>Upload conversation</strong><span>TXT, CSV or JSON</span></button></div>
+    <div className="import-divider"><span>or paste a conversation</span></div>
+    <textarea className="simple-import-text" value={raw} onChange={(event) => { setRaw(event.target.value); setAnalysis(undefined); }} onPaste={(event) => { const text = event.clipboardData.getData("text"); if (text.trim()) setTimeout(() => void analyzeText(text), 0); }} placeholder="Paste the conversation here. The system will identify the platform, person, topic and your next reply." />
+    {!analysis && <button type="button" className="btn primary analyze-import-button" onClick={() => void analyzeText()} disabled={working || !raw.trim()}>{working ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />} {working ? "Reading and analyzing…" : "Analyze conversation"}</button>}
+    <p className="import-privacy">Analyzing sends the text or image temporarily to the configured OpenAI API. API storage is disabled and screenshots are not saved by the app.</p>{error && <div className="empty-card negative">{error}</div>}
+    {analysis && <div className="import-analysis"><div className="import-detected"><span>{analysis.source}</span><span>{analysis.participantName}</span><span>{analysis.title}</span><span>Priority {analysis.priorityScore}/10</span></div><section><small>What this is about</small><p>{analysis.summary}</p></section><section><small>Likely intent</small><p>{analysis.intent}</p></section><section className="import-reply"><div><small>Suggested reply · {analysis.draftTone}</small><button type="button" className="btn" onClick={() => void copyReply()}>{copied ? <CheckCircle2 size={13} /> : <Clipboard size={13} />} {copied ? "Copied" : "Copy reply"}</button></div>{analysis.draftResponse ? <textarea value={analysis.draftResponse} onChange={(event) => setAnalysis({ ...analysis, draftResponse: event.target.value })} /> : <p>{analysis.recommendedAction}</p>}</section>
+      <input type="hidden" name="source" value={analysis.source} /><input type="hidden" name="accountLabel" value={analysis.accountLabel} /><input type="hidden" name="participantName" value={analysis.participantName} /><input type="hidden" name="ownerName" value={analysis.ownerName} /><input type="hidden" name="title" value={analysis.title} /><input type="hidden" name="transcript" value={analysis.transcript} /><input type="hidden" name="summary" value={analysis.summary} /><input type="hidden" name="intent" value={analysis.intent} /><input type="hidden" name="priorityScore" value={analysis.priorityScore} /><input type="hidden" name="recommendedAction" value={analysis.recommendedAction} /><input type="hidden" name="draftResponse" value={analysis.draftResponse} /><input type="hidden" name="draftTone" value={analysis.draftTone} /><input type="hidden" name="confirmed" value="yes" />
+      <div className="case-form-footer"><div aria-live="polite">{state?.error && <span className="form-message error">{state.error}</span>}{state?.success && <span className="form-message success">{state.success}</span>}</div><button className="btn primary" type="submit" disabled={pending}>{pending ? <LoaderCircle className="spin" size={13} /> : <FileUp size={13} />} {pending ? "Saving…" : "Save conversation"}</button></div></div>}
   </form>;
 }

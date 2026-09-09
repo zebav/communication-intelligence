@@ -30,4 +30,6 @@ Each connection represents one specific account, not merely one provider. Multip
 
 Conversation screenshots are sent to the configured OpenAI API only after explicit confirmation, with storage disabled, to extract visible text. The image itself is not persisted by the application. Extracted text must be reviewed before database import.
 
+Pasted text, exported files, and screenshots use the same automatic import analysis. It infers the likely channel, participants, topic, intent, priority, recommended action, and an editable reply. Channels without an approved sending API expose Copy reply rather than pretending to send externally.
+
 Adding a provider requires a catalog entry, a provider adapter, normalization tests, permission review, and an explicit owner-controlled connection flow.

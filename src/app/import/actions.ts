@@ -11,6 +11,8 @@ const schema = z.object({
   accountLabel: z.string().trim().min(1).max(120), participantName: z.string().trim().min(1).max(120),
   ownerName: z.string().trim().min(1).max(120), title: z.string().trim().min(1).max(200),
   transcript: z.string().trim().min(1).max(500_000), confirmed: z.literal("yes"),
+  summary: z.string().trim().max(600).optional(), intent: z.string().trim().max(400).optional(), priorityScore: z.coerce.number().min(1).max(10).optional(),
+  recommendedAction: z.string().trim().max(120).optional(), draftResponse: z.string().max(4000).optional(), draftTone: z.string().max(120).optional(),
 });
 
 export async function importConversation(_: ImportConversationState, formData: FormData): Promise<ImportConversationState> {
@@ -42,9 +44,9 @@ export async function importConversation(_: ImportConversationState, formData: F
   const importId = crypto.randomUUID();
   const now = new Date();
   const sentTimes = lines.map((line, index) => validImportedDate(line.sentAt, new Date(now.getTime() - (lines.length - index) * 1000)));
-  const { data: conversation, error: conversationError } = await supabase.from("conversations").insert({ owner_id: user.id, person_id: person.id, connection_id: connection.id, source: parsed.data.source, external_conversation_id: `manual-import-${importId}`, title: parsed.data.title, conversation_type: "imported", last_message_at: sentTimes.at(-1), summary: lines.at(-1)?.body.slice(0, 300) }).select("id").single();
+  const { data: conversation, error: conversationError } = await supabase.from("conversations").insert({ owner_id: user.id, person_id: person.id, connection_id: connection.id, source: parsed.data.source, external_conversation_id: `manual-import-${importId}`, title: parsed.data.title, conversation_type: "imported", last_message_at: sentTimes.at(-1), summary: parsed.data.summary || lines.at(-1)?.body.slice(0, 300), priority_score: parsed.data.priorityScore, recommended_action: { action: parsed.data.recommendedAction, intent: parsed.data.intent, imported_analysis: true } }).select("id").single();
   if (conversationError || !conversation) return { error: "The imported conversation could not be saved." };
-  const messages = lines.map((line, index) => ({ owner_id: user.id, conversation_id: conversation.id, external_message_id: `manual-import-${importId}-${index}`, direction: line.sender.toLowerCase() === parsed.data.ownerName.toLowerCase() ? "out" : "in", source: parsed.data.source, body_text: line.body, sent_at: sentTimes[index], processed_at: null, metadata: { provider, account_label: parsed.data.accountLabel, imported_sender: line.sender, owner_reviewed: true } }));
+  const messages = lines.map((line, index) => ({ owner_id: user.id, conversation_id: conversation.id, external_message_id: `manual-import-${importId}-${index}`, direction: line.sender.toLowerCase() === parsed.data.ownerName.toLowerCase() ? "out" : "in", source: parsed.data.source, body_text: line.body, sent_at: sentTimes[index], processed_at: null, metadata: { provider, account_label: parsed.data.accountLabel, imported_sender: line.sender, owner_reviewed: true, ...(index === lines.length - 1 ? { ai_analysis: { summary: parsed.data.summary, intent: parsed.data.intent, priorityScore: parsed.data.priorityScore, recommendedAction: parsed.data.recommendedAction, draftResponse: parsed.data.draftResponse, draftTone: parsed.data.draftTone } } : {}) } }));
   const { error: messageError } = await supabase.from("messages").insert(messages);
   if (messageError) { await supabase.from("conversations").delete().eq("id", conversation.id).eq("owner_id", user.id); return { error: "The imported messages could not be saved." }; }
   await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "conversation.imported", object_type: "conversation", object_id: conversation.id, source: parsed.data.source, actor_type: "user", new_value: { provider, account_label: parsed.data.accountLabel, message_count: messages.length } });
