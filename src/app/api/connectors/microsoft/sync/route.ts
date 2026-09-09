@@ -85,10 +85,12 @@ export async function POST(request: NextRequest) {
     userId = user.id;
   }
 
-  const { data: connection, error: connectionError } = await supabase.from("connections")
+  const requestedConnectionId = request.nextUrl.searchParams.get("connectionId");
+  let connectionQuery = supabase.from("connections")
     .select("id,encrypted_credentials,token_metadata,last_sync_at")
-    .eq("owner_id", userId).eq("provider", microsoftGraphConnector.id).eq("status", "connected")
-    .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    .eq("owner_id", userId).eq("provider", microsoftGraphConnector.id).eq("status", "connected");
+  if (requestedConnectionId) connectionQuery = connectionQuery.eq("id", requestedConnectionId);
+  const { data: connection, error: connectionError } = await connectionQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (connectionError || !connection?.encrypted_credentials) return jsonError("Connect Outlook before importing messages.", 409);
   if (request.headers.get("x-sync-trigger") === "automatic" && connection.last_sync_at && Date.now() - new Date(connection.last_sync_at).getTime() < 5 * 60 * 1000) {
     return NextResponse.json({ imported: 0, skipped: true, syncedAt: connection.last_sync_at });
@@ -174,7 +176,7 @@ export async function POST(request: NextRequest) {
       const { data: existingConversation } = await supabase.from("conversations").select("id")
         .eq("owner_id", userId).eq("source", normalized.source).eq("external_conversation_id", normalized.externalConversationId).maybeSingle();
       const conversationValues = {
-        owner_id: userId, person_id: personId, source: normalized.source, external_conversation_id: normalized.externalConversationId,
+        owner_id: userId, person_id: personId, connection_id: connection.id, source: normalized.source, external_conversation_id: normalized.externalConversationId,
         title: normalized.subject || "(No subject)", conversation_type: normalized.channelKind, priority_score: priority,
         last_message_at: sentAt, last_other_message_at: sentAt, summary: content.text.slice(0, 300),
         recommended_action: { action, reason: `Initial rule-based classification: ${classification}`, relevance_reasons: relevance.reasons }, updated_at: new Date().toISOString(),

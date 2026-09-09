@@ -2,6 +2,7 @@ import type { Source } from "@/lib/domain";
 
 const guidance: Record<Source, string> = {
   email: "Use an email structure when useful: clear opening, complete answer, and appropriate sign-off.",
+  imessage: "Use a natural, concise chat style that matches the existing personal relationship.",
   instagram: "Use a concise direct-message style and preserve the relationship's established tone.",
   whatsapp: "Use a conversational chat style, short paragraphs, and avoid unnecessary formality.",
   messenger: "Use a concise direct-message style and make the next action easy to understand.",

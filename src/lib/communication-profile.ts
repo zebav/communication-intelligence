@@ -2,6 +2,7 @@ import type { CommunicationSituation, Source, UniversalCommunicationProfile } fr
 
 export const communicationChannels: { id: Source; label: string }[] = [
   { id: "email", label: "Email" }, { id: "whatsapp", label: "WhatsApp" },
+  { id: "imessage", label: "iMessage" },
   { id: "instagram", label: "Instagram" }, { id: "linkedin", label: "LinkedIn" },
   { id: "messenger", label: "Messenger" }, { id: "tinder", label: "Tinder" },
   { id: "tiktok", label: "TikTok" }, { id: "manual", label: "Other / manual" },

@@ -33,9 +33,12 @@ export async function POST(request: NextRequest) {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return jsonError("Two-factor authentication is required.", 403);
 
-  const { data: message } = await supabase.from("messages").select("external_message_id,conversations(person_id)").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
+  const { data: message } = await supabase.from("messages").select("external_message_id,conversations(person_id,connection_id)").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
   if (!message?.external_message_id) return jsonError("The Outlook message could not be found.", 404);
-  const { data: connection } = await supabase.from("connections").select("id,encrypted_credentials,token_metadata").eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
+  let connectionQuery = supabase.from("connections").select("id,encrypted_credentials,token_metadata").eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected");
+  if (linkedConversation?.connection_id) connectionQuery = connectionQuery.eq("id", linkedConversation.connection_id);
+  const { data: connection } = await connectionQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (!connection?.encrypted_credentials) return jsonError("Connect Outlook again before sending.", 409);
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!encryptionKey) return jsonError("The server encryption key is not configured.");
@@ -68,7 +71,6 @@ export async function POST(request: NextRequest) {
       if (learningError) console.error("Reply sent but learning signal could not be saved", learningError.code);
     }
     if (persistedMessage?.id) {
-      const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
       const { data: waitingOutcome } = await supabase.from("communication_outcomes").select("id").eq("owner_id", user.id).eq("conversation_id", parsed.data.conversationId).eq("status", "waiting").order("created_at", { ascending: false }).limit(1).maybeSingle();
       const outcomeResult = waitingOutcome
         ? await supabase.from("communication_outcomes").update({ trigger_message_id: persistedMessage.id, person_id: linkedConversation?.person_id, desired_outcome: parsed.data.desiredOutcome ?? "Receive a useful reply or advance the conversation", updated_at: sentAt }).eq("id", waitingOutcome.id).eq("owner_id", user.id)
