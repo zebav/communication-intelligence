@@ -114,12 +114,25 @@ export interface LearningSignal {
   personName?: string;
   conversationTitle?: string;
   source: Source;
-  signalType: "draft_accepted" | "draft_edited" | "tone_requested" | "category_corrected";
+  signalType: "draft_accepted" | "draft_edited" | "tone_requested" | "category_corrected" | "outcome_confirmed";
   observation: string;
   proposedRule: string;
   confidence: number;
   status: "suggested" | "approved" | "dismissed";
   createdAt: string;
+}
+
+export interface CommunicationOutcome {
+  id: string;
+  personName: string;
+  conversationTitle: string;
+  desiredOutcome: string;
+  status: "waiting" | "reply_received" | "resolved" | "follow_up_needed" | "unknown";
+  ownerRating?: "successful" | "neutral" | "unsuccessful";
+  responseTimeMinutes?: number;
+  userConfirmed: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function calculateAttention(dimensions: ScoreDimension[]): number {

@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 export type DraftLearning = {
   signalType: "draft_accepted" | "draft_edited";
   observation: string;
@@ -54,4 +56,3 @@ export async function saveLearningSuggestion(supabase: SupabaseClient, suggestio
   if (result.error?.code === "23505") return { ...result, error: null };
   return result;
 }
-import type { SupabaseClient } from "@supabase/supabase-js";

@@ -9,6 +9,7 @@ import { isAuthorizedCron } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
+import { responseTimeMinutes } from "@/lib/outcomes";
 import { z } from "zod";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
@@ -181,15 +182,21 @@ export async function POST(request: NextRequest) {
         ? await supabase.from("conversations").update(conversationValues).eq("id", existingConversation.id).select("id").single()
         : await supabase.from("conversations").insert(conversationValues).select("id").single();
       if (conversationResult.error || !conversationResult.data) throw new Error("conversation_save_failed");
-      const { error: messageError } = await supabase.from("messages").upsert({
+      const { data: savedIncoming, error: messageError } = await supabase.from("messages").upsert({
         owner_id: userId, conversation_id: conversationResult.data.id, external_message_id: message.id,
         direction: "in", sender_identity_id: identityId, source: "email", body_text: content.text,
         sent_at: sentAt, classification, importance_score: priority,
         attachment_count: message.hasAttachments ? 1 : 0,
         metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated },
         processed_at: new Date().toISOString(),
-      }, { onConflict: "owner_id,source,external_message_id" });
+      }, { onConflict: "owner_id,source,external_message_id" }).select("id").single();
       if (messageError) throw new Error("message_save_failed");
+      const { data: waitingOutcome } = await supabase.from("communication_outcomes").select("id,trigger_message_id").eq("owner_id", userId).eq("conversation_id", conversationResult.data.id).eq("status", "waiting").order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (waitingOutcome && savedIncoming?.id) {
+        const { data: trigger } = await supabase.from("messages").select("sent_at").eq("id", waitingOutcome.trigger_message_id).eq("owner_id", userId).maybeSingle();
+        const responseMinutes = trigger?.sent_at ? responseTimeMinutes(trigger.sent_at, sentAt) : null;
+        if (responseMinutes != null) await supabase.from("communication_outcomes").update({ response_message_id: savedIncoming.id, status: "reply_received", response_time_minutes: responseMinutes, evidence: { provider: microsoftGraphConnector.id, detection: "later_incoming_message" }, updated_at: new Date().toISOString() }).eq("id", waitingOutcome.id).eq("owner_id", userId);
+      }
       imported += 1;
       }
 
