@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { analyzeImportedConversation } from "@/lib/connectors/import-analysis";
 
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   if (request.headers.get("origin") !== request.nextUrl.origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
@@ -18,6 +19,6 @@ export async function POST(request: NextRequest) {
   if (!allowedTypes.has(image.type) || image.size > 8_000_000) return NextResponse.json({ error: "Use a PNG, JPEG, or WebP image smaller than 8 MB." }, { status: 400 });
   const imageUrl = `data:${image.type};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
   try {
-    return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, content: [{ type: "input_text", text: "Read and analyze this conversation screenshot." }, { type: "input_image", image_url: imageUrl, detail: "high" }] }));
-  } catch { return NextResponse.json({ error: "The screenshot could not be read and analyzed. Try a clearer image." }, { status: 502 }); }
+    return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, model: process.env.OPENAI_VISION_MODEL || "gpt-5", content: [{ type: "input_text", text: "Read and analyze this conversation screenshot." }, { type: "input_image", image_url: imageUrl, detail: "high" }] }));
+  } catch (error) { console.error("Screenshot import failed", { reason: error instanceof Error ? error.message : "unknown" }); return NextResponse.json({ error: "The image service could not complete the analysis. Please try again." }, { status: 502 }); }
 }
