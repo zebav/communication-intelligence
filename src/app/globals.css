@@ -116,6 +116,7 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
 .list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .list-row { display: grid; grid-template-columns: 44px 1.2fr 1.5fr 110px; gap: 12px; align-items: center; padding: 13px 15px; border-bottom: 1px solid var(--line); font-size: 12px; }.list-row:last-child { border: 0; }.list-row small { color: var(--muted); display: block; margin-top: 3px; }
+.connector-actions { display: grid; justify-items: start; gap: 7px; }.connector-actions .pill { margin-top: 0; }
 .people-page { max-width: 1440px; }
 .people-layout { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 14px; align-items: start; }
 .people-list, .person-detail { border: 1px solid var(--line); background: var(--panel); border-radius: 11px; overflow: hidden; }

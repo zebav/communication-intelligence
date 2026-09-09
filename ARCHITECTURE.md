@@ -20,3 +20,7 @@ Communication Intelligence starts as a modular Next.js monolith. The browser sur
 - Future connectors must normalize provider data before it reaches domain services.
 
 Incoming data will follow: connector → normalize → deduplicate → resolve identity → persist → classify → summarize → detect commitments → score → recommend → optionally draft.
+
+## Universal connector foundation
+
+`src/lib/connectors` owns the provider-neutral contract, connector catalog, capability declarations, normalization, and channel-specific writing guidance. Outlook is the first adapter using this boundary; it is not the domain model. Instagram, Messenger, WhatsApp, and future approved providers must produce the same normalized message before shared intelligence runs. See `CONNECTORS.md` for the implementation checklist and current availability.

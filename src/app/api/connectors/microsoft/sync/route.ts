@@ -5,6 +5,7 @@ import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { initialInboxDeltaUrl, validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
 import { extractMicrosoftMessageText, type MicrosoftItemBody } from "@/lib/connectors/microsoft-message";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
+import { normalizeCommunicationMessage } from "@/lib/connectors/normalization";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -156,8 +157,8 @@ export async function POST(request: NextRequest) {
         identityId = newIdentity.id;
       }
 
-      const externalConversationId = message.conversationId ?? message.id;
       const content = extractMicrosoftMessageText(message);
+      const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "in", senderIdentifier: address, senderName: displayName, subject: message.subject, body: content.text, sentAt: message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated } });
       const classification = classifyEmail({ subject: message.subject, preview: content.text, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
       const basePriority = emailPriority(classification, message.importance);
       const { data: senderPreferences } = await supabase.from("people").select("relationship_type,manual_priority,email_handling_rule,sender_preferences_verified").eq("id", personId).eq("owner_id", userId).maybeSingle();
@@ -169,12 +170,12 @@ export async function POST(request: NextRequest) {
       });
       const priority = relevance.score;
       const action = recommendedEmailAction(classification);
-      const sentAt = message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString();
+      const sentAt = normalized.sentAt;
       const { data: existingConversation } = await supabase.from("conversations").select("id")
-        .eq("owner_id", userId).eq("source", "email").eq("external_conversation_id", externalConversationId).maybeSingle();
+        .eq("owner_id", userId).eq("source", normalized.source).eq("external_conversation_id", normalized.externalConversationId).maybeSingle();
       const conversationValues = {
-        owner_id: userId, person_id: personId, source: "email", external_conversation_id: externalConversationId,
-        title: message.subject || "(No subject)", conversation_type: "email", priority_score: priority,
+        owner_id: userId, person_id: personId, source: normalized.source, external_conversation_id: normalized.externalConversationId,
+        title: normalized.subject || "(No subject)", conversation_type: normalized.channelKind, priority_score: priority,
         last_message_at: sentAt, last_other_message_at: sentAt, summary: content.text.slice(0, 300),
         recommended_action: { action, reason: `Initial rule-based classification: ${classification}`, relevance_reasons: relevance.reasons }, updated_at: new Date().toISOString(),
       };
@@ -183,11 +184,11 @@ export async function POST(request: NextRequest) {
         : await supabase.from("conversations").insert(conversationValues).select("id").single();
       if (conversationResult.error || !conversationResult.data) throw new Error("conversation_save_failed");
       const { data: savedIncoming, error: messageError } = await supabase.from("messages").upsert({
-        owner_id: userId, conversation_id: conversationResult.data.id, external_message_id: message.id,
-        direction: "in", sender_identity_id: identityId, source: "email", body_text: content.text,
+        owner_id: userId, conversation_id: conversationResult.data.id, external_message_id: normalized.externalId,
+        direction: normalized.direction, sender_identity_id: identityId, source: normalized.source, body_text: normalized.body,
         sent_at: sentAt, classification, importance_score: priority,
-        attachment_count: message.hasAttachments ? 1 : 0,
-        metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated },
+        attachment_count: normalized.attachmentCount,
+        metadata: normalized.providerMetadata,
         processed_at: new Date().toISOString(),
       }, { onConflict: "owner_id,source,external_message_id" }).select("id").single();
       if (messageError) throw new Error("message_save_failed");
@@ -220,15 +221,16 @@ export async function POST(request: NextRequest) {
         if (!message.id || !message.conversationId) continue;
         const content = extractMicrosoftMessageText(message);
         if (!content.text) continue;
+        const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "out", subject: message.subject, body: content.text, sentAt: message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, style_reference: true, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated } });
         const { data: matchingConversation } = await supabase.from("conversations").select("id")
-          .eq("owner_id", userId).eq("source", "email").eq("external_conversation_id", message.conversationId).maybeSingle();
+          .eq("owner_id", userId).eq("source", normalized.source).eq("external_conversation_id", normalized.externalConversationId).maybeSingle();
         if (!matchingConversation) continue;
-        const sentAt = message.sentDateTime ?? new Date().toISOString();
+        const sentAt = normalized.sentAt;
         const { error: sentMessageError } = await supabase.from("messages").upsert({
-          owner_id: userId, conversation_id: matchingConversation.id, external_message_id: message.id,
-          direction: "out", source: "email", body_text: content.text, sent_at: sentAt,
-          attachment_count: message.hasAttachments ? 1 : 0,
-          metadata: { provider: microsoftGraphConnector.id, internet_message_id: message.internetMessageId, style_reference: true, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated },
+          owner_id: userId, conversation_id: matchingConversation.id, external_message_id: normalized.externalId,
+          direction: normalized.direction, source: normalized.source, body_text: normalized.body, sent_at: sentAt,
+          attachment_count: normalized.attachmentCount,
+          metadata: normalized.providerMetadata,
         }, { onConflict: "owner_id,source,external_message_id" });
         if (!sentMessageError) {
           styleSamples += 1;

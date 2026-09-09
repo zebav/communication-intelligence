@@ -135,6 +135,16 @@ export interface CommunicationOutcome {
   updatedAt: string;
 }
 
+export interface ChannelConnection {
+  provider: string;
+  accountName?: string;
+  accountIdentifier?: string;
+  status: string;
+  healthStatus: string;
+  lastSyncAt?: string;
+  capabilities: Record<string, boolean>;
+}
+
 export function calculateAttention(dimensions: ScoreDimension[]): number {
   const total = 5 + dimensions.reduce((sum, item) => sum + item.value, 0);
   return Math.round(Math.min(10, Math.max(1, total)) * 10) / 10;
