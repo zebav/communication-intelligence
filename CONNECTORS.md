@@ -18,9 +18,16 @@ Each connector declares exactly what it can do. Reading history, incremental syn
 | --- | --- | --- |
 | Outlook / Microsoft 365 | Implemented | OAuth, history import, incremental sync, approved send |
 | Manual capture | Available | Owner-provided communication |
+| Manual/file/screenshot import | Available | Reviewed text, CSV, JSON, PNG, JPEG, or WebP imports linked to an exact account label |
+| iMessage | Manual import available | No Apple account access requested |
+| Gmail / Google Workspace | Manual import available | Direct OAuth connector planned |
 | Instagram Professional | Planned | Official Meta integration for eligible professional accounts |
 | Messenger Page | Planned | Official Meta Page integration |
 | WhatsApp Business | Planned | Official business platform and webhooks |
-| Tinder | Planned manual path | No account automation without an approved provider API |
+| LinkedIn / TikTok / Tinder | Manual import available | No account automation without an approved provider API |
+
+Each connection represents one specific account, not merely one provider. Multiple Microsoft 365 companies, personal Outlook/Hotmail accounts, Gmail accounts, and manual social identities remain separate through `connection_id` and the owner-supplied account label.
+
+Conversation screenshots are sent to the configured OpenAI API only after explicit confirmation, with storage disabled, to extract visible text. The image itself is not persisted by the application. Extracted text must be reviewed before database import.
 
 Adding a provider requires a catalog entry, a provider adapter, normalization tests, permission review, and an explicit owner-controlled connection flow.

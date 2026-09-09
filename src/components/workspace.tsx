@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
+import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
 import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
 import { cleanups, conversations } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
@@ -18,17 +18,18 @@ import { reviewLearningSignal } from "@/app/intelligence/actions";
 import { deleteCommunicationOutcome, reviewCommunicationOutcome } from "@/app/outcomes/actions";
 import { formatResponseTime, outcomeAgeDays } from "@/lib/outcomes";
 import { connectorCatalog } from "@/lib/connectors/catalog";
+import { ConversationImportForm } from "@/components/conversation-import-form";
 
 type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
   { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "People", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
-const sources = ["Email", "Instagram", "WhatsApp", "Messenger", "Tinder", "TikTok", "LinkedIn"];
+const sources = ["Email", "iMessage", "Instagram", "WhatsApp", "Messenger", "Tinder", "TikTok", "LinkedIn"];
 const EMAIL_CATEGORIES = ["Relevant", "Filtered out", "All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
 export function Workspace({ userEmail, communicationCases, connections, syncedEmails, followUps, outcomes, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
   const router = useRouter();
-  const microsoftConnection = connections.find((item) => item.provider === "microsoft-graph") ?? null;
+  const microsoftConnections = connections.filter((item) => item.provider === "microsoft-graph");
   const automaticSyncStarted = useRef(false);
   const automaticAnalysisInFlight = useRef(false);
   const automaticAnalysisFailures = useRef(new Set<string>());
@@ -36,7 +37,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const [view, setView] = useState<View>("today");
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
-  useEffect(() => { if (!microsoftConnection || automaticSyncStarted.current) return; const lastSync = microsoftConnection.lastSyncAt ? new Date(microsoftConnection.lastSyncAt).getTime() : 0; if (Date.now() - lastSync < 5 * 60 * 1000) return; automaticSyncStarted.current = true; void fetch("/api/connectors/microsoft/sync", { method: "POST", headers: { "x-sync-trigger": "automatic" } }).then((response) => { if (response.ok) router.refresh(); }).catch(() => undefined); }, [microsoftConnection, router]);
+  useEffect(() => { if (!microsoftConnections.length || automaticSyncStarted.current) return; const due = microsoftConnections.filter((connection) => !connection.lastSyncAt || Date.now() - new Date(connection.lastSyncAt).getTime() >= 5 * 60 * 1000); if (!due.length) return; automaticSyncStarted.current = true; void Promise.all(due.map((connection) => fetch(`/api/connectors/microsoft/sync?connectionId=${connection.id}`, { method: "POST", headers: { "x-sync-trigger": "automatic" } }))).then(() => router.refresh()).catch(() => undefined); }, [microsoftConnections, router]);
   useEffect(() => { const next = syncedEmails.find((email) => email.messageId && isRelevantEmail(email.classification) && !email.analysis && !automaticAnalysisFailures.current.has(email.messageId)); if (!next || automaticAnalysisInFlight.current) return; automaticAnalysisInFlight.current = true; void analyzeEmailWithAI({ messageId: next.messageId, conversationId: next.id }).then((result) => { if (result.error) automaticAnalysisFailures.current.add(next.messageId); else router.refresh(); }).finally(() => { automaticAnalysisInFlight.current = false; }); }, [router, syncedEmails]);
   return <div className="workspace">
     <aside className="sidebar">
@@ -55,8 +56,10 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
 }
 
 function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
-  return <div className="page"><PageHeader eyebrow="Supabase workspace" title="Communication cases" subtitle="Capture an important communication and keep it securely in your private workspace." />
-    <div className="section-title"><MessageCircle size={14} color="#34d399" /> Create a new case</div>
+  return <div className="page"><PageHeader eyebrow="Manual & Imported Conversation Connector V1" title="Import conversations" subtitle="Bring communication from any channel into the same intelligence system. You review everything before it is saved." />
+    <div className="section-title"><FileUp size={14} color="#34d399" /> Import a conversation or exported file</div>
+    <ConversationImportForm />
+    <div className="section-title"><MessageCircle size={14} color="#34d399" /> Save one important message</div>
     <CommunicationCaseForm />
     <div className="section-title">Saved cases <span className="count">{cases.length}</span></div>
     {cases.length === 0 ? <div className="empty-card">No cases saved yet. Use the form above to create the first one.</div> : <div className="case-list">{cases.map((item) => <article className="case-item" key={item.id}><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><div className="case-title"><strong>{item.title}</strong><span className="tag">{item.source}</span></div><span className="case-person">{item.personName} · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</span><p>{item.message}</p></div></article>)}</div>}
@@ -224,27 +227,28 @@ function Intelligence({ items }: { items: LearningSignal[] }) {
 }
 function Connections({ connections }: { connections: ChannelConnection[] }) {
   const router = useRouter();
-  const [syncing, setSyncing] = useState(false);
+  const [syncing, setSyncing] = useState("");
   const [syncError, setSyncError] = useState("");
   const [syncResult, setSyncResult] = useState("");
-  const syncOutlook = async () => {
-    setSyncing(true); setSyncError(""); setSyncResult("");
+  const syncOutlook = async (connectionId: string) => {
+    setSyncing(connectionId); setSyncError(""); setSyncResult("");
     try {
-      const response = await fetch("/api/connectors/microsoft/sync", { method: "POST" });
+      const response = await fetch(`/api/connectors/microsoft/sync?connectionId=${connectionId}`, { method: "POST" });
       const result = await response.json() as { imported?: number; error?: string };
       if (!response.ok) throw new Error(result.error ?? "The import failed.");
       setSyncResult(`${result.imported ?? 0} Outlook messages imported. Open Inbox to review them.`);
       router.refresh();
     } catch (error) { setSyncError(error instanceof Error ? error.message : "The import failed."); }
-    finally { setSyncing(false); }
+    finally { setSyncing(""); }
   };
   const capabilityLabels = { fullSync: "History", incrementalSync: "New messages", pushNotifications: "Live updates", sendWithApproval: "Approved sending" } as const;
   return <div className="page"><PageHeader eyebrow="Universal Communication Connector Foundation V1" title="Connections" subtitle="Every channel now enters the same communication model. A channel is enabled only through an approved connector or manual capture." />{syncResult && <div className="empty-card">{syncResult}</div>}<div className="list">{connectorCatalog.map((connector) => {
-    const connection = connections.find((item) => item.provider === connector.id);
+    const matchingConnections = connections.filter((item) => item.provider === connector.id);
+    const connection = matchingConnections[0];
     const connected = connection?.status === "connected";
     const account = connection?.accountName ?? connection?.accountIdentifier;
     const lastSync = connection?.lastSyncAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connection.lastSyncAt)) : "Not synchronized yet";
-    return <div className="list-row" key={connector.id}><div className="avatar"><Link2 size={14} /></div><div><strong>{connector.displayName}</strong><small>{account ?? connector.description}</small></div><div className="muted">{connected ? `Connected · Last sync: ${lastSync}` : connector.setupNote}<small>{Object.entries(capabilityLabels).filter(([key]) => connector.capabilities[key as keyof typeof capabilityLabels]).map(([, label]) => label).join(" · ") || "Manual only"}</small>{connector.id === "microsoft-graph" && syncError && <small className="negative">{syncError}</small>}</div><div>{connected && connector.id === "microsoft-graph" ? <div className="connector-actions"><span className="pill"><CheckCircle2 size={11} /> Connected</span><button className="btn" onClick={() => void syncOutlook()} disabled={syncing}>{syncing ? "Importing…" : "Import now"}</button></div> : connector.id === "microsoft-graph" ? <a className="btn" href="/api/connectors/microsoft/start">Connect Outlook</a> : connector.id === "manual-capture" ? <span className="pill"><CheckCircle2 size={11} /> Available</span> : <button className="btn" disabled>Planned</button>}</div></div>;
+    return <div className="list-row" key={connector.id}><div className="avatar"><Link2 size={14} /></div><div><strong>{connector.displayName}</strong><small>{account ?? connector.description}</small>{connector.id === "microsoft-graph" && matchingConnections.slice(1).map((item) => <small key={item.id}>Also connected: {item.accountName ?? item.accountIdentifier}</small>)}</div><div className="muted">{connected ? `Connected · Last sync: ${lastSync}` : connector.setupNote}<small>{Object.entries(capabilityLabels).filter(([key]) => connector.capabilities[key as keyof typeof capabilityLabels]).map(([, label]) => label).join(" · ") || "Manual only"}</small>{connector.id === "microsoft-graph" && syncError && <small className="negative">{syncError}</small>}</div><div>{connected && connector.id === "microsoft-graph" ? <div className="connector-actions">{matchingConnections.map((item) => <button className="btn" key={item.id} onClick={() => void syncOutlook(item.id)} disabled={Boolean(syncing)}>{syncing === item.id ? "Importing…" : `Import ${item.accountName ?? "account"}`}</button>)}<a className="btn" href="/api/connectors/microsoft/start">Add another account</a></div> : connector.id === "microsoft-graph" ? <a className="btn" href="/api/connectors/microsoft/start">Connect Outlook</a> : connector.availability === "available" ? <span className="pill"><CheckCircle2 size={11} /> Manual import</span> : <button className="btn" disabled>Planned</button>}</div></div>;
   })}</div></div>;
 }
 function SettingsView({ persona, people }: { persona: UniversalCommunicationProfile; people: CommunicationPersonOption[] }) { return <div className="page"><PageHeader eyebrow="Private workspace" title="Universal communication profile" subtitle="One profile for how you communicate across people, situations and apps." /><div className="section-title"><Sparkles size={14} /> Your verified communication rules</div><p className="subtitle">You control every saved fact. Priority: person and situation first, then channel, then your core profile.</p><PersonaForm initial={persona} people={people} /><div className="cards"><div className="card"><CircleUserRound size={17} /><h3>Account & security</h3><p>Supabase Auth architecture with manual provisioning and mandatory TOTP MFA.</p><span className="pill">MFA required</span></div><div className="card"><Sparkles size={17} /><h3>AI & privacy</h3><p>Only the relevant channel, situation and person profile is sent for the active message.</p><span className="pill">Minimal context</span></div><div className="card"><CheckCircle2 size={17} /><h3>Profile control</h3><p>AI can use your profile but cannot change it or turn an inference into a saved fact.</p><span className="pill">Owner verified</span></div></div></div> }

@@ -9,7 +9,7 @@ export type CreateCaseState = { error?: string; success?: string } | undefined;
 const createCaseSchema = z.object({
   personName: z.string().trim().min(1, "Enter the person's name.").max(120),
   title: z.string().trim().min(1, "Enter a subject.").max(200),
-  source: z.enum(["email", "instagram", "whatsapp", "messenger", "tinder", "tiktok", "linkedin", "manual"]),
+  source: z.enum(["email", "imessage", "instagram", "whatsapp", "messenger", "tinder", "tiktok", "linkedin", "manual"]),
   message: z.string().trim().min(1, "Paste or write the communication.").max(20_000),
 });
 

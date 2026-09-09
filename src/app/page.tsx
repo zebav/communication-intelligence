@@ -49,11 +49,11 @@ export default async function Home() {
 
   const { data: connectionRows } = await supabase
     .from("connections")
-    .select("provider,account_name,account_identifier,status,health_status,last_sync_at,capabilities")
+    .select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities")
     .eq("owner_id", user.id)
     .eq("status", "connected")
     .order("updated_at", { ascending: false });
-  const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ provider: item.provider, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
+  const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source as Source | undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
 
   const communicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
