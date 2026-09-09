@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
-import type { CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
+import type { ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -47,15 +47,13 @@ export default async function Home() {
     return { id: item.id, conversationId: item.conversation_id, personName: person?.display_name ?? "Unknown person", conversationTitle: conversation?.title ?? "Untitled conversation", description: item.description, owner: item.commitment_owner === "user" || item.commitment_owner === "sender" ? item.commitment_owner : "unknown", dueAt: item.due_at ?? undefined, status: item.status === "open" ? "open" : "suggested", confidence: Number(item.confidence ?? 0) };
   });
 
-  const { data: microsoftConnection } = await supabase
+  const { data: connectionRows } = await supabase
     .from("connections")
-    .select("account_name,account_identifier,status,health_status,last_sync_at")
+    .select("provider,account_name,account_identifier,status,health_status,last_sync_at,capabilities")
     .eq("owner_id", user.id)
-    .eq("provider", "microsoft-graph")
     .eq("status", "connected")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("updated_at", { ascending: false });
+  const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ provider: item.provider, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
 
   const communicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
@@ -127,7 +125,7 @@ export default async function Home() {
   return <Workspace
     userEmail={user.email ?? "Private owner"}
     communicationCases={communicationCases}
-    microsoftConnection={microsoftConnection}
+    connections={connections}
     syncedEmails={syncedEmails}
     followUps={followUps}
     people={intelligentPeople}

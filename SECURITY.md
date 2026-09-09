@@ -9,6 +9,8 @@
 - OAuth and provider credentials are server-only and must be encrypted before database storage.
 - Microsoft OAuth uses state validation, PKCE, short-lived HTTP-only cookies, and AES-256-GCM credential encryption.
 - No autonomous external send, delete, unsubscribe, or identity merge is permitted.
+- Connector actions are capability-gated. A provider being listed never grants permission to read or act on an account.
+- Only official, approved provider integrations or explicit manual capture are allowed; the system must not scrape personal messaging accounts or bypass platform access controls.
 - Every consequential action must write an audit event.
 - Security headers are configured centrally in `next.config.ts`.
 - `.env` variants are ignored; only names are documented in `.env.example`.

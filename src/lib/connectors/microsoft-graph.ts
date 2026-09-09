@@ -4,8 +4,12 @@ export const microsoftGraphConnector: ConnectorDefinition = {
   id: "microsoft-graph",
   displayName: "Outlook and Microsoft 365",
   source: "email",
+  channelKind: "email",
   authorization: "oauth2-web-server",
   accountAudience: "work-school-and-personal",
+  availability: "available",
+  description: "Email, conversation history, approved sending and incremental synchronization.",
+  setupNote: "Connected through Microsoft OAuth.",
   scopes: ["openid", "profile", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send"],
   capabilities: {
     validateConnection: true,
