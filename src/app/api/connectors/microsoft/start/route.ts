@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const config = microsoftConfig(request.nextUrl.origin);
+    const callbackOrigin = new URL(config.redirectUri).origin;
+    if (callbackOrigin !== request.nextUrl.origin) return NextResponse.redirect(new URL(MICROSOFT_OAUTH_COOKIE_PATH + "/start", callbackOrigin));
     const attempt = createOAuthAttempt();
     const cookieStore = await cookies();
     const options = { httpOnly: true, secure: true, sameSite: "lax" as const, maxAge: 600, path: MICROSOFT_OAUTH_COOKIE_PATH };
