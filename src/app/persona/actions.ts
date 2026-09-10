@@ -25,5 +25,5 @@ export async function saveUniversalCommunicationProfile(input: z.infer<typeof pr
   const { data: savedProfile, error } = await supabase.from("profiles").update({ preferences: { ...preferences, universal_communication_profile: parsed.data }, updated_at: new Date().toISOString() }).eq("id", user.id).select("id").maybeSingle();
   if (error || !savedProfile) return { error: "The universal communication profile could not be saved. No profile record was updated." };
   revalidatePath("/");
-  return { success: true };
+  return { success: true, profile: parsed.data };
 }
