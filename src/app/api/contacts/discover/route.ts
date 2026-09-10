@@ -16,6 +16,14 @@ function jsonError(message: string, status = 500) { return NextResponse.json({ e
 function cleanAddress(value?: string) { return value?.trim().toLowerCase() ?? ""; }
 function gmailAddress(value: string) { return cleanAddress(value.match(/<([^>]+)>/)?.[1] ?? value.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i)?.[0]); }
 function gmailName(value: string, address: string) { return value.replace(/<[^>]+>/, "").replace(/^"|"$/g, "").trim() || address; }
+function contactEntity(contact: Contact): "person" | "organization" | "automated" | "unknown" {
+  const local = contact.address.split("@")[0] ?? ""; const value = `${contact.name} ${local}`.toLowerCase();
+  if (/no.?reply|do.?not.?reply|notification|newsletter|mailer|automated|alerts?|updates?|marketing/.test(value)) return "automated";
+  if (/\b(team|support|service|sales|billing|accounts?|info|office|company|group|network|conference|institute|university|bank|hotel|booking|business)\b|\b(ab|ltd|inc|llc)\b/.test(value)) return "organization";
+  const words = contact.name.trim().split(/\s+/).filter(Boolean);
+  if (contact.name !== contact.address && words.length >= 2 && words.length <= 5 && !/[|<>]/.test(contact.name)) return "person";
+  return "unknown";
+}
 
 async function microsoftToken(credentials: StoredCredentials, origin: string) {
   if (new Date(credentials.expiresAt).getTime() > Date.now() + 60_000) return { token: credentials.accessToken, credentials, refreshed: false };
@@ -110,8 +118,9 @@ export async function POST(request: NextRequest) {
     for (let offset = 0; offset < candidates.length; offset += 10) {
       await Promise.all(candidates.slice(offset, offset + 10).map(async (contact) => {
         const { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
-        if (identity) { existing += 1; if (contact.lastSeenAt) await database.from("people").update({ last_contact_at: contact.lastSeenAt }).eq("id", identity.person_id).eq("owner_id", user.id); return; }
-        const { data: person, error: personError } = await database.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: "unknown", relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
+        const entityType = contactEntity(contact);
+        if (identity) { existing += 1; await database.from("people").update({ ...(contact.lastSeenAt ? { last_contact_at: contact.lastSeenAt } : {}), entity_type: entityType }).eq("id", identity.person_id).eq("owner_id", user.id).eq("entity_type", "unknown"); return; }
+        const { data: person, error: personError } = await database.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: entityType, relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
         if (personError || !person) return;
         const { error: identityError } = await database.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
         if (identityError) { await database.from("people").delete().eq("id", person.id); return; }
