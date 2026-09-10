@@ -30,7 +30,7 @@ export interface UniversalCommunicationProfile {
   situations: Partial<Record<CommunicationSituation, ProfileGuidance>>;
   people: Record<string, PersonProfileGuidance>;
 }
-export interface CommunicationPersonOption { id: string; name: string; relationship: string; organization: string; professionalSpecialty?: string; jurisdiction?: string }
+export interface CommunicationPersonOption { id: string; name: string; relationship: string; organization: string; professionalSpecialty?: string; jurisdiction?: string; entityType?: "person" | "organization" | "automated" | "unknown"; priority?: number; lastContactAt?: string }
 
 export interface SyncedEmailConversation {
   id: string;

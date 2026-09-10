@@ -26,7 +26,7 @@ export default async function Home() {
   const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
 
   const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(1000);
-  const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "" }));
+  const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", priority: Number(person.manual_priority ?? person.overall_priority ?? 0), lastContactAt: person.last_contact_at ?? undefined }));
 
   const { data: rows } = await supabase
     .from("conversations")
