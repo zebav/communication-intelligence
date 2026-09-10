@@ -81,6 +81,7 @@ export interface PersonMemory {
 
 export interface FollowUpCommitment {
   id: string;
+  sourceMessageId?: string;
   conversationId: string;
   personName: string;
   conversationTitle: string;

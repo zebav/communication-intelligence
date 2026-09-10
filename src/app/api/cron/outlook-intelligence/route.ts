@@ -55,7 +55,8 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   }
   await supabase.from("commitments").delete().eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("status", "suggested");
   if (analysis.commitment.detected && analysis.commitment.confidence >= 0.7 && analysis.commitment.description.trim()) {
-    await supabase.from("commitments").upsert({ owner_id: message.owner_id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
+    const { data: existingOpen } = await supabase.from("commitments").select("id").eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("status", "open").limit(1).maybeSingle();
+    if (!existingOpen) await supabase.from("commitments").upsert({ owner_id: message.owner_id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
   return true;
 }
