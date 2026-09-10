@@ -3,6 +3,8 @@ import { z } from "zod";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
+import { googleGmailConnector } from "@/lib/connectors/google-gmail";
+import { googleConfig } from "@/lib/connectors/google-oauth";
 import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 60;
@@ -12,7 +14,7 @@ const requestSchema = z.object({ messageIds: z.array(z.string().uuid()).min(1).m
 
 function jsonError(message: string, status = 500) { return NextResponse.json({ error: message }, { status }); }
 
-async function accessToken(credentials: StoredCredentials, origin: string) {
+async function microsoftAccessToken(credentials: StoredCredentials, origin: string) {
   if (new Date(credentials.expiresAt).getTime() > Date.now() + 60_000) return { token: credentials.accessToken, credentials, refreshed: false };
   if (!credentials.refreshToken) throw new Error("reconnect_required");
   const config = microsoftConfig(origin);
@@ -22,6 +24,23 @@ async function accessToken(credentials: StoredCredentials, origin: string) {
   if (!result.access_token || !result.expires_in) throw new Error("reconnect_required");
   const next = { ...credentials, accessToken: result.access_token, refreshToken: result.refresh_token ?? credentials.refreshToken, tokenType: result.token_type ?? credentials.tokenType, scope: result.scope ?? credentials.scope, expiresAt: new Date(Date.now() + result.expires_in * 1000).toISOString() };
   return { token: result.access_token, credentials: next, refreshed: true };
+}
+
+
+async function googleAccessToken(credentials: StoredCredentials, origin: string) {
+  if (new Date(credentials.expiresAt).getTime() > Date.now() + 60_000) return { token: credentials.accessToken, credentials, refreshed: false };
+  if (!credentials.refreshToken) throw new Error("reconnect_required");
+  const config = googleConfig(origin);
+  const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, grant_type: "refresh_token", refresh_token: credentials.refreshToken }), signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error("reconnect_required");
+  const result = await response.json() as { access_token?: string; expires_in?: number; token_type?: string; scope?: string };
+  if (!result.access_token || !result.expires_in) throw new Error("reconnect_required");
+  const next = { ...credentials, accessToken: result.access_token, tokenType: result.token_type ?? credentials.tokenType, scope: result.scope ?? credentials.scope, expiresAt: new Date(Date.now() + result.expires_in * 1000).toISOString() };
+  return { token: result.access_token, credentials: next, refreshed: true };
+}
+
+function gmailMessageId(externalMessageId: string) {
+  return externalMessageId.startsWith("gmail:") ? externalMessageId.split(":").at(-1) ?? "" : externalMessageId;
 }
 
 export async function POST(request: NextRequest) {
@@ -47,16 +66,23 @@ export async function POST(request: NextRequest) {
   for (const connectionId of connectionIds) {
     const connection = connectionMap.get(connectionId);
     const selected = messages.filter((message) => connectionByConversation.get(message.conversation_id) === connectionId);
-    if (!connection?.encrypted_credentials || connection.provider !== "microsoft-graph") { failed.push(`${connection?.account_name || connection?.account_identifier || "Unknown account"}: Outlook action is not available`); continue; }
+    if (!connection?.encrypted_credentials || !["microsoft-graph", "gmail"].includes(connection.provider)) { failed.push(`${connection?.account_name || connection?.account_identifier || "Unknown account"}: cleanup action is not available`); continue; }
     try {
       const stored = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
-      const authorized = await accessToken(stored, request.nextUrl.origin);
+      if (connection.provider === "gmail" && !String(stored.scope ?? "").split(" ").includes(googleGmailConnector.scopes.at(-1)!)) throw new Error("reconnect_required");
+      const authorized = connection.provider === "gmail" ? await googleAccessToken(stored, request.nextUrl.origin) : await microsoftAccessToken(stored, request.nextUrl.origin);
       if (authorized.refreshed) await database.from("connections").update({ encrypted_credentials: encryptCredential(authorized.credentials, encryptionKey), token_metadata: { ...(connection.token_metadata as object ?? {}), expires_at: authorized.credentials.expiresAt }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
       for (const message of selected) {
-        const url = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(message.external_message_id)}`;
-        const response = parsed.data.action === "mark_read"
-          ? await fetch(url, { method: "PATCH", headers: { authorization: `Bearer ${authorized.token}`, "content-type": "application/json" }, body: JSON.stringify({ isRead: true }), signal: AbortSignal.timeout(15_000) })
-          : await fetch(`${url}/move`, { method: "POST", headers: { authorization: `Bearer ${authorized.token}`, "content-type": "application/json" }, body: JSON.stringify({ destinationId: parsed.data.action === "archive" ? "archive" : "junkemail" }), signal: AbortSignal.timeout(15_000) });
+        let response: Response;
+        if (connection.provider === "gmail") {
+          const labelChanges = parsed.data.action === "archive" ? { removeLabelIds: ["INBOX"] } : parsed.data.action === "mark_read" ? { removeLabelIds: ["UNREAD"] } : { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] };
+          response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(gmailMessageId(message.external_message_id))}/modify`, { method: "POST", headers: { authorization: `Bearer ${authorized.token}`, "content-type": "application/json" }, body: JSON.stringify(labelChanges), signal: AbortSignal.timeout(15_000) });
+        } else {
+          const url = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(message.external_message_id)}`;
+          response = parsed.data.action === "mark_read"
+            ? await fetch(url, { method: "PATCH", headers: { authorization: `Bearer ${authorized.token}`, "content-type": "application/json" }, body: JSON.stringify({ isRead: true }), signal: AbortSignal.timeout(15_000) })
+            : await fetch(`${url}/move`, { method: "POST", headers: { authorization: `Bearer ${authorized.token}`, "content-type": "application/json" }, body: JSON.stringify({ destinationId: parsed.data.action === "archive" ? "archive" : "junkemail" }), signal: AbortSignal.timeout(15_000) });
+        }
         if (!response.ok) { failed.push(`${connection.account_name || connection.account_identifier}: ${message.id}`); continue; }
         const metadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as Record<string, unknown> : {};
         await database.from("messages").update({ metadata: { ...metadata, is_read: parsed.data.action === "mark_read" ? true : metadata.is_read, cleanup_action: parsed.data.action, cleanup_at: new Date().toISOString() } }).eq("id", message.id).eq("owner_id", user.id);
