@@ -11,6 +11,7 @@ import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { approvedLearningContext, saveLearningSuggestion, toneRule } from "@/lib/learning-feedback";
 import { relationshipTypes } from "@/lib/relationship-types";
 import { enforceProfessionalRouting } from "@/lib/action-routing";
+import { firstSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
