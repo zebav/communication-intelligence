@@ -9,7 +9,7 @@ import type { CommunicationPersonOption, CommunicationSituation, ProfileGuidance
 type Section = "core" | "channels" | "situations" | "people";
 const emptyGuidance = (): ProfileGuidance => ({ tone: "", guidance: "" });
 
-export function PersonaForm({ initial, people }: { initial: UniversalCommunicationProfile; people: CommunicationPersonOption[] }) {
+export function PersonaForm({ initial, people, onSaved }: { initial: UniversalCommunicationProfile; people: CommunicationPersonOption[]; onSaved?: (profile: UniversalCommunicationProfile) => void }) {
   const router = useRouter();
   const [profile, setProfile] = useState(initial); const [section, setSection] = useState<Section>("core");
   const [selectedPerson, setSelectedPerson] = useState(people[0]?.id ?? ""); const [saving, setSaving] = useState(false); const [message, setMessage] = useState("");
@@ -17,7 +17,7 @@ export function PersonaForm({ initial, people }: { initial: UniversalCommunicati
   const channelField = (id: Source, key: keyof ProfileGuidance, value: string) => setProfile((current) => ({ ...current, channels: { ...current.channels, [id]: { ...(current.channels[id] ?? emptyGuidance()), [key]: value } } }));
   const situationField = (id: CommunicationSituation, key: keyof ProfileGuidance, value: string) => setProfile((current) => ({ ...current, situations: { ...current.situations, [id]: { ...(current.situations[id] ?? emptyGuidance()), [key]: value } } }));
   const personField = (key: keyof ProfileGuidance, value: string) => { const person = people.find((item) => item.id === selectedPerson); if (!person) return; setProfile((current) => ({ ...current, people: { ...current.people, [person.id]: { name: person.name, tone: current.people[person.id]?.tone ?? "", guidance: current.people[person.id]?.guidance ?? "", [key]: value } } })); };
-  const save = async () => { setSaving(true); setMessage(""); const result = await saveUniversalCommunicationProfile(profile); setMessage(result.error ?? "Universal communication profile saved securely."); if (!result.error) router.refresh(); setSaving(false); };
+  const save = async () => { setSaving(true); setMessage(""); const result = await saveUniversalCommunicationProfile(profile); setMessage(result.error ?? "Universal communication profile saved securely."); if (!result.error && result.profile) { setProfile(result.profile); onSaved?.(result.profile); router.refresh(); } setSaving(false); };
   const selected = selectedPerson ? profile.people[selectedPerson] ?? { name: people.find((item) => item.id === selectedPerson)?.name ?? "", ...emptyGuidance() } : null;
   return <div className="profile-editor">
     <div className="profile-tabs" role="tablist">{([['core','Core profile'],['channels','Channels'],['situations','Situations'],['people','People']] as [Section,string][]).map(([id,label]) => <button type="button" role="tab" aria-selected={section === id} className={section === id ? "active" : ""} key={id} onClick={() => setSection(id)}>{label}</button>)}</div>
