@@ -261,13 +261,16 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     const response = await fetch(`/api/connectors/${providerPath}/sync?connectionId=${connection.id}`, { method: "POST" });
     const result = await response.json() as { imported?: number; error?: string; moreAvailable?: boolean };
     if (!response.ok) throw new Error(result.error ?? "The import failed.");
-    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false };
+    const discoveryResponse = await fetch("/api/contacts/discover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId: connection.id }) });
+    const discovery = await discoveryResponse.json() as { created?: number; scanned?: number; error?: string };
+    if (!discoveryResponse.ok) throw new Error(discovery.error ?? "Historical contact discovery failed.");
+    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false, contactsCreated: discovery.created ?? 0, contactsScanned: discovery.scanned ?? 0 };
   };
   const syncOutlook = async (connection: ChannelConnection) => {
     setSyncing(connection.id); setSyncError(""); setSyncResult("");
     try {
       const result = await importAccount(connection);
-      setSyncResult(result.imported > 0 ? `${accountDisplayLabel(connection)}: ${result.imported} messages imported.${result.moreAvailable ? " More history is available; import again to continue." : ""}` : `${accountDisplayLabel(connection)} is up to date. No new or changed messages were found.`);
+      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported} messages imported · ${result.contactsScanned} historical contacts checked · ${result.contactsCreated} new contacts created.${result.moreAvailable ? " More message history is available; import again to continue." : ""}`);
       router.refresh();
     } catch (error) { setSyncError(`${accountDisplayLabel(connection)}: ${error instanceof Error ? error.message : "The import failed."}`); }
     finally { setSyncing(""); }
@@ -276,7 +279,7 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     setSyncing("all"); setSyncError(""); setSyncResult("");
     const results: string[] = []; const errors: string[] = []; let total = 0;
     for (const account of accounts) {
-      try { const result = await importAccount(account); total += result.imported; results.push(`${accountDisplayLabel(account)}: ${result.imported}${result.moreAvailable ? " (more available)" : ""}`); }
+      try { const result = await importAccount(account); total += result.imported; results.push(`${accountDisplayLabel(account)}: ${result.imported} messages, ${result.contactsCreated} new contacts${result.moreAvailable ? " (more available)" : ""}`); }
       catch (error) { errors.push(`${accountDisplayLabel(account)}: ${error instanceof Error ? error.message : "Import failed"}`); }
     }
     setSyncResult(`All ${accounts.length} accounts checked · ${total} messages imported. ${results.join(" · ")}`);
