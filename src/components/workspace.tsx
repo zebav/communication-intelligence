@@ -240,14 +240,80 @@ function FollowUps({ items }: { items: FollowUpCommitment[] }) {
   const orderedSections = ["Review", "Overdue", "I owe them", "They owe me", "Waiting", "Upcoming"];
   return <div className="page"><PageHeader eyebrow="Open loops" title="Follow-ups" subtitle="Real promises and requests from your conversations. AI suggestions require your approval." /><div className="summary-bar"><div className="summary-stat"><strong>{counts.mine}</strong><span>I owe them</span></div><div className="summary-stat"><strong>{counts.theirs}</strong><span>they owe me</span></div><div className="summary-stat"><strong>{counts.review}</strong><span>to review</span></div></div>{error && <div className="empty-card negative">{error}</div>}{items.length === 0 ? <div className="empty-card">No follow-ups yet. Analyze a conversation containing a concrete promise or requested action.</div> : orderedSections.map((section) => { const sectionItems = items.filter((item) => followUpSection(item) === section); if (!sectionItems.length) return null; return <section key={section}><div className="section-title">{section}</div><div className="list">{sectionItems.map((item) => <div className="list-row" key={item.id}><div className="avatar"><Clock3 size={14} /></div><div><strong>{item.personName}</strong><small>{item.conversationTitle}</small></div><div><span>{item.description}</span><small>{Math.round(item.confidence * 100)}% confidence</small></div><div><small className={section === "Overdue" ? "negative" : "muted"}>{item.dueAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(item.dueAt)) : "No reliable date"}</small>{item.status === "suggested" ? <div className="toolbar"><button className="btn" disabled={working === item.id} onClick={() => void decide(item.id, "reject")}>Reject</button><button className="btn primary" disabled={working === item.id} onClick={() => void decide(item.id, "approve")}>Approve</button></div> : <button className="btn" disabled={working === item.id} onClick={() => void decide(item.id, "complete")}>{working === item.id ? "Saving…" : "Mark complete"}</button>}</div></div>)}</div></section>; })}</div>;
 }
-type CleanupPreview = { key: string; account: string; sender: string; senderAddress: string; count: number; unread: number; categories: string[]; lastSeenAt: string; action: "archive" | "mark_read" | "move_to_junk" | "unsubscribe_review"; reason: string; unsubscribeUrl?: string };
+type CleanupAction = "archive" | "mark_read" | "move_to_junk";
+type CleanupPreview = { key: string; account: string; sender: string; senderAddress: string; count: number; unread: number; categories: string[]; lastSeenAt: string; action: CleanupAction | "unsubscribe_review"; reason: string; unsubscribeUrl?: string; messageIds: string[]; canApply: boolean };
 function CleanUp() {
-  const [items, setItems] = useState<CleanupPreview[]>([]); const [analyzed, setAnalyzed] = useState(0); const [lowValue, setLowValue] = useState(0); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [account, setAccount] = useState("all"); const [action, setAction] = useState("all"); const [query, setQuery] = useState("");
-  const scan = async () => { setLoading(true); setError(""); try { const response = await fetch("/api/cleanup/preview"); const result = await response.json() as { analyzed?: number; lowValueMessages?: number; suggestions?: CleanupPreview[]; error?: string }; if (!response.ok) throw new Error(result.error ?? "The inbox could not be analyzed."); setItems(result.suggestions ?? []); setAnalyzed(result.analyzed ?? 0); setLowValue(result.lowValueMessages ?? 0); } catch (scanError) { setError(scanError instanceof Error ? scanError.message : "The inbox could not be analyzed."); } finally { setLoading(false); } };
+  const [items, setItems] = useState<CleanupPreview[]>([]);
+  const [analyzed, setAnalyzed] = useState(0);
+  const [lowValue, setLowValue] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [account, setAccount] = useState("all");
+  const [action, setAction] = useState("all");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [confirmAction, setConfirmAction] = useState<CleanupAction | "">("");
+  const [working, setWorking] = useState(false);
+  const [resultMessage, setResultMessage] = useState("");
+  const scan = async () => {
+    setLoading(true); setError("");
+    try {
+      const response = await fetch("/api/cleanup/preview");
+      const result = await response.json() as { analyzed?: number; lowValueMessages?: number; suggestions?: CleanupPreview[]; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "The inbox could not be analyzed.");
+      setItems(result.suggestions ?? []); setAnalyzed(result.analyzed ?? 0); setLowValue(result.lowValueMessages ?? 0); setSelected({});
+    } catch (scanError) { setError(scanError instanceof Error ? scanError.message : "The inbox could not be analyzed."); }
+    finally { setLoading(false); }
+  };
   useEffect(() => { void scan(); }, []);
-  const accounts = [...new Set(items.map((item) => item.account))]; const visible = items.filter((item) => (account === "all" || item.account === account) && (action === "all" || item.action === action) && [item.sender, item.senderAddress, item.account, ...item.categories].join(" ").toLowerCase().includes(query.toLowerCase()));
-  const labels: Record<CleanupPreview["action"], string> = { archive: "Review for archive", mark_read: "Review as read", move_to_junk: "Review for junk", unsubscribe_review: "Review subscription" };
-  return <div className="page"><PageHeader eyebrow="Email Clean Up & Inbox Hygiene V1" title="Clean Up" subtitle="Review low-value messages across your connected email accounts. Internal colleagues are protected from cleanup suggestions." /><div className="summary-bar"><div className="summary-stat"><strong>{analyzed}</strong><span>messages analyzed</span></div><div className="summary-stat"><strong>{lowValue}</strong><span>low-value messages</span></div><div className="summary-stat"><strong>{items.length}</strong><span>sender groups</span></div></div><div className="learning-notice"><CheckCircle2 size={16} /><div><strong>Safe review</strong><p>You can open a verified unsubscribe link when one is available. Archiving, marking as read and junk actions remain suggestions only.</p></div></div><div className="connector-global-actions"><button className="btn primary" disabled={loading} onClick={() => void scan()}>{loading ? "Analyzing connected inboxes…" : "Analyze inboxes again"}</button><select className="filter" aria-label="Cleanup account" value={account} onChange={(event) => setAccount(event.target.value)}><option value="all">All email accounts</option>{accounts.map((value) => <option key={value}>{value}</option>)}</select><select className="filter" aria-label="Cleanup action" value={action} onChange={(event) => setAction(event.target.value)}><option value="all">All suggestions</option><option value="unsubscribe_review">Subscriptions</option><option value="archive">Archive candidates</option><option value="mark_read">Notifications</option><option value="move_to_junk">Spam</option></select></div><input className="people-search" aria-label="Search cleanup suggestions" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search sender, address, category or account…" />{error && <div className="empty-card negative">{error}</div>}{!loading && !error && visible.length === 0 ? <div className="empty-card">No cleanup suggestions match these filters.</div> : <div className="list">{visible.map((item) => <div className="list-row" key={item.key}><div className="avatar"><Mail size={14} /></div><div><strong>{item.sender}</strong><small>{item.senderAddress} · {item.account}</small></div><div><span>{item.count} messages · {item.unread} unread</span><small>{item.categories.join(" · ")} · Last {new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(item.lastSeenAt))}</small><small className="muted">{item.reason}</small></div><div>{item.action === "unsubscribe_review" && item.unsubscribeUrl ? <a className="btn primary" href={item.unsubscribeUrl} target="_blank" rel="noreferrer">Unsubscribe</a> : <span className="pill">{labels[item.action]}</span>}</div></div>)}</div>}</div>;
+  const accounts = [...new Set(items.map((item) => item.account))];
+  const visible = items.filter((item) => (account === "all" || item.account === account) && (action === "all" || item.action === action) && [item.sender, item.senderAddress, item.account, ...item.categories].join(" ").toLowerCase().includes(query.toLowerCase()));
+  const selectedGroups = visible.filter((item) => selected[item.key] && item.canApply);
+  const selectedMessageIds = [...new Set(selectedGroups.flatMap((item) => item.messageIds))].slice(0, 50);
+  const labels: Record<CleanupPreview["action"], string> = { archive: "Archive", mark_read: "Mark as read", move_to_junk: "Move to junk", unsubscribe_review: "Review subscription" };
+  const applyAction = async () => {
+    if (!confirmAction || !selectedMessageIds.length) return;
+    setWorking(true); setError(""); setResultMessage("");
+    try {
+      const response = await fetch("/api/cleanup/apply", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messageIds: selectedMessageIds, action: confirmAction }) });
+      const result = await response.json() as { message?: string; error?: string; failed?: string[] };
+      if (!response.ok) throw new Error(result.error ?? "The selected email action could not be completed.");
+      setResultMessage(result.failed?.length ? `${result.message} ${result.failed.length} could not be updated.` : result.message ?? "The selected messages were updated.");
+      setConfirmAction(""); await scan();
+    } catch (applyError) { setError(applyError instanceof Error ? applyError.message : "The selected email action could not be completed."); }
+    finally { setWorking(false); }
+  };
+  const toggleAll = () => {
+    const actionable = visible.filter((item) => item.canApply);
+    const allSelected = actionable.length > 0 && actionable.every((item) => selected[item.key]);
+    setSelected((values) => ({ ...values, ...Object.fromEntries(actionable.map((item) => [item.key, !allSelected])) }));
+  };
+  return <div className="page">
+    <PageHeader eyebrow="Safe Cleanup Actions V2" title="Clean Up" subtitle="Review and apply safe email actions. Internal colleagues are protected and nothing can be permanently deleted." />
+    <div className="summary-bar"><div className="summary-stat"><strong>{analyzed}</strong><span>messages analyzed</span></div><div className="summary-stat"><strong>{lowValue}</strong><span>low-value messages</span></div><div className="summary-stat"><strong>{selectedMessageIds.length}</strong><span>selected messages</span></div></div>
+    <div className="learning-notice"><CheckCircle2 size={16} /><div><strong>Approval required</strong><p>Only the messages you select will change. Outlook actions are logged. Gmail actions stay unavailable until its write permission is connected.</p></div></div>
+    <div className="connector-global-actions">
+      <button className="btn primary" disabled={loading} onClick={() => void scan()}>{loading ? "Analyzing connected inboxes…" : "Analyze inboxes again"}</button>
+      <button className="btn" disabled={!visible.some((item) => item.canApply)} onClick={toggleAll}>Select all visible Outlook groups</button>
+      <select className="filter" aria-label="Cleanup account" value={account} onChange={(event) => setAccount(event.target.value)}><option value="all">All email accounts</option>{accounts.map((value) => <option key={value}>{value}</option>)}</select>
+      <select className="filter" aria-label="Cleanup action" value={action} onChange={(event) => setAction(event.target.value)}><option value="all">All suggestions</option><option value="unsubscribe_review">Subscriptions</option><option value="archive">Archive candidates</option><option value="mark_read">Notifications</option><option value="move_to_junk">Spam</option></select>
+    </div>
+    <div className="connector-global-actions">
+      <button className="btn" disabled={!selectedMessageIds.length || working} onClick={() => setConfirmAction("archive")}>Archive selected</button>
+      <button className="btn" disabled={!selectedMessageIds.length || working} onClick={() => setConfirmAction("mark_read")}>Mark selected as read</button>
+      <button className="btn negative-button" disabled={!selectedMessageIds.length || working} onClick={() => setConfirmAction("move_to_junk")}>Move selected to junk</button>
+    </div>
+    {confirmAction && <div className="send-confirm"><strong>Apply “{labels[confirmAction]}” to {selectedMessageIds.length} selected message{selectedMessageIds.length === 1 ? "" : "s"}?</strong><p>This changes the messages in Outlook. Nothing is permanently deleted.</p><div><button className="btn" disabled={working} onClick={() => setConfirmAction("")}>Cancel</button><button className="btn primary" disabled={working} onClick={() => void applyAction()}>{working ? "Applying…" : "Yes, apply action"}</button></div></div>}
+    <input className="people-search" aria-label="Search cleanup suggestions" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search sender, address, category or account…" />
+    {resultMessage && <div className="empty-card positive">{resultMessage}</div>}
+    {error && <div className="empty-card negative">{error}</div>}
+    {!loading && !error && visible.length === 0 ? <div className="empty-card">No cleanup suggestions match these filters.</div> : <div className="list">{visible.map((item) => <div className="list-row" key={item.key}>
+      <div>{item.canApply ? <input type="checkbox" aria-label={`Select ${item.sender}`} checked={Boolean(selected[item.key])} onChange={(event) => setSelected((values) => ({ ...values, [item.key]: event.target.checked }))} /> : <Mail size={14} />}</div>
+      <div><strong>{item.sender}</strong><small>{item.senderAddress} · {item.account}</small></div>
+      <div><span>{item.count} messages · {item.unread} unread</span><small>{item.categories.join(" · ")} · Last {new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(item.lastSeenAt))}</small><small className="muted">{item.reason}</small>{!item.canApply && <small className="muted">Preview only for Gmail or legacy messages without an account link.</small>}</div>
+      <div>{item.action === "unsubscribe_review" && item.unsubscribeUrl ? <a className="btn primary" href={item.unsubscribeUrl} target="_blank" rel="noreferrer">Unsubscribe</a> : <span className="pill">{labels[item.action]}</span>}</div>
+    </div>)}</div>}
+  </div>;
 }
 function Intelligence({ items }: { items: LearningSignal[] }) {
   const router = useRouter();
