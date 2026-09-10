@@ -13,9 +13,17 @@ type CleanupGroup = {
   lastSeenAt: string;
   action: CleanupAction;
   reason: string;
+  unsubscribeUrl?: string;
 };
 
 const lowValueCategories = new Set(["Newsletter", "Marketing", "Notification", "Spam", "Information Only"]);
+const publicMailboxDomains = new Set(["gmail.com", "hotmail.com", "outlook.com", "icloud.com", "yahoo.com", "live.com"]);
+
+function domainOf(address: string) { return address.toLowerCase().split("@")[1] ?? ""; }
+function unsubscribeUrl(body?: string | null) {
+  const urls = body?.match(/https?:\/\/[^\s<>"')\]]+/gi) ?? [];
+  return urls.find((url) => /unsubscribe|opt.?out|manage.?preferences|email.?preferences/i.test(url));
+}
 
 function actionFor(categories: Set<string>): { action: CleanupAction; reason: string } {
   if (categories.has("Spam")) return { action: "move_to_junk", reason: "Messages classified as spam should be reviewed for the junk folder." };
@@ -33,7 +41,7 @@ export async function GET(request: NextRequest) {
   if (assurance?.currentLevel !== "aal2") return NextResponse.json({ error: "Two-factor authentication is required." }, { status: 403 });
 
   const { data: messages, error } = await database.from("messages")
-    .select("id,sender_identity_id,conversation_id,classification,sent_at,metadata")
+    .select("id,sender_identity_id,conversation_id,classification,sent_at,metadata,body_text")
     .eq("owner_id", user.id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1000);
   if (error) return NextResponse.json({ error: "The inbox could not be analyzed." }, { status: 500 });
   const relevantMessages = (messages ?? []).filter((message) => lowValueCategories.has(message.classification ?? ""));
@@ -56,12 +64,15 @@ export async function GET(request: NextRequest) {
     const connectionId = conversationMap.get(message.conversation_id) ?? "unknown";
     const connection = connectionMap.get(connectionId ?? "");
     const address = identity?.external_identifier ?? "Unknown address";
+    const accountDomain = domainOf(connection?.account_identifier ?? "");
+    if (accountDomain && !publicMailboxDomains.has(accountDomain) && domainOf(address) === accountDomain) continue;
     const key = `${connectionId}:${address}`;
     const category = message.classification ?? "Information Only";
     const metadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as { is_read?: boolean; gmail_labels?: string[] } : {};
     const unread = metadata.is_read === false || metadata.gmail_labels?.includes("UNREAD") === true;
-    const current = groups.get(key) ?? { key, account: connection?.account_name || connection?.account_identifier || "Unknown account", sender: personMap.get(identity?.person_id ?? "") ?? address, senderAddress: address, count: 0, unread: 0, categories: [], categorySet: new Set<string>(), lastSeenAt: message.sent_at, action: "archive", reason: "" };
+    const current = groups.get(key) ?? { key, account: connection?.account_name || connection?.account_identifier || "Unknown account", sender: personMap.get(identity?.person_id ?? "") ?? address, senderAddress: address, count: 0, unread: 0, categories: [], categorySet: new Set<string>(), lastSeenAt: message.sent_at, action: "archive", reason: "", unsubscribeUrl: unsubscribeUrl(message.body_text) };
     current.count += 1; if (unread) current.unread += 1; current.categorySet.add(category);
+    current.unsubscribeUrl ||= unsubscribeUrl(message.body_text);
     if (message.sent_at > current.lastSeenAt) current.lastSeenAt = message.sent_at;
     groups.set(key, current);
   }
