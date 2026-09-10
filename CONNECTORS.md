@@ -20,7 +20,7 @@ Each connector declares exactly what it can do. Reading history, incremental syn
 | Manual capture | Available | Owner-provided communication |
 | Manual/file/screenshot import | Available | Reviewed text, CSV, JSON, PNG, JPEG, or WebP imports linked to an exact account label |
 | iMessage | Manual import available | No Apple account access requested |
-| Gmail / Google Workspace | Manual import available | Direct OAuth connector planned |
+| Gmail / Google Workspace | Implemented | OAuth, separate multi-account identity, bounded history import, incremental re-check |
 | Instagram Professional | Planned | Official Meta integration for eligible professional accounts |
 | Messenger Page | Planned | Official Meta Page integration |
 | WhatsApp Business | Planned | Official business platform and webhooks |
@@ -29,6 +29,8 @@ Each connector declares exactly what it can do. Reading history, incremental syn
 Each connection represents one specific account, not merely one provider. Multiple Microsoft 365 companies, personal Outlook/Hotmail accounts, Gmail accounts, and manual social identities remain separate through `connection_id` and the owner-supplied account label.
 
 Microsoft OAuth always starts and returns on the stable production domain. Requests initiated from a temporary Vercel Preview are first redirected to production so PKCE/state cookies and the Entra redirect URI remain on the same host.
+
+Google OAuth follows the same stable-domain rule. Gmail V1 requests read-only access, imports the Inbox in bounded pages from the last 30 days, encrypts refresh credentials, prefixes provider message/thread IDs by Google account, and never sends, archives, or deletes mail.
 
 Conversation screenshots are sent to the configured OpenAI API only after explicit confirmation, with storage disabled, to extract visible text. The image itself is not persisted by the application. Extracted text must be reviewed before database import.
 
