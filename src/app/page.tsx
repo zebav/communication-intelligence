@@ -55,12 +55,18 @@ export default async function Home() {
     .order("updated_at", { ascending: false });
   const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source as Source | undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
 
-  const communicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
+  const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
     const messages = Array.isArray(row.messages) ? row.messages : [];
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at };
   });
+  const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
+    const key = `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
+    const current = grouped.get(key);
+    if (!current || item.createdAt > current.createdAt) grouped.set(key, item);
+    return grouped;
+  }, new Map<string, CommunicationCase>()).values()];
 
   const syncedEmails: SyncedEmailConversation[] = (rows ?? []).filter((row) => row.source === "email").map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
@@ -102,10 +108,18 @@ export default async function Home() {
   });
 
   const intelligentPeople: IntelligentPerson[] = (personRows ?? []).map((person) => {
-    const personConversations = (rows ?? []).filter((row) => {
+    const allPersonConversations = (rows ?? []).filter((row) => {
       const linked = Array.isArray(row.people) ? row.people[0] : row.people;
       return linked?.id === person.id;
     });
+    const personConversations = [...allPersonConversations.reduce((grouped, row) => {
+      const key = row.source === "email" ? `email:${row.id}` : `${row.source}:imported-thread`;
+      const current = grouped.get(key);
+      const rowTime = String(row.last_message_at ?? row.created_at ?? "");
+      const currentTime = String(current?.last_message_at ?? current?.created_at ?? "");
+      if (!current || rowTime > currentTime) grouped.set(key, row);
+      return grouped;
+    }, new Map<string, (typeof allPersonConversations)[number]>()).values()];
     const responseConversations = personConversations.filter((row) => {
       const messages = Array.isArray(row.messages) ? row.messages : [];
       const latestInbound = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
