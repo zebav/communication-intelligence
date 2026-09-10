@@ -13,3 +13,20 @@ export function firstSafeExternalActionUrl(value: string) {
   }
   return null;
 }
+
+
+export function bestSafeExternalActionUrl(value: string) {
+  const matches = [...value.matchAll(/https:\/\/[^\s<>"']+/gi)];
+  const ranked = matches.flatMap((match) => {
+    const url = safeExternalActionUrl(match[0].replace(/[),.;!?]+$/, ""));
+    if (!url) return [];
+    const index = match.index ?? 0;
+    const preceding = value.slice(Math.max(0, index - 120), index);
+    const boundary = Math.max(preceding.lastIndexOf(">"), preceding.lastIndexOf("\n"), preceding.lastIndexOf("."));
+    const context = preceding.slice(boundary + 1).toLowerCase();
+    const positive = (context.match(/start|continue|complete|verify|verification|form|submit|sign in|log in|access|öppna|fortsätt|slutför|verifiera|formulär|logga in/g) ?? []).length;
+    const negative = (context.match(/learn more|privacy|support|unsubscribe|tracking|pixel|\.gif|läs mer|integritet|support|avregistrera/g) ?? []).length;
+    return [{ url, score: positive * 3 - negative * 4 }];
+  });
+  return ranked.sort((a, b) => b.score - a.score)[0]?.url ?? null;
+}
