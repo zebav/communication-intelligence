@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
   const { data: people } = personIds.length ? await database.from("people").select("id,display_name").eq("owner_id", user.id).in("id", personIds) : { data: [] };
   const { data: conversations } = conversationIds.length ? await database.from("conversations").select("id,connection_id").eq("owner_id", user.id).in("id", conversationIds) : { data: [] };
   const connectionIds = [...new Set((conversations ?? []).flatMap((conversation) => conversation.connection_id ? [conversation.connection_id] : []))];
-  const { data: connections } = connectionIds.length ? await database.from("connections").select("id,account_name,account_identifier,provider").eq("owner_id", user.id).in("id", connectionIds) : { data: [] };
+  const { data: connections } = connectionIds.length ? await database.from("connections").select("id,account_name,account_identifier,provider,scopes").eq("owner_id", user.id).in("id", connectionIds) : { data: [] };
   const { data: connectedMailboxes } = await database.from("connections").select("account_identifier").eq("owner_id", user.id).eq("status", "connected").in("provider", ["microsoft-graph", "gmail"]);
   const trustedInternalDomains = new Set((connectedMailboxes ?? []).map((mailbox) => domainOf(mailbox.account_identifier ?? "")).filter((domain) => domain && !publicMailboxDomains.has(domain)));
   const identityMap = new Map((identities ?? []).map((identity) => [identity.id, identity]));
@@ -73,7 +73,8 @@ export async function GET(request: NextRequest) {
     const category = message.classification ?? "Information Only";
     const metadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as { is_read?: boolean; gmail_labels?: string[] } : {};
     const unread = metadata.is_read === false || metadata.gmail_labels?.includes("UNREAD") === true;
-    const current: CleanupGroup & { categorySet: Set<string> } = groups.get(key) ?? { key, account: connection?.account_name || connection?.account_identifier || "Unknown account", sender: personMap.get(identity?.person_id ?? "") ?? address, senderAddress: address, count: 0, unread: 0, categories: [], categorySet: new Set<string>(), lastSeenAt: message.sent_at, action: "archive", reason: "", unsubscribeUrl: unsubscribeUrl(message.body_text), messageIds: [], canApply: connection?.provider === "microsoft-graph" };
+    const googleModifyGranted = connection?.provider === "gmail" && Array.isArray(connection.scopes) && connection.scopes.includes("https://www.googleapis.com/auth/gmail.modify");
+    const current: CleanupGroup & { categorySet: Set<string> } = groups.get(key) ?? { key, account: connection?.account_name || connection?.account_identifier || "Unknown account", sender: personMap.get(identity?.person_id ?? "") ?? address, senderAddress: address, count: 0, unread: 0, categories: [], categorySet: new Set<string>(), lastSeenAt: message.sent_at, action: "archive", reason: "", unsubscribeUrl: unsubscribeUrl(message.body_text), messageIds: [], canApply: connection?.provider === "microsoft-graph" || googleModifyGranted };
     current.count += 1; if (unread) current.unread += 1; current.categorySet.add(category);
     if (current.messageIds.length < 50) current.messageIds.push(message.id);
     current.unsubscribeUrl ||= unsubscribeUrl(message.body_text);
