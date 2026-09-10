@@ -10,6 +10,7 @@ import { senderRelevance } from "@/lib/sender-intelligence";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { approvedLearningContext, saveLearningSuggestion, toneRule } from "@/lib/learning-feedback";
 import { relationshipTypes } from "@/lib/relationship-types";
+import { enforceProfessionalRouting } from "@/lib/action-routing";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -161,7 +162,8 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     const conversationReplies = (conversationHistory ?? []).filter((item) => item.direction === "out");
     const { data: recentReplies } = await supabase.from("messages").select("body_text").eq("owner_id", user.id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8);
     const styleExamples = [...(conversationReplies ?? []), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
-    const analysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content), styleExamples, conversationMessages });
+    const aiAnalysis = await getAIService().analyzeEmail({ ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content), styleExamples, conversationMessages });
+    const analysis = enforceProfessionalRouting(aiAnalysis, [conversation.title, ...conversationMessages.map((item) => item.body)].join("\n"));
     const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
     const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
     const now = new Date().toISOString();
