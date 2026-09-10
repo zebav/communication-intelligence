@@ -53,6 +53,8 @@ export async function GET(request: NextRequest) {
   const { data: conversations } = conversationIds.length ? await database.from("conversations").select("id,connection_id").eq("owner_id", user.id).in("id", conversationIds) : { data: [] };
   const connectionIds = [...new Set((conversations ?? []).flatMap((conversation) => conversation.connection_id ? [conversation.connection_id] : []))];
   const { data: connections } = connectionIds.length ? await database.from("connections").select("id,account_name,account_identifier,provider").eq("owner_id", user.id).in("id", connectionIds) : { data: [] };
+  const { data: connectedMailboxes } = await database.from("connections").select("account_identifier").eq("owner_id", user.id).eq("status", "connected").in("provider", ["microsoft-graph", "gmail"]);
+  const trustedInternalDomains = new Set((connectedMailboxes ?? []).map((mailbox) => domainOf(mailbox.account_identifier ?? "")).filter((domain) => domain && !publicMailboxDomains.has(domain)));
   const identityMap = new Map((identities ?? []).map((identity) => [identity.id, identity]));
   const personMap = new Map((people ?? []).map((person) => [person.id, person.display_name ?? "Unknown sender"]));
   const conversationMap = new Map((conversations ?? []).map((conversation) => [conversation.id, conversation.connection_id]));
@@ -64,8 +66,7 @@ export async function GET(request: NextRequest) {
     const connectionId = conversationMap.get(message.conversation_id) ?? "unknown";
     const connection = connectionMap.get(connectionId ?? "");
     const address = identity?.external_identifier ?? "Unknown address";
-    const accountDomain = domainOf(connection?.account_identifier ?? "");
-    if (accountDomain && !publicMailboxDomains.has(accountDomain) && domainOf(address) === accountDomain) continue;
+    if (trustedInternalDomains.has(domainOf(address))) continue;
     const key = `${connectionId}:${address}`;
     const category = message.classification ?? "Information Only";
     const metadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as { is_read?: boolean; gmail_labels?: string[] } : {};
