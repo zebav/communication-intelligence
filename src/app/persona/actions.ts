@@ -5,11 +5,11 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
 const guidanceSchema = z.object({ tone: z.string().trim().max(160), guidance: z.string().trim().max(600) });
-const profileSchema = z.object({ identitySummary: z.string().trim().max(1000), values: z.string().trim().max(600), defaultTone: z.string().trim().max(160), preferredLength: z.string().trim().max(80), principles: z.string().trim().max(1000), signOff: z.string().trim().max(120), channels: z.record(z.string(), guidanceSchema), situations: z.record(z.string(), guidanceSchema), people: z.record(z.string().uuid(), guidanceSchema.extend({ name: z.string().trim().max(200) })) });
+const profileSchema = z.object({ identitySummary: z.string().trim().max(8000), values: z.string().trim().max(2000), defaultTone: z.string().trim().max(160), preferredLength: z.string().trim().max(80), principles: z.string().trim().max(1000), signOff: z.string().trim().max(120), channels: z.record(z.string(), guidanceSchema), situations: z.record(z.string(), guidanceSchema), people: z.record(z.string().uuid(), guidanceSchema.extend({ name: z.string().trim().max(200) })) });
 
 export async function saveUniversalCommunicationProfile(input: z.infer<typeof profileSchema>) {
   const parsed = profileSchema.safeParse(input);
-  if (!parsed.success) return { error: "Check the profile fields and try again." };
+  if (!parsed.success) { const field = parsed.error.issues[0]?.path.join(".") || "profile"; return { error: `The field "${field}" contains too much text or an invalid value. Please check that field and try again.` }; }
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Your session has expired. Sign in again." };
