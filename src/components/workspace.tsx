@@ -6,7 +6,6 @@ import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock
 import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
 import { cleanups, conversations } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
-import { CommunicationCaseForm } from "@/components/communication-case-form";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, deeplyAnalyzeEmailWithAI, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
 import type { DraftTransformation } from "@/lib/ai/service";
 import { emailDashboardExcerpt, emailDashboardSummary, prioritizeEmails } from "@/lib/email-intelligence";
@@ -57,13 +56,19 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
 }
 
 function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
+  const grouped = Object.entries(cases.reduce<Record<string, Record<string, CommunicationCase[]>>>((sources, item) => {
+    const source = item.source || "manual";
+    const person = item.personName.trim().toLocaleLowerCase();
+    sources[source] ??= {};
+    sources[source][person] ??= [];
+    sources[source][person].push(item);
+    return sources;
+  }, {}));
   return <div className="page"><PageHeader eyebrow="Manual & Imported Conversation Connector V1" title="Analyze a conversation" subtitle="Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply." />
     <div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div>
     <ConversationImportForm />
-    <div className="section-title"><MessageCircle size={14} color="#34d399" /> Save one important message</div>
-    <CommunicationCaseForm />
-    <div className="section-title">Saved cases <span className="count">{cases.length}</span></div>
-    {cases.length === 0 ? <div className="empty-card">No cases saved yet. Use the form above to create the first one.</div> : <div className="case-list">{cases.map((item) => <article className="case-item" key={item.id}><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><div className="case-title"><strong>{item.title}</strong><span className="tag">{item.source}</span></div><span className="case-person">{item.personName} · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</span><p>{item.message}</p></div></article>)}</div>}
+    <div className="section-title">Conversations by source <span className="count">{cases.length}</span></div>
+    {grouped.length === 0 ? <div className="empty-card">No imported conversations yet. Upload a screenshot or paste a conversation above.</div> : <div className="source-folders">{grouped.map(([source, people]) => <section className="source-folder" key={source}><div className="source-folder-head"><MessageCircle size={15} /><strong>{source}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); const latest = ordered[0]; return <article className="case-item" key={`${source}-${latest.personName}`}><div className="avatar">{latest.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><div className="case-title"><strong>{latest.personName}</strong><span className="tag">{ordered.length} conversation{ordered.length === 1 ? "" : "s"}</span></div><span className="case-person">{latest.title} · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(latest.createdAt))}</span><p>{latest.message}</p></div></article>; })}</div></section>)}</div>}
   </div>;
 }
 
