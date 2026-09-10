@@ -4,7 +4,6 @@ import { decryptCredential, encryptCredential } from "@/lib/connectors/credentia
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { googleConfig } from "@/lib/connectors/google-oauth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 60;
@@ -87,35 +86,35 @@ export async function POST(request: NextRequest) {
   if (!user) return jsonError("Your session has expired. Sign in again.", 401);
   const { data: assurance } = await session.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return jsonError("Two-factor authentication is required.", 403);
-  const admin = createAdminClient();
-  const { data: connection } = await admin.from("connections").select("id,provider,account_identifier,encrypted_credentials,token_metadata").eq("id", parsed.data.connectionId).eq("owner_id", user.id).eq("status", "connected").maybeSingle();
+  const database = session;
+  const { data: connection } = await database.from("connections").select("id,provider,account_identifier,encrypted_credentials,token_metadata").eq("id", parsed.data.connectionId).eq("owner_id", user.id).eq("status", "connected").maybeSingle();
   if (!connection?.encrypted_credentials || !["microsoft-graph", "gmail"].includes(connection.provider)) return jsonError("The selected email account is not connected.", 409);
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!encryptionKey) return jsonError("The server encryption key is not configured.");
   try {
     const stored = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
     const authorized = connection.provider === "gmail" ? await googleToken(stored, request.nextUrl.origin) : await microsoftToken(stored, request.nextUrl.origin);
-    if (authorized.refreshed) await admin.from("connections").update({ encrypted_credentials: encryptCredential(authorized.credentials, encryptionKey), token_metadata: { ...(connection.token_metadata as object ?? {}), expires_at: authorized.credentials.expiresAt }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
+    if (authorized.refreshed) await database.from("connections").update({ encrypted_credentials: encryptCredential(authorized.credentials, encryptionKey), token_metadata: { ...(connection.token_metadata as object ?? {}), expires_at: authorized.credentials.expiresAt }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
     const metadata = (connection.token_metadata as Record<string, unknown> | null) ?? {};
     const cursorKey = connection.provider === "gmail" ? "contact_discovery_page_token" : "contact_discovery_next_link";
     const cursor = typeof metadata[cursorKey] === "string" ? metadata[cursorKey] as string : undefined;
     const discovery = connection.provider === "gmail" ? await discoverGoogle(authorized.token, cursor) : await discoverMicrosoft(authorized.token, cursor);
     const discovered = discovery.contacts;
-    await admin.from("connections").update({ token_metadata: { ...metadata, expires_at: authorized.credentials.expiresAt, [cursorKey]: discovery.cursor ?? null, contact_discovery_completed_at: discovery.cursor ? null : new Date().toISOString() }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
+    await database.from("connections").update({ token_metadata: { ...metadata, expires_at: authorized.credentials.expiresAt, [cursorKey]: discovery.cursor ?? null, contact_discovery_completed_at: discovery.cursor ? null : new Date().toISOString() }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
     const ownAddress = cleanAddress(connection.account_identifier);
     let created = 0; let existing = 0;
     const createdContacts: Array<{ name: string; address: string }> = [];
     for (const contact of discovered.filter((item) => item.address !== ownAddress)) {
-      const { data: identity } = await admin.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
-      if (identity) { existing += 1; if (contact.lastSeenAt) await admin.from("people").update({ last_contact_at: contact.lastSeenAt }).eq("id", identity.person_id).eq("owner_id", user.id); continue; }
-      const { data: person, error: personError } = await admin.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: "unknown", relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
+      const { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
+      if (identity) { existing += 1; if (contact.lastSeenAt) await database.from("people").update({ last_contact_at: contact.lastSeenAt }).eq("id", identity.person_id).eq("owner_id", user.id); continue; }
+      const { data: person, error: personError } = await database.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: "unknown", relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
       if (personError || !person) continue;
-      const { error: identityError } = await admin.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
-      if (identityError) { await admin.from("people").delete().eq("id", person.id); continue; }
+      const { error: identityError } = await database.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
+      if (identityError) { await database.from("people").delete().eq("id", person.id); continue; }
       created += 1;
       createdContacts.push({ name: contact.name, address: contact.address });
     }
-    await admin.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "contacts.history_discovered", object_type: "connection", object_id: connection.id, source: "email", actor_type: "user", new_value: { provider: connection.provider, scanned: discovered.length, created, existing } });
+    await database.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "contacts.history_discovered", object_type: "connection", object_id: connection.id, source: "email", actor_type: "user", new_value: { provider: connection.provider, scanned: discovered.length, created, existing } });
     return NextResponse.json({ success: true, scanned: discovered.length, created, existing, createdContacts: createdContacts.slice(0, 20), moreAvailable: Boolean(discovery.cursor) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
