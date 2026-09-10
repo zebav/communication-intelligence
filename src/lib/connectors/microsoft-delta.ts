@@ -3,9 +3,9 @@ const INBOX_DELTA_PATH = "/v1.0/me/mailFolders/inbox/messages/delta";
 
 export function initialInboxDeltaUrl(now = Date.now()) {
   const url = new URL(`https://${GRAPH_HOST}${INBOX_DELTA_PATH}`);
-  url.searchParams.set("$top", "25");
+  url.searchParams.set("$top", "50");
   url.searchParams.set("$orderby", "receivedDateTime desc");
-  url.searchParams.set("$filter", `receivedDateTime ge ${new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()}`);
+  url.searchParams.set("$filter", `receivedDateTime ge ${new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString()}`);
   url.searchParams.set("$select", "id,conversationId,internetMessageId,subject,body,uniqueBody,bodyPreview,from,receivedDateTime,sentDateTime,importance,inferenceClassification,isRead,hasAttachments");
   return url;
 }

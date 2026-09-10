@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { analyzeImportedConversation } from "@/lib/connectors/import-analysis";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeUniversalProfile } from "@/lib/communication-profile";
 
 const requestSchema = z.object({ transcript: z.string().trim().min(1).max(100_000) });
 
@@ -15,6 +16,10 @@ export async function POST(request: NextRequest) {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return NextResponse.json({ error: "Two-factor authentication is required." }, { status: 403 });
   try {
-    return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, content: [{ type: "input_text", text: parsed.data.transcript }] }));
+    const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
+    const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
+    const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
+    const personaContext = JSON.stringify({ identitySummary: universalProfile.identitySummary, values: universalProfile.values, defaultTone: universalProfile.defaultTone, preferredLength: universalProfile.preferredLength, principles: universalProfile.principles, signOff: universalProfile.signOff, channels: universalProfile.channels, situations: universalProfile.situations });
+    return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, personaContext, content: [{ type: "input_text", text: parsed.data.transcript }] }));
   } catch { return NextResponse.json({ error: "The conversation could not be analyzed. Try again." }, { status: 502 }); }
 }

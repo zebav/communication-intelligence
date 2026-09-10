@@ -8,6 +8,7 @@ import { googleConfig } from "@/lib/connectors/google-oauth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isAuthorizedCron } from "@/lib/cron-auth";
+import { senderRelevance } from "@/lib/sender-intelligence";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
     const authorized = await accessToken(stored, request.nextUrl.origin);
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-    listUrl.searchParams.set("maxResults", "25"); listUrl.searchParams.append("labelIds", "INBOX"); listUrl.searchParams.set("q", "newer_than:30d");
+    listUrl.searchParams.set("maxResults", "50"); listUrl.searchParams.append("labelIds", "INBOX"); listUrl.searchParams.set("q", "newer_than:1y");
     if (typeof metadata.gmail_page_token === "string") listUrl.searchParams.set("pageToken", metadata.gmail_page_token);
     const listResponse = await fetch(listUrl, { headers: { authorization: `Bearer ${authorized.token}` }, signal: AbortSignal.timeout(15_000) });
     if (listResponse.status === 401) throw new Error("reconnect_required");
@@ -91,9 +92,14 @@ export async function POST(request: NextRequest) {
         const { data: createdIdentity, error: identityError } = await supabase.from("identities").insert({ owner_id: userId, person_id: personId, source: "email", external_identifier: address, metadata: { provider: googleGmailConnector.id }, verified_match: true, confidence: 1 }).select("id").single();
         if (identityError || !createdIdentity) throw new Error("identity_insert_failed"); identityId = createdIdentity.id;
       }
-      const classification = classifyEmail({ subject, preview: content, sender: address }); const priority = emailPriority(classification); const externalConversationId = `gmail:${profileId}:${message.threadId}`;
+      const classification = classifyEmail({ subject, preview: content, sender: address });
+      const unread = (message.labelIds ?? []).includes("UNREAD");
+      const { data: history } = await supabase.from("conversations").select("id,last_user_message_at").eq("owner_id", userId).eq("person_id", personId).limit(100);
+      const { data: senderPreferences } = await supabase.from("people").select("relationship_type,manual_priority,email_handling_rule,sender_preferences_verified").eq("id", personId).eq("owner_id", userId).maybeSingle();
+      const relevance = senderRelevance({ basePriority: emailPriority(classification), unread, historicalConversationCount: history?.length ?? 0, hasOwnerReplies: (history ?? []).some((item) => Boolean(item.last_user_message_at)), relationshipType: senderPreferences?.sender_preferences_verified ? senderPreferences.relationship_type : null, manualPriority: senderPreferences?.sender_preferences_verified && senderPreferences.manual_priority != null ? Number(senderPreferences.manual_priority) : null, handlingRule: senderPreferences?.sender_preferences_verified ? senderPreferences.email_handling_rule : "normal" });
+      const priority = relevance.score; const externalConversationId = `gmail:${profileId}:${message.threadId}`;
       const { data: existingConversation } = await supabase.from("conversations").select("id").eq("owner_id", userId).eq("source", "email").eq("external_conversation_id", externalConversationId).maybeSingle();
-      const conversationValues = { owner_id: userId, person_id: personId, connection_id: connection.id, source: "email", external_conversation_id: externalConversationId, title: subject, conversation_type: "email", priority_score: priority, last_message_at: sentAt, last_other_message_at: sentAt, summary: content.slice(0, 300), recommended_action: { action: recommendedEmailAction(classification), reason: `Initial rule-based classification: ${classification}` }, updated_at: new Date().toISOString() };
+      const conversationValues = { owner_id: userId, person_id: personId, connection_id: connection.id, source: "email", external_conversation_id: externalConversationId, title: subject, conversation_type: "email", priority_score: priority, last_message_at: sentAt, last_other_message_at: sentAt, summary: content.slice(0, 300), recommended_action: { action: recommendedEmailAction(classification), reason: `Initial rule-based classification: ${classification}`, relevance_reasons: relevance.reasons, unread }, updated_at: new Date().toISOString() };
       const conversation = existingConversation?.id ? await supabase.from("conversations").update(conversationValues).eq("id", existingConversation.id).select("id").single() : await supabase.from("conversations").insert(conversationValues).select("id").single();
       if (conversation.error || !conversation.data) throw new Error("conversation_save_failed");
       const { error: messageError } = await supabase.from("messages").insert({ owner_id: userId, conversation_id: conversation.data.id, external_message_id: externalMessageId, direction: "in", sender_identity_id: identityId, source: "email", body_text: content, sent_at: sentAt, classification, importance_score: priority, metadata: { provider: googleGmailConnector.id, account: connection.account_identifier, gmail_labels: message.labelIds ?? [] }, processed_at: new Date().toISOString() });
