@@ -53,8 +53,10 @@ export async function importConversation(_: ImportConversationState, formData: F
   const sentTimes = lines.map((line, index) => validImportedDate(line.sentAt, new Date(now.getTime() - (lines.length - index) * 1000)));
   const conversationValues = { owner_id: user.id, person_id: person.id, connection_id: connection.id, source: parsed.data.source, external_conversation_id: conversationKey, title: parsed.data.title, conversation_type: "imported", last_message_at: sentTimes.at(-1), last_other_message_at: sentTimes.at(-1), summary: parsed.data.summary || lines.at(-1)?.body.slice(0, 300), priority_score: parsed.data.priorityScore, recommended_action: { action: parsed.data.recommendedAction, intent: parsed.data.intent, imported_analysis: true }, updated_at: now.toISOString() };
   const { data: existingConversation } = await supabase.from("conversations").select("id").eq("owner_id", user.id).eq("source", parsed.data.source).eq("external_conversation_id", conversationKey).maybeSingle();
-  const conversationResult = existingConversation?.id
-    ? await supabase.from("conversations").update(conversationValues).eq("id", existingConversation.id).eq("owner_id", user.id).select("id").single()
+  const { data: legacyConversations } = existingConversation?.id ? { data: [] } : await supabase.from("conversations").select("id").eq("owner_id", user.id).eq("person_id", person.id).eq("connection_id", connection.id).eq("source", parsed.data.source).eq("conversation_type", "imported").order("created_at", { ascending: true }).limit(1);
+  const reusableConversationId = existingConversation?.id ?? legacyConversations?.[0]?.id;
+  const conversationResult = reusableConversationId
+    ? await supabase.from("conversations").update(conversationValues).eq("id", reusableConversationId).eq("owner_id", user.id).select("id").single()
     : await supabase.from("conversations").insert(conversationValues).select("id").single();
   const { data: conversation, error: conversationError } = conversationResult;
   if (conversationError || !conversation) return { error: "The imported conversation could not be saved." };
