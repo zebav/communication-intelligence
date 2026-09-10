@@ -20,6 +20,18 @@ export async function POST(request: NextRequest) {
   if (image.size > 12_000_000) return NextResponse.json({ error: "The screenshot is larger than 12 MB. Crop it or choose a smaller image." }, { status: 400 });
   const imageUrl = `data:${image.type};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
   try {
-    return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, model: process.env.OPENAI_VISION_MODEL || "gpt-5", content: [{ type: "input_text", text: "Read and analyze this conversation screenshot." }, { type: "input_image", image_url: imageUrl, detail: "high" }] }));
+    const content = [{ type: "input_text", text: "Read and analyze this conversation screenshot." }, { type: "input_image", image_url: imageUrl, detail: "high" }];
+    const models = [...new Set([process.env.OPENAI_VISION_MODEL, process.env.OPENAI_FAST_MODEL, "gpt-4.1-mini", "gpt-4o-mini"].filter((model): model is string => Boolean(model?.trim())))];
+    let lastError: unknown;
+    for (const model of models) {
+      try {
+        return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, model, content }));
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof Error) || !error.message.includes("_404_model_not_found")) throw error;
+        console.warn("Screenshot model unavailable; trying fallback", { model });
+      }
+    }
+    throw lastError ?? new Error("no_vision_model_available");
   } catch (error) { console.error("Screenshot import failed", { reason: error instanceof Error ? error.message : "unknown" }); return NextResponse.json({ error: "The image service could not complete the analysis. Please try again." }, { status: 502 }); }
 }
