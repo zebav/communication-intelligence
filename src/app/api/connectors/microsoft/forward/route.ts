@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 
   const { data: message } = await supabase.from("messages").select("external_message_id,conversations(connection_id)").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
   if (!message?.external_message_id) return jsonError("The Outlook message could not be found.", 404);
-  const { data: identity } = await supabase.from("person_identities").select("external_identifier").eq("owner_id", user.id).eq("person_id", parsed.data.recipientPersonId).eq("source", "email").eq("verified_match", true).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: identity } = await supabase.from("identities").select("external_identifier").eq("owner_id", user.id).eq("person_id", parsed.data.recipientPersonId).eq("source", "email").eq("verified_match", true).order("created_at", { ascending: false }).limit(1).maybeSingle();
   const recipient = identity?.external_identifier?.trim();
   if (!recipient || !z.string().email().safeParse(recipient).success) return jsonError("The selected person has no verified email address.", 409);
   const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
