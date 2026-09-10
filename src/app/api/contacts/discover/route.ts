@@ -19,7 +19,7 @@ function gmailName(value: string, address: string) { return value.replace(/<[^>]
 function contactEntity(contact: Contact): "person" | "organization" | "automated" | "unknown" {
   const local = contact.address.split("@")[0] ?? ""; const value = `${contact.name} ${local}`.toLowerCase();
   if (/no.?reply|do.?not.?reply|notification|newsletter|mailer|automated|alerts?|updates?|marketing/.test(value)) return "automated";
-  if (/\b(team|support|service|sales|billing|accounts?|info|office|company|group|network|conference|institute|university|bank|hotel|booking|business)\b|\b(ab|ltd|inc|llc)\b/.test(value)) return "organization";
+  if (/\b(team|support|service|sales|billing|accounts?|info|office|company|group|networks?|conference|institute|university|bank|hotel|booking|business|club|daily|media|foundation|association|society|academy|school|centre|center|store|shop|studio)\b|\b(ab|ltd|inc|llc)\b/.test(value)) return "organization";
   const words = contact.name.trim().split(/\s+/).filter(Boolean);
   if (contact.name !== contact.address && words.length >= 2 && words.length <= 5 && !/[|<>]/.test(contact.name)) return "person";
   return "unknown";
@@ -119,7 +119,13 @@ export async function POST(request: NextRequest) {
       await Promise.all(candidates.slice(offset, offset + 10).map(async (contact) => {
         const { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
         const entityType = contactEntity(contact);
-        if (identity) { existing += 1; await database.from("people").update({ ...(contact.lastSeenAt ? { last_contact_at: contact.lastSeenAt } : {}), entity_type: entityType }).eq("id", identity.person_id).eq("owner_id", user.id).eq("entity_type", "unknown"); return; }
+        if (identity) {
+          existing += 1;
+          let update = database.from("people").update({ ...(contact.lastSeenAt ? { last_contact_at: contact.lastSeenAt } : {}), entity_type: entityType }).eq("id", identity.person_id).eq("owner_id", user.id);
+          update = entityType === "person" ? update.eq("entity_type", "unknown") : update.in("entity_type", ["unknown", "person"]).eq("relationship_type", "unknown");
+          await update;
+          return;
+        }
         const { data: person, error: personError } = await database.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: entityType, relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
         if (personError || !person) return;
         const { error: identityError } = await database.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
