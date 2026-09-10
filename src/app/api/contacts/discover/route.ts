@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
     const discovered = connection.provider === "gmail" ? await discoverGoogle(authorized.token) : await discoverMicrosoft(authorized.token);
     const ownAddress = cleanAddress(connection.account_identifier);
     let created = 0; let existing = 0;
+    const createdContacts: Array<{ name: string; address: string }> = [];
     for (const contact of discovered.filter((item) => item.address !== ownAddress)) {
       const { data: identity } = await admin.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
       if (identity) { existing += 1; if (contact.lastSeenAt) await admin.from("people").update({ last_contact_at: contact.lastSeenAt }).eq("id", identity.person_id).eq("owner_id", user.id); continue; }
@@ -106,9 +107,10 @@ export async function POST(request: NextRequest) {
       const { error: identityError } = await admin.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
       if (identityError) { await admin.from("people").delete().eq("id", person.id); continue; }
       created += 1;
+      createdContacts.push({ name: contact.name, address: contact.address });
     }
     await admin.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "contacts.history_discovered", object_type: "connection", object_id: connection.id, source: "email", actor_type: "user", new_value: { provider: connection.provider, scanned: discovered.length, created, existing } });
-    return NextResponse.json({ success: true, scanned: discovered.length, created, existing });
+    return NextResponse.json({ success: true, scanned: discovered.length, created, existing, createdContacts: createdContacts.slice(0, 20) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Historical contact discovery failed", { provider: connection.provider, reason });
