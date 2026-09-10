@@ -19,6 +19,7 @@ function htmlToText(value: string) {
     .replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
     .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<a\\b[^>]*href=["\'](https:\\/\\/[^"\']+)["\'][^>]*>([\\s\\S]*?)<\\/a>/gi, "$2 ($1)")
     .replace(/<[^>]+>/g, ""));
 }
 
