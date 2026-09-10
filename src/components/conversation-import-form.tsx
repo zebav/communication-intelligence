@@ -5,6 +5,25 @@ import { CheckCircle2, Clipboard, FileText, FileUp, Image as ImageIcon, LoaderCi
 import { importConversation } from "@/app/import/actions";
 import type { ImportedConversationAnalysis } from "@/lib/connectors/import-analysis";
 
+async function normalizeMobileImage(file: File) {
+  const supported = new Set(["image/png", "image/jpeg", "image/webp"]);
+  if (supported.has(file.type) && file.size <= 8_000_000) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2400 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("canvas_unavailable");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    if (!blob) throw new Error("conversion_failed");
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "conversation"}.jpg`, { type: "image/jpeg" });
+  } catch {
+    throw new Error("The iPhone image could not be converted. Save it as a screenshot or JPEG and try again.");
+  }
+}
+
 export function ConversationImportForm() {
   const [state, action, pending] = useActionState(importConversation, undefined);
   const [raw, setRaw] = useState(""); const [analysis, setAnalysis] = useState<ImportedConversationAnalysis>();
@@ -14,7 +33,7 @@ export function ConversationImportForm() {
   useEffect(() => { if (analysis && autoSave && !pending) { setAutoSave(false); requestAnimationFrame(() => formRef.current?.requestSubmit()); } }, [analysis, autoSave, pending]);
   const acceptAnalysis = (result: ImportedConversationAnalysis) => { setAnalysis(result); setRaw(result.transcript); };
   const analyzeText = async (text = raw) => { if (!text.trim()) return; setWorking(true); setError(""); setAnalysis(undefined); try { const response = await fetch("/api/import/analyze", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ transcript: text }) }); const result = await response.json() as ImportedConversationAnalysis & { error?: string }; if (!response.ok) throw new Error(result.error); acceptAnalysis(result); } catch (cause) { setError(cause instanceof Error ? cause.message : "The conversation could not be analyzed."); } finally { setWorking(false); } };
-  const analyzeImage = async (file?: File) => { if (!file) return; setWorking(true); setError(""); setAnalysis(undefined); try { if (!file.type.startsWith("image/")) throw new Error("Choose an image from your phone."); const form = new FormData(); form.set("image", file); form.set("consent", "yes"); const response = await fetch("/api/import/screenshot", { method: "POST", body: form }); const result = await response.json() as ImportedConversationAnalysis & { error?: string }; if (!response.ok) throw new Error(result.error); setAutoSave(true); acceptAnalysis(result); } catch (cause) { setError(cause instanceof Error ? cause.message : "The screenshot could not be analyzed."); } finally { setWorking(false); if (imageFile.current) imageFile.current.value = ""; } };
+  const analyzeImage = async (file?: File) => { if (!file) return; setWorking(true); setError(""); setAnalysis(undefined); try { const upload = await normalizeMobileImage(file); const form = new FormData(); form.set("image", upload); form.set("consent", "yes"); const response = await fetch("/api/import/screenshot", { method: "POST", body: form }); const result = await response.json() as ImportedConversationAnalysis & { error?: string }; if (!response.ok) throw new Error(result.error); setAutoSave(true); acceptAnalysis(result); } catch (cause) { setError(cause instanceof Error ? cause.message : "The screenshot could not be analyzed."); } finally { setWorking(false); if (imageFile.current) imageFile.current.value = ""; } };
   const chooseTextFile = async (file?: File) => { if (!file) return; if (file.size > 500_000) return setError("Choose a TXT, CSV, or JSON file smaller than 500 KB."); const text = await file.text(); setRaw(text); await analyzeText(text); };
   const copyReply = async () => { if (!analysis?.draftResponse) return; await navigator.clipboard.writeText(analysis.draftResponse); setCopied(true); setTimeout(() => setCopied(false), 1800); };
   return <form ref={formRef} action={action} className="case-form import-form simple-import">
