@@ -34,6 +34,8 @@ Google OAuth follows the same stable-domain rule. Gmail V1 requests read-only ac
 
 Conversation screenshots are sent to the configured OpenAI API after the owner deliberately selects an image, with storage disabled, to extract visible text. The image itself is not persisted by the application. Large or HEIC/HEIF iPhone selections are normalized locally in the browser to a bounded JPEG before upload. Successful mobile screenshot analysis automatically stores the structured transcript, links it through a stable channel/person identity, and creates an unverified conversation-context memory that remains distinguishable from owner-verified facts.
 
+Screenshot analysis uses `OPENAI_VISION_MODEL` when configured. If that model is unavailable to the API project, the server safely retries with the configured fast model and established vision-capable fallback models instead of failing the upload.
+
 Pasted text, exported files, and screenshots use the same automatic import analysis. It infers the likely channel, participants, topic, intent, priority, recommended action, and an editable reply. Channels without an approved sending API expose Copy reply rather than pretending to send externally.
 
 Adding a provider requires a catalog entry, a provider adapter, normalization tests, permission review, and an explicit owner-controlled connection flow.
