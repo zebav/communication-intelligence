@@ -10,6 +10,35 @@ export const importedConversationAnalysisSchema = z.object({
 });
 export type ImportedConversationAnalysis = z.infer<typeof importedConversationAnalysisSchema>;
 
+const boundedText = (value: unknown, fallback: string, maxLength: number) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  return (text || fallback).slice(0, maxLength);
+};
+
+export function parseImportedConversationAnalysis(output: string): ImportedConversationAnalysis {
+  const raw = JSON.parse(output) as Record<string, unknown>;
+  const normalized = {
+    source: raw.source,
+    accountLabel: boundedText(raw.accountLabel, typeof raw.source === "string" ? raw.source : "Imported conversation", 120),
+    participantName: boundedText(raw.participantName, "Unknown", 120),
+    ownerName: boundedText(raw.ownerName, "Me", 120),
+    title: boundedText(raw.title, "Imported conversation", 200),
+    transcript: boundedText(raw.transcript, "No readable transcript was returned.", 100_000),
+    summary: boundedText(raw.summary, "Conversation imported from screenshot.", 600),
+    intent: boundedText(raw.intent, "The immediate intent is unclear from the visible messages.", 400),
+    priorityScore: Math.min(10, Math.max(1, Number(raw.priorityScore) || 1)),
+    recommendedAction: boundedText(raw.recommendedAction, "Review the conversation", 120),
+    draftResponse: boundedText(raw.draftResponse, "", 4000),
+    draftTone: boundedText(raw.draftTone, "Natural", 120),
+  };
+  const parsed = importedConversationAnalysisSchema.safeParse(normalized);
+  if (!parsed.success) {
+    console.error("Imported conversation response validation failed", { issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), code: issue.code })) });
+    throw new Error("invalid_analysis");
+  }
+  return parsed.data;
+}
+
 const jsonSchema = { type: "object", additionalProperties: false, properties: {
   source: { type: "string", enum: ["email", "imessage", "instagram", "whatsapp", "messenger", "tinder", "tiktok", "linkedin", "manual"] },
   accountLabel: { type: "string" }, participantName: { type: "string" }, ownerName: { type: "string" }, title: { type: "string" }, transcript: { type: "string" }, summary: { type: "string" }, intent: { type: "string" }, priorityScore: { type: "number", minimum: 1, maximum: 10 }, recommendedAction: { type: "string" }, draftResponse: { type: "string" }, draftTone: { type: "string" },
@@ -31,7 +60,5 @@ export async function analyzeImportedConversation(input: { ownerId: string; cont
   const payload = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
   const output = payload.output_text ?? payload.output?.flatMap((item) => item.content ?? []).find((item) => item.type === "output_text")?.text;
   if (!output) throw new Error("no_analysis");
-  const parsed = importedConversationAnalysisSchema.safeParse(JSON.parse(output));
-  if (!parsed.success) { console.error("Imported conversation response validation failed", { issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), code: issue.code })) }); throw new Error("invalid_analysis"); }
-  return parsed.data;
+  return parseImportedConversationAnalysis(output);
 }
