@@ -262,16 +262,17 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     const result = await response.json() as { imported?: number; error?: string; moreAvailable?: boolean };
     if (!response.ok) throw new Error(result.error ?? "The import failed.");
     const discoveryResponse = await fetch("/api/contacts/discover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId: connection.id }) });
-    const discovery = await discoveryResponse.json() as { created?: number; scanned?: number; error?: string };
+    const discovery = await discoveryResponse.json() as { created?: number; scanned?: number; createdContacts?: Array<{ name: string; address: string }>; error?: string };
     if (!discoveryResponse.ok) throw new Error(discovery.error ?? "Historical contact discovery failed.");
-    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false, contactsCreated: discovery.created ?? 0, contactsScanned: discovery.scanned ?? 0 };
+    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false, contactsCreated: discovery.created ?? 0, contactsScanned: discovery.scanned ?? 0, createdContacts: discovery.createdContacts ?? [] };
   };
   const syncOutlook = async (connection: ChannelConnection) => {
     setSyncing(connection.id); setSyncError(""); setSyncResult("");
     try {
       const result = await importAccount(connection);
-      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported} messages imported · ${result.contactsScanned} historical contacts checked · ${result.contactsCreated} new contacts created.${result.moreAvailable ? " More message history is available; import again to continue." : ""}`);
-      router.refresh();
+      const examples = result.createdContacts.slice(0, 5).map((item) => item.name || item.address).join(", ");
+      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported} messages imported · ${result.contactsScanned} historical contacts checked · ${result.contactsCreated} new contacts created.${examples ? ` New: ${examples}.` : " Existing contacts were matched; no duplicate contacts were created."}${result.moreAvailable ? " More message history is available; import again to continue." : ""}`);
+      await router.refresh();
     } catch (error) { setSyncError(`${accountDisplayLabel(connection)}: ${error instanceof Error ? error.message : "The import failed."}`); }
     finally { setSyncing(""); }
   };
