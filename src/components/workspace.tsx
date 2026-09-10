@@ -294,7 +294,7 @@ function CleanUp() {
     <div className="learning-notice"><CheckCircle2 size={16} /><div><strong>Approval required</strong><p>Only the messages you select will change. Outlook actions are logged. Gmail actions stay unavailable until its write permission is connected.</p></div></div>
     <div className="connector-global-actions">
       <button className="btn primary" disabled={loading} onClick={() => void scan()}>{loading ? "Analyzing connected inboxes…" : "Analyze inboxes again"}</button>
-      <button className="btn" disabled={!visible.some((item) => item.canApply)} onClick={toggleAll}>Select all visible Outlook groups</button>
+      <button className="btn" disabled={!visible.some((item) => item.canApply)} onClick={toggleAll}>Select all actionable groups</button>
       <select className="filter" aria-label="Cleanup account" value={account} onChange={(event) => setAccount(event.target.value)}><option value="all">All email accounts</option>{accounts.map((value) => <option key={value}>{value}</option>)}</select>
       <select className="filter" aria-label="Cleanup action" value={action} onChange={(event) => setAction(event.target.value)}><option value="all">All suggestions</option><option value="unsubscribe_review">Subscriptions</option><option value="archive">Archive candidates</option><option value="mark_read">Notifications</option><option value="move_to_junk">Spam</option></select>
     </div>
@@ -310,7 +310,7 @@ function CleanUp() {
     {!loading && !error && visible.length === 0 ? <div className="empty-card">No cleanup suggestions match these filters.</div> : <div className="list">{visible.map((item) => <div className="list-row" key={item.key}>
       <div>{item.canApply ? <input type="checkbox" aria-label={`Select ${item.sender}`} checked={Boolean(selected[item.key])} onChange={(event) => setSelected((values) => ({ ...values, [item.key]: event.target.checked }))} /> : <Mail size={14} />}</div>
       <div><strong>{item.sender}</strong><small>{item.senderAddress} · {item.account}</small></div>
-      <div><span>{item.count} messages · {item.unread} unread</span><small>{item.categories.join(" · ")} · Last {new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(item.lastSeenAt))}</small><small className="muted">{item.reason}</small>{!item.canApply && <small className="muted">Preview only for Gmail or legacy messages without an account link.</small>}</div>
+      <div><span>{item.count} messages · {item.unread} unread</span><small>{item.categories.join(" · ")} · Last {new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(item.lastSeenAt))}</small><small className="muted">{item.reason}</small>{!item.canApply && <small className="muted">Preview only. Reconnect Gmail to approve cleanup actions, or relink this legacy message to an account.</small>}</div>
       <div>{item.action === "unsubscribe_review" && item.unsubscribeUrl ? <a className="btn primary" href={item.unsubscribeUrl} target="_blank" rel="noreferrer">Unsubscribe</a> : <span className="pill">{labels[item.action]}</span>}</div>
     </div>)}</div>}
   </div>;
