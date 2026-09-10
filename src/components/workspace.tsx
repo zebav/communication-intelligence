@@ -256,6 +256,22 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
   const [syncing, setSyncing] = useState("");
   const [syncError, setSyncError] = useState("");
   const [syncResult, setSyncResult] = useState("");
+  const discoverAccount = async (connection: ChannelConnection) => {
+    const response = await fetch("/api/contacts/discover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId: connection.id }) });
+    const result = await response.json() as { created?: number; scanned?: number; moreAvailable?: boolean; error?: string };
+    if (!response.ok) throw new Error(result.error ?? "Historical contact discovery failed.");
+    return result;
+  };
+  const discoverAllContacts = async () => {
+    setSyncing("contacts"); setSyncError(""); setSyncResult("");
+    const results: string[] = []; const errors: string[] = [];
+    for (const account of connectedEmailAccounts) {
+      try { const result = await discoverAccount(account); results.push(`${accountDisplayLabel(account)}: ${result.scanned ?? 0} checked, ${result.created ?? 0} new${result.moreAvailable ? " (more history remains)" : " (history complete)"}`); }
+      catch (error) { errors.push(`${accountDisplayLabel(account)}: ${error instanceof Error ? error.message : "Contact discovery failed"}`); }
+    }
+    setSyncResult(`Historical contact discovery completed for ${connectedEmailAccounts.length} accounts. ${results.join(" · ")}`);
+    setSyncError(errors.join(" · ")); await router.refresh(); setSyncing("");
+  };
   const importAccount = async (connection: ChannelConnection) => {
     const providerPath = connection.provider === "gmail" ? "google" : "microsoft";
     const response = await fetch(`/api/connectors/${providerPath}/sync?connectionId=${connection.id}`, { method: "POST" });
@@ -289,7 +305,7 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     router.refresh(); setSyncing("");
   };
   const capabilityLabels = { fullSync: "History", incrementalSync: "New messages", pushNotifications: "Live updates", sendWithApproval: "Approved sending" } as const;
-  return <div className="page"><PageHeader eyebrow="Gmail & Google Workspace Connector V1" title="Connections" subtitle="Connect and distinguish multiple Outlook, Gmail and Google Workspace accounts. Credentials are encrypted and every imported conversation keeps its account identity." />{syncResult && <div className="empty-card">{syncResult}</div>}{syncError && <div className="empty-card negative">{syncError}</div>}{connectedEmailAccounts.length > 1 && <div className="connector-global-actions"><button className="btn primary" onClick={() => void syncAllOutlook(connectedEmailAccounts)} disabled={Boolean(syncing)}>{syncing === "all" ? "Importing all email accounts…" : `Import all email accounts (${connectedEmailAccounts.length})`}</button></div>}<div className="list">{connectorCatalog.map((connector) => {
+  return <div className="page"><PageHeader eyebrow="Gmail & Google Workspace Connector V1" title="Connections" subtitle="Connect and distinguish multiple Outlook, Gmail and Google Workspace accounts. Credentials are encrypted and every imported conversation keeps its account identity." />{syncResult && <div className="empty-card">{syncResult}</div>}{syncError && <div className="empty-card negative">{syncError}</div>}{connectedEmailAccounts.length > 0 && <div className="connector-global-actions"><button className="btn primary" onClick={() => void discoverAllContacts()} disabled={Boolean(syncing)}>{syncing === "contacts" ? "Discovering historical contacts…" : `Discover historical contacts (${connectedEmailAccounts.length} accounts)`}</button>{connectedEmailAccounts.length > 1 && <button className="btn" onClick={() => void syncAllOutlook(connectedEmailAccounts)} disabled={Boolean(syncing)}>{syncing === "all" ? "Importing all email accounts…" : `Import all messages (${connectedEmailAccounts.length} accounts)`}</button>}</div>}<div className="list">{connectorCatalog.map((connector) => {
     const matchingConnections = connections.filter((item) => item.provider === connector.id);
     const connection = matchingConnections[0];
     const connected = connection?.status === "connected";
