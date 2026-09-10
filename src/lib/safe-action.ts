@@ -4,3 +4,12 @@ export function safeExternalActionUrl(value: string) {
   try { const url = new URL(value); if (url.protocol !== "https:" || blockedHosts.has(url.hostname.toLowerCase()) || url.username || url.password) return null; return url.toString(); }
   catch { return null; }
 }
+
+export function firstSafeExternalActionUrl(value: string) {
+  const candidates = value.match(/https:\/\/[^\s<>"']+/gi) ?? [];
+  for (const candidate of candidates) {
+    const safe = safeExternalActionUrl(candidate.replace(/[),.;!?]+$/, ""));
+    if (safe) return safe;
+  }
+  return null;
+}
