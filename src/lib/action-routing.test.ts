@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { enforceProfessionalRouting } from "@/lib/action-routing";
 import type { EmailAnalysis } from "@/lib/ai/service";
 
-const base: EmailAnalysis = { category: "Business", confidence: 0.8, summary: "A document needs review.", intent: "Request", priorityScore: 7, priorityReason: "Action is requested.", recommendedAction: "RESPOND_TODAY", requiresReply: true, draftResponse: "Thank you.", draftTone: "professional", commitment: { detected: false, description: "", dueAt: "", owner: "unknown", confidence: 0 }, memoryCandidates: [], relationshipSuggestion: { type: "advisor", confidence: 0.5, reason: "" }, forwardingSuggestion: { recommended: false, recipientRole: "none", reason: "", introduction: "" } };
+const base: EmailAnalysis = { category: "Business", confidence: 0.8, summary: "A document needs review.", intent: "Request", priorityScore: 7, priorityReason: "Action is requested.", recommendedAction: "RESPOND_TODAY", requiresReply: true, draftResponse: "Thank you.", draftTone: "professional", commitment: { detected: false, description: "", dueAt: "", owner: "unknown", confidence: 0 }, memoryCandidates: [], relationshipSuggestion: { type: "advisor", confidence: 0.5, reason: "" }, forwardingSuggestion: { recommended: false, recipientRole: "none", reason: "", introduction: "" }, actionSuggestion: { detected: false, type: "none", task: "", reason: "", targetUrl: "", requiresLogin: false, contactIds: [], confidence: 0 } };
 
 describe("professional routing guardrails", () => {
   it("routes Spanish legal matters to a lawyer", () => {
