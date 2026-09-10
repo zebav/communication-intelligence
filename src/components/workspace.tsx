@@ -260,11 +260,11 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     const providerPath = connection.provider === "gmail" ? "google" : "microsoft";
     const response = await fetch(`/api/connectors/${providerPath}/sync?connectionId=${connection.id}`, { method: "POST" });
     const result = await response.json() as { imported?: number; error?: string; moreAvailable?: boolean };
-    if (!response.ok) throw new Error(result.error ?? "The import failed.");
+    const messageImportError = response.ok ? "" : result.error ?? "The message import failed.";
     const discoveryResponse = await fetch("/api/contacts/discover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId: connection.id }) });
     const discovery = await discoveryResponse.json() as { created?: number; scanned?: number; createdContacts?: Array<{ name: string; address: string }>; moreAvailable?: boolean; error?: string };
-    if (!discoveryResponse.ok) throw new Error(discovery.error ?? "Historical contact discovery failed.");
-    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false, contactsCreated: discovery.created ?? 0, contactsScanned: discovery.scanned ?? 0, createdContacts: discovery.createdContacts ?? [], moreContactsAvailable: discovery.moreAvailable ?? false };
+    if (!discoveryResponse.ok) throw new Error([messageImportError, discovery.error ?? "Historical contact discovery failed."].filter(Boolean).join(" "));
+    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false, contactsCreated: discovery.created ?? 0, contactsScanned: discovery.scanned ?? 0, createdContacts: discovery.createdContacts ?? [], moreContactsAvailable: discovery.moreAvailable ?? false, messageImportError };
   };
   const syncOutlook = async (connection: ChannelConnection) => {
     setSyncing(connection.id); setSyncError(""); setSyncResult("");
@@ -272,6 +272,7 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
       const result = await importAccount(connection);
       const examples = result.createdContacts.slice(0, 5).map((item) => item.name || item.address).join(", ");
       setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported} messages imported · ${result.contactsScanned} historical contacts checked · ${result.contactsCreated} new contacts created.${examples ? ` New: ${examples}.` : " Existing contacts were matched; no duplicate contacts were created."}${result.moreContactsAvailable ? " More contact history remains; run the import again to continue further back." : " Contact history is complete for this account."}${result.moreAvailable ? " More message history is also available." : ""}`);
+      setSyncError(result.messageImportError);
       await router.refresh();
     } catch (error) { setSyncError(`${accountDisplayLabel(connection)}: ${error instanceof Error ? error.message : "The import failed."}`); }
     finally { setSyncing(""); }
@@ -280,7 +281,7 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     setSyncing("all"); setSyncError(""); setSyncResult("");
     const results: string[] = []; const errors: string[] = []; let total = 0;
     for (const account of accounts) {
-      try { const result = await importAccount(account); total += result.imported; results.push(`${accountDisplayLabel(account)}: ${result.contactsScanned} historical contacts checked, ${result.contactsCreated} new${result.moreContactsAvailable ? " (more history remains)" : " (history complete)"}`); }
+      try { const result = await importAccount(account); total += result.imported; results.push(`${accountDisplayLabel(account)}: ${result.contactsScanned} historical contacts checked, ${result.contactsCreated} new${result.moreContactsAvailable ? " (more history remains)" : " (history complete)"}`); if (result.messageImportError) errors.push(`${accountDisplayLabel(account)} message import: ${result.messageImportError}`); }
       catch (error) { errors.push(`${accountDisplayLabel(account)}: ${error instanceof Error ? error.message : "Import failed"}`); }
     }
     setSyncResult(`All ${accounts.length} accounts checked · ${total} messages imported. ${results.join(" · ")}`);
