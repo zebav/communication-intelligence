@@ -5,12 +5,13 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { senderRelevance } from "@/lib/sender-intelligence";
+import { relationshipTypes } from "@/lib/relationship-types";
 
 const personSchema = z.object({
   personId: z.string().uuid(),
   name: z.string().trim().min(1).max(200),
   organization: z.string().trim().max(200),
-  relationshipType: z.enum(["unknown", "customer", "partner", "investor", "colleague", "supplier", "family", "friend"]),
+  relationshipType: z.enum(relationshipTypes),
   notes: z.string().trim().max(2000),
   relationshipSummary: z.string().trim().max(1000),
   manualPriority: z.number().min(1).max(10),
