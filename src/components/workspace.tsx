@@ -99,8 +99,9 @@ function InboxView({ syncedEmails, people }: { syncedEmails: SyncedEmailConversa
 }
 
 function ReadableMessage({ text }: { text: string }) {
-  const blocks = text.replace(/\r\n?/g, "\n").split(/\n{2,}/).map((value) => value.trim()).filter(Boolean);
-  const renderLine = (line: string) => line.split(/(https:\/\/[^\s<>]+)/gi).map((part, index) => /^https:\/\//i.test(part) ? <a className="message-link" href={part.replace(/[),.;!?]+$/, "")} target="_blank" rel="noopener noreferrer" key={`${part}-${index}`}>{part.replace(/[),.;!?]+$/, "")}</a> : <span key={`${index}-${part.slice(0, 12)}`}>{part}</span>);
+  const cleaned = text.replace(/\r\n?/g, "\n").replace(/^b_preheader[\s\u00ad\u034f\u200b-\u200f\u2060\ufeff]*/i, "").replace(/[\u00ad\u034f\u200b-\u200f\u2060\ufeff]+/g, "").replace(/_{8,}/g, "\n\n").replace(/\s*\[https:\/\/[^\]]+\/(?:ho|open)\.gif\]\s*$/i, "").trim();
+  const blocks = cleaned.split(/\n{2,}/).map((value) => value.trim()).filter(Boolean);
+  const renderLine = (line: string) => line.split(/(<?https:\/\/[^\s<>]+>?)/gi).map((part, index) => { if (!/<?https:\/\//i.test(part)) return <span key={`${index}-${part.slice(0, 12)}`}>{part}</span>; const href = part.replace(/^</, "").replace(/>$/, "").replace(/[),.;!?]+$/, ""); let host = "website"; try { host = new URL(href).hostname.replace(/^www\./, ""); } catch {} return <a className="message-link" href={href} target="_blank" rel="noopener noreferrer" key={`${href}-${index}`}>Open link on {host} ↗</a>; });
   return <div className="message-bubble readable-message">{blocks.length ? blocks.map((block, index) => <p key={`${index}-${block.slice(0, 20)}`}>{block.split("\n").map((line, lineIndex) => <span className="message-line" key={lineIndex}>{renderLine(line)}</span>)}</p>) : <p>No readable message text is available.</p>}</div>;
 }
 
