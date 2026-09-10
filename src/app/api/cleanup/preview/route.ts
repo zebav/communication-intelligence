@@ -14,6 +14,8 @@ type CleanupGroup = {
   action: CleanupAction;
   reason: string;
   unsubscribeUrl?: string;
+  messageIds: string[];
+  canApply: boolean;
 };
 
 const lowValueCategories = new Set(["Newsletter", "Marketing", "Notification", "Spam", "Information Only"]);
@@ -44,7 +46,7 @@ export async function GET(request: NextRequest) {
     .select("id,sender_identity_id,conversation_id,classification,sent_at,metadata,body_text")
     .eq("owner_id", user.id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1000);
   if (error) return NextResponse.json({ error: "The inbox could not be analyzed." }, { status: 500 });
-  const relevantMessages = (messages ?? []).filter((message) => lowValueCategories.has(message.classification ?? ""));
+  const relevantMessages = (messages ?? []).filter((message) => { const metadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as Record<string, unknown> : {}; return lowValueCategories.has(message.classification ?? "") && !metadata.cleanup_action; });
   const identityIds = [...new Set(relevantMessages.flatMap((message) => message.sender_identity_id ? [message.sender_identity_id] : []))];
   const conversationIds = [...new Set(relevantMessages.map((message) => message.conversation_id))];
   const { data: identities } = identityIds.length ? await database.from("identities").select("id,external_identifier,person_id").eq("owner_id", user.id).in("id", identityIds) : { data: [] };
@@ -71,8 +73,9 @@ export async function GET(request: NextRequest) {
     const category = message.classification ?? "Information Only";
     const metadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as { is_read?: boolean; gmail_labels?: string[] } : {};
     const unread = metadata.is_read === false || metadata.gmail_labels?.includes("UNREAD") === true;
-    const current = groups.get(key) ?? { key, account: connection?.account_name || connection?.account_identifier || "Unknown account", sender: personMap.get(identity?.person_id ?? "") ?? address, senderAddress: address, count: 0, unread: 0, categories: [], categorySet: new Set<string>(), lastSeenAt: message.sent_at, action: "archive", reason: "", unsubscribeUrl: unsubscribeUrl(message.body_text) };
+    const current: CleanupGroup & { categorySet: Set<string> } = groups.get(key) ?? { key, account: connection?.account_name || connection?.account_identifier || "Unknown account", sender: personMap.get(identity?.person_id ?? "") ?? address, senderAddress: address, count: 0, unread: 0, categories: [], categorySet: new Set<string>(), lastSeenAt: message.sent_at, action: "archive", reason: "", unsubscribeUrl: unsubscribeUrl(message.body_text), messageIds: [], canApply: connection?.provider === "microsoft-graph" };
     current.count += 1; if (unread) current.unread += 1; current.categorySet.add(category);
+    if (current.messageIds.length < 50) current.messageIds.push(message.id);
     current.unsubscribeUrl ||= unsubscribeUrl(message.body_text);
     if (message.sent_at > current.lastSeenAt) current.lastSeenAt = message.sent_at;
     groups.set(key, current);
