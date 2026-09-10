@@ -64,15 +64,17 @@ async function discoverGoogle(token: string, cursor?: string) {
   if (!listResponse.ok) throw new Error(`google_history_${listResponse.status}`);
   const list = await listResponse.json() as { messages?: Array<{ id?: string }>; nextPageToken?: string };
   const contacts = new Map<string, Contact>();
-  for (const item of (list.messages ?? []).slice(0, 75)) {
-    if (!item.id) continue;
-    const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) continue;
-    const message = await response.json() as { internalDate?: string; payload?: { headers?: Array<{ name?: string; value?: string }> } };
-    for (const header of message.payload?.headers ?? []) if (["from", "to", "cc"].includes(header.name?.toLowerCase() ?? "")) for (const value of (header.value ?? "").split(",")) {
-      const address = gmailAddress(value); if (!address) continue;
-      contacts.set(address, { address, name: gmailName(value, address), lastSeenAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : undefined });
-    }
+  const items = (list.messages ?? []).slice(0, 75);
+  for (let offset = 0; offset < items.length; offset += 15) {
+    const messages = await Promise.all(items.slice(offset, offset + 15).map(async (item) => {
+      if (!item.id) return null;
+      const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
+      return response.ok ? response.json() as Promise<{ internalDate?: string; payload?: { headers?: Array<{ name?: string; value?: string }> } }> : null;
+    }));
+    for (const message of messages) for (const header of message?.payload?.headers ?? []) if (["from", "to", "cc"].includes(header.name?.toLowerCase() ?? "")) for (const value of (header.value ?? "").split(",")) {
+        const address = gmailAddress(value); if (!address) continue;
+        contacts.set(address, { address, name: gmailName(value, address), lastSeenAt: message?.internalDate ? new Date(Number(message.internalDate)).toISOString() : undefined });
+      }
   }
   return { contacts: [...contacts.values()], cursor: list.nextPageToken };
 }
@@ -104,15 +106,17 @@ export async function POST(request: NextRequest) {
     const ownAddress = cleanAddress(connection.account_identifier);
     let created = 0; let existing = 0;
     const createdContacts: Array<{ name: string; address: string }> = [];
-    for (const contact of discovered.filter((item) => item.address !== ownAddress)) {
-      const { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
-      if (identity) { existing += 1; if (contact.lastSeenAt) await database.from("people").update({ last_contact_at: contact.lastSeenAt }).eq("id", identity.person_id).eq("owner_id", user.id); continue; }
-      const { data: person, error: personError } = await database.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: "unknown", relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
-      if (personError || !person) continue;
-      const { error: identityError } = await database.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
-      if (identityError) { await database.from("people").delete().eq("id", person.id); continue; }
-      created += 1;
-      createdContacts.push({ name: contact.name, address: contact.address });
+    const candidates = discovered.filter((item) => item.address !== ownAddress);
+    for (let offset = 0; offset < candidates.length; offset += 10) {
+      await Promise.all(candidates.slice(offset, offset + 10).map(async (contact) => {
+        const { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", user.id).eq("source", "email").eq("external_identifier", contact.address).maybeSingle();
+        if (identity) { existing += 1; if (contact.lastSeenAt) await database.from("people").update({ last_contact_at: contact.lastSeenAt }).eq("id", identity.person_id).eq("owner_id", user.id); return; }
+        const { data: person, error: personError } = await database.from("people").insert({ owner_id: user.id, display_name: contact.name, entity_type: "unknown", relationship_type: "unknown", last_contact_at: contact.lastSeenAt ?? new Date().toISOString() }).select("id").single();
+        if (personError || !person) return;
+        const { error: identityError } = await database.from("identities").insert({ owner_id: user.id, person_id: person.id, source: "email", external_identifier: contact.address, metadata: { provider: connection.provider, discovered_from_history: true }, verified_match: true, confidence: 1 });
+        if (identityError) { await database.from("people").delete().eq("id", person.id); return; }
+        created += 1; createdContacts.push({ name: contact.name, address: contact.address });
+      }));
     }
     await database.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "contacts.history_discovered", object_type: "connection", object_id: connection.id, source: "email", actor_type: "user", new_value: { provider: connection.provider, scanned: discovered.length, created, existing } });
     return NextResponse.json({ success: true, scanned: discovered.length, created, existing, createdContacts: createdContacts.slice(0, 20), moreAvailable: Boolean(discovery.cursor) });
