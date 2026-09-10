@@ -11,7 +11,7 @@ import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { approvedLearningContext, saveLearningSuggestion, toneRule } from "@/lib/learning-feedback";
 import { relationshipTypes } from "@/lib/relationship-types";
 import { enforceProfessionalRouting } from "@/lib/action-routing";
-import { firstSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
+import { bestSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -174,7 +174,7 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     const analysis = enforceProfessionalRouting(aiAnalysis, [conversation.title, ...conversationMessages.map((item) => item.body)].join("\n"));
     const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
     const validContactIds = new Set(contactDirectory.map((contact) => contact.id));
-    const verifiedTargetUrl = safeExternalActionUrl(analysis.actionSuggestion.targetUrl) ?? firstSafeExternalActionUrl([message.body_text ?? "", ...conversationMessages.map((item) => item.body)].join("\n")) ?? "";
+    const verifiedTargetUrl = safeExternalActionUrl(analysis.actionSuggestion.targetUrl) ?? bestSafeExternalActionUrl([message.body_text ?? "", ...conversationMessages.map((item) => item.body)].join("\n")) ?? "";
     const actionSuggestion = { ...analysis.actionSuggestion, targetUrl: verifiedTargetUrl, contactIds: analysis.actionSuggestion.contactIds.filter((id) => validContactIds.has(id)), status: "proposed" as const };
     const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
     const now = new Date().toISOString();
