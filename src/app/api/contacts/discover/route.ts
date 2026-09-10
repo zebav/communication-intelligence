@@ -42,9 +42,9 @@ async function googleToken(credentials: StoredCredentials, origin: string) {
   return { token: result.access_token, credentials: next, refreshed: true };
 }
 
-async function discoverMicrosoft(token: string) {
+async function discoverMicrosoft(token: string, cursor?: string) {
   const contacts = new Map<string, Contact>();
-  let url: string | undefined = "https://graph.microsoft.com/v1.0/me/messages?$select=from,toRecipients,ccRecipients,sentDateTime,receivedDateTime&$top=100&$orderby=sentDateTime%20desc";
+  let url: string | undefined = cursor || "https://graph.microsoft.com/v1.0/me/messages?$select=from,toRecipients,ccRecipients,sentDateTime,receivedDateTime&$top=100&$orderby=sentDateTime%20desc";
   let pages = 0;
   while (url && pages < 3) {
     const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
@@ -56,13 +56,14 @@ async function discoverMicrosoft(token: string) {
     }
     url = data["@odata.nextLink"]; pages += 1;
   }
-  return [...contacts.values()];
+  return { contacts: [...contacts.values()], cursor: url };
 }
 
-async function discoverGoogle(token: string) {
-  const listResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=75&q=newer_than%3A5y", { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
+async function discoverGoogle(token: string, cursor?: string) {
+  const pageToken = cursor ? `&pageToken=${encodeURIComponent(cursor)}` : "";
+  const listResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=75&q=newer_than%3A5y${pageToken}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
   if (!listResponse.ok) throw new Error(`google_history_${listResponse.status}`);
-  const list = await listResponse.json() as { messages?: Array<{ id?: string }> };
+  const list = await listResponse.json() as { messages?: Array<{ id?: string }>; nextPageToken?: string };
   const contacts = new Map<string, Contact>();
   for (const item of (list.messages ?? []).slice(0, 75)) {
     if (!item.id) continue;
@@ -74,7 +75,7 @@ async function discoverGoogle(token: string) {
       contacts.set(address, { address, name: gmailName(value, address), lastSeenAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : undefined });
     }
   }
-  return [...contacts.values()];
+  return { contacts: [...contacts.values()], cursor: list.nextPageToken };
 }
 
 export async function POST(request: NextRequest) {
@@ -95,7 +96,12 @@ export async function POST(request: NextRequest) {
     const stored = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
     const authorized = connection.provider === "gmail" ? await googleToken(stored, request.nextUrl.origin) : await microsoftToken(stored, request.nextUrl.origin);
     if (authorized.refreshed) await admin.from("connections").update({ encrypted_credentials: encryptCredential(authorized.credentials, encryptionKey), token_metadata: { ...(connection.token_metadata as object ?? {}), expires_at: authorized.credentials.expiresAt }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
-    const discovered = connection.provider === "gmail" ? await discoverGoogle(authorized.token) : await discoverMicrosoft(authorized.token);
+    const metadata = (connection.token_metadata as Record<string, unknown> | null) ?? {};
+    const cursorKey = connection.provider === "gmail" ? "contact_discovery_page_token" : "contact_discovery_next_link";
+    const cursor = typeof metadata[cursorKey] === "string" ? metadata[cursorKey] as string : undefined;
+    const discovery = connection.provider === "gmail" ? await discoverGoogle(authorized.token, cursor) : await discoverMicrosoft(authorized.token, cursor);
+    const discovered = discovery.contacts;
+    await admin.from("connections").update({ token_metadata: { ...metadata, expires_at: authorized.credentials.expiresAt, [cursorKey]: discovery.cursor ?? null, contact_discovery_completed_at: discovery.cursor ? null : new Date().toISOString() }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
     const ownAddress = cleanAddress(connection.account_identifier);
     let created = 0; let existing = 0;
     const createdContacts: Array<{ name: string; address: string }> = [];
@@ -110,7 +116,7 @@ export async function POST(request: NextRequest) {
       createdContacts.push({ name: contact.name, address: contact.address });
     }
     await admin.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "contacts.history_discovered", object_type: "connection", object_id: connection.id, source: "email", actor_type: "user", new_value: { provider: connection.provider, scanned: discovered.length, created, existing } });
-    return NextResponse.json({ success: true, scanned: discovered.length, created, existing, createdContacts: createdContacts.slice(0, 20) });
+    return NextResponse.json({ success: true, scanned: discovered.length, created, existing, createdContacts: createdContacts.slice(0, 20), moreAvailable: Boolean(discovery.cursor) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Historical contact discovery failed", { provider: connection.provider, reason });
