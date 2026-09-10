@@ -16,7 +16,8 @@ export async function POST(request: NextRequest) {
   const image = form.get("image");
   const consent = form.get("consent");
   if (!(image instanceof File) || consent !== "yes") return NextResponse.json({ error: "Select an image and approve text extraction." }, { status: 400 });
-  if (!allowedTypes.has(image.type) || image.size > 8_000_000) return NextResponse.json({ error: "Use a PNG, JPEG, or WebP image smaller than 8 MB." }, { status: 400 });
+  if (!allowedTypes.has(image.type)) return NextResponse.json({ error: "This phone image format is not supported. Choose a screenshot saved as PNG or JPEG." }, { status: 400 });
+  if (image.size > 12_000_000) return NextResponse.json({ error: "The screenshot is larger than 12 MB. Crop it or choose a smaller image." }, { status: 400 });
   const imageUrl = `data:${image.type};base64,${Buffer.from(await image.arrayBuffer()).toString("base64")}`;
   try {
     return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, model: process.env.OPENAI_VISION_MODEL || "gpt-5", content: [{ type: "input_text", text: "Read and analyze this conversation screenshot." }, { type: "input_image", image_url: imageUrl, detail: "high" }] }));

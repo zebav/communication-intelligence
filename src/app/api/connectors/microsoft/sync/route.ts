@@ -115,7 +115,8 @@ export async function POST(request: NextRequest) {
       : {};
     // Existing cursors were created before full bodies were selected. Restart
     // once from the bounded 30-day window so existing previews are upgraded.
-    const needsFullBodyUpgrade = metadata.full_body_sync_v1 !== true;
+    const needsHistoryBackfill = metadata.relationship_history_v1 !== true;
+    const needsFullBodyUpgrade = metadata.full_body_sync_v1 !== true || needsHistoryBackfill;
     let pageUrl = needsFullBodyUpgrade ? initialInboxDeltaUrl() : validatedInboxDeltaUrl(metadata.inbox_sync_url);
     let nextSyncUrl: string | undefined;
     let deltaReady = false;
@@ -163,12 +164,16 @@ export async function POST(request: NextRequest) {
       const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "in", senderIdentifier: address, senderName: displayName, subject: message.subject, body: content.text, sentAt: message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated } });
       const classification = classifyEmail({ subject: message.subject, preview: content.text, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
       const basePriority = emailPriority(classification, message.importance);
+      const { data: history } = await supabase.from("conversations").select("id,last_user_message_at").eq("owner_id", userId).eq("person_id", personId).limit(100);
       const { data: senderPreferences } = await supabase.from("people").select("relationship_type,manual_priority,email_handling_rule,sender_preferences_verified").eq("id", personId).eq("owner_id", userId).maybeSingle();
       const relevance = senderRelevance({
         basePriority,
         relationshipType: senderPreferences?.sender_preferences_verified ? senderPreferences.relationship_type : null,
         manualPriority: senderPreferences?.sender_preferences_verified && senderPreferences.manual_priority != null ? Number(senderPreferences.manual_priority) : null,
         handlingRule: senderPreferences?.sender_preferences_verified ? senderPreferences.email_handling_rule : "normal",
+        unread: message.isRead === false,
+        historicalConversationCount: history?.length ?? 0,
+        hasOwnerReplies: (history ?? []).some((item) => Boolean(item.last_user_message_at)),
       });
       const priority = relevance.score;
       const action = recommendedEmailAction(classification);
@@ -251,6 +256,7 @@ export async function POST(request: NextRequest) {
         inbox_sync_url: nextSyncUrl,
         inbox_delta_ready: deltaReady,
         full_body_sync_v1: true,
+        relationship_history_v1: true,
       },
       updated_at: syncedAt,
     }).eq("id", connection.id);

@@ -30,9 +30,9 @@ Each connection represents one specific account, not merely one provider. Multip
 
 Microsoft OAuth always starts and returns on the stable production domain. Requests initiated from a temporary Vercel Preview are first redirected to production so PKCE/state cookies and the Entra redirect URI remain on the same host.
 
-Google OAuth follows the same stable-domain rule. Gmail V1 requests read-only access, imports the Inbox in bounded pages from the last 30 days, encrypts refresh credentials, prefixes provider message/thread IDs by Google account, and never sends, archives, or deletes mail.
+Google OAuth follows the same stable-domain rule. Gmail V1 requests read-only access, imports the Inbox in bounded pages from the last year, encrypts refresh credentials, prefixes provider message/thread IDs by Google account, and never sends, archives, or deletes mail. Outlook uses the same one-year relationship-history window. Unread messages receive an explicit unhandled-message relevance signal; repeated conversations and prior owner replies strengthen the contact signal without overriding explicit owner rules.
 
-Conversation screenshots are sent to the configured OpenAI API only after explicit confirmation, with storage disabled, to extract visible text. The image itself is not persisted by the application. Extracted text must be reviewed before database import.
+Conversation screenshots are sent to the configured OpenAI API after the owner deliberately selects an image, with storage disabled, to extract visible text. The image itself is not persisted by the application. Successful mobile screenshot analysis automatically stores the reviewed structured transcript, links it through a stable channel/person identity, and creates an unverified conversation-context memory that remains distinguishable from owner-verified facts.
 
 Pasted text, exported files, and screenshots use the same automatic import analysis. It infers the likely channel, participants, topic, intent, priority, recommended action, and an editable reply. Channels without an approved sending API expose Copy reply rather than pretending to send externally.
 
