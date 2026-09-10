@@ -12,12 +12,15 @@ const personSchema = z.object({
   name: z.string().trim().min(1).max(200),
   organization: z.string().trim().max(200),
   relationshipType: z.enum(relationshipTypes),
+  entityType: z.enum(["person", "organization", "automated", "unknown"]),
+  professionalSpecialty: z.string().trim().max(200),
+  jurisdiction: z.string().trim().max(100),
   notes: z.string().trim().max(2000),
   relationshipSummary: z.string().trim().max(1000),
   manualPriority: z.number().min(1).max(10),
 });
 
-export async function savePersonIntelligence(input: { personId: string; name: string; organization: string; relationshipType: string; notes: string; relationshipSummary: string; manualPriority: number }) {
+export async function savePersonIntelligence(input: { personId: string; name: string; organization: string; relationshipType: string; entityType: "person" | "organization" | "automated" | "unknown"; professionalSpecialty: string; jurisdiction: string; notes: string; relationshipSummary: string; manualPriority: number }) {
   const parsed = personSchema.safeParse(input);
   if (!parsed.success) return { error: "Check the person's name, relationship, and priority." };
   const supabase = await createClient();
@@ -25,9 +28,9 @@ export async function savePersonIntelligence(input: { personId: string; name: st
   if (!user) return { error: "Your session has expired. Sign in again." };
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
-  const { data: previous } = await supabase.from("people").select("display_name,organization,relationship_type,notes,relationship_summary,manual_priority,email_handling_rule").eq("id", parsed.data.personId).eq("owner_id", user.id).maybeSingle();
+  const { data: previous } = await supabase.from("people").select("display_name,organization,relationship_type,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,manual_priority,email_handling_rule").eq("id", parsed.data.personId).eq("owner_id", user.id).maybeSingle();
   if (!previous) return { error: "The selected person could not be loaded." };
-  const values = { display_name: parsed.data.name, organization: parsed.data.organization || null, relationship_type: parsed.data.relationshipType, notes: parsed.data.notes || null, relationship_summary: parsed.data.relationshipSummary || null, manual_priority: parsed.data.manualPriority, sender_preferences_verified: true, updated_at: new Date().toISOString() };
+  const values = { display_name: parsed.data.name, organization: parsed.data.organization || null, relationship_type: parsed.data.relationshipType, entity_type: parsed.data.entityType, professional_specialty: parsed.data.professionalSpecialty || null, jurisdiction: parsed.data.jurisdiction || null, notes: parsed.data.notes || null, relationship_summary: parsed.data.relationshipSummary || null, manual_priority: parsed.data.manualPriority, sender_preferences_verified: true, updated_at: new Date().toISOString() };
   const { error } = await supabase.from("people").update(values).eq("id", parsed.data.personId).eq("owner_id", user.id);
   if (error) return { error: "The person information could not be saved." };
   const { data: conversations } = await supabase.from("conversations").select("id,recommended_action,messages(classification,sent_at,direction)").eq("owner_id", user.id).eq("person_id", parsed.data.personId).eq("source", "email");
