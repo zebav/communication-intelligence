@@ -16,6 +16,7 @@ describe("parseImportedConversationAnalysis", () => {
       recommendedAction: "R".repeat(160),
       draftResponse: "D".repeat(5000),
       draftTone: "Professional",
+      profileSuggestions: [],
     }));
 
     expect(result.participantName).toHaveLength(120);
@@ -29,6 +30,7 @@ describe("parseImportedConversationAnalysis", () => {
     const result = parseImportedConversationAnalysis(JSON.stringify({
       source: "manual", accountLabel: "", participantName: "", ownerName: "", title: "", transcript: "",
       summary: "", intent: "", priorityScore: 0, recommendedAction: "", draftResponse: "", draftTone: "",
+      profileSuggestions: [],
     }));
 
     expect(result.participantName).toBe("Unknown");
