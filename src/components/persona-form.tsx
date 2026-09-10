@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveUniversalCommunicationProfile } from "@/app/persona/actions";
 import { communicationChannels, communicationSituations } from "@/lib/communication-profile";
 import type { CommunicationPersonOption, CommunicationSituation, ProfileGuidance, Source, UniversalCommunicationProfile } from "@/lib/domain";
 
@@ -17,7 +16,19 @@ export function PersonaForm({ initial, people, onSaved }: { initial: UniversalCo
   const channelField = (id: Source, key: keyof ProfileGuidance, value: string) => setProfile((current) => ({ ...current, channels: { ...current.channels, [id]: { ...(current.channels[id] ?? emptyGuidance()), [key]: value } } }));
   const situationField = (id: CommunicationSituation, key: keyof ProfileGuidance, value: string) => setProfile((current) => ({ ...current, situations: { ...current.situations, [id]: { ...(current.situations[id] ?? emptyGuidance()), [key]: value } } }));
   const personField = (key: keyof ProfileGuidance, value: string) => { const person = people.find((item) => item.id === selectedPerson); if (!person) return; setProfile((current) => ({ ...current, people: { ...current.people, [person.id]: { name: person.name, tone: current.people[person.id]?.tone ?? "", guidance: current.people[person.id]?.guidance ?? "", [key]: value } } })); };
-  const save = async () => { setSaving(true); setMessage(""); const result = await saveUniversalCommunicationProfile(profile); setMessage(result.error ?? "Universal communication profile saved securely."); if (!result.error && result.profile) { setProfile(result.profile); onSaved?.(result.profile); router.refresh(); } setSaving(false); };
+  useEffect(() => { let active = true; fetch("/api/persona", { cache: "no-store" }).then((response) => response.json()).then((result) => { if (active && result.profile) { setProfile(result.profile); onSaved?.(result.profile); } }).catch(() => undefined); return () => { active = false; }; }, []);
+  const save = async () => {
+    setSaving(true); setMessage("");
+    try {
+      const response = await fetch("/api/persona", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) });
+      const result = await response.json();
+      if (!response.ok || !result.profile) { setMessage(result.error ?? "The profile could not be saved."); return; }
+      setProfile(result.profile); onSaved?.(result.profile);
+      setMessage(`Saved and verified in Supabase · ${result.verifiedCharacters} profile characters`);
+      router.refresh();
+    } catch { setMessage("The profile could not be saved because the server could not be reached."); }
+    finally { setSaving(false); }
+  };
   const selected = selectedPerson ? profile.people[selectedPerson] ?? { name: people.find((item) => item.id === selectedPerson)?.name ?? "", ...emptyGuidance() } : null;
   return <div className="profile-editor">
     <div className="profile-tabs" role="tablist">{([['core','Core profile'],['channels','Channels'],['situations','Situations'],['people','People']] as [Section,string][]).map(([id,label]) => <button type="button" role="tab" aria-selected={section === id} className={section === id ? "active" : ""} key={id} onClick={() => setSection(id)}>{label}</button>)}</div>
@@ -26,7 +37,7 @@ export function PersonaForm({ initial, people, onSaved }: { initial: UniversalCo
       {section === "channels" && <><div className="profile-explainer"><strong>How you communicate in each app</strong><span>Only the active channel is shared with the AI for a message.</span></div><div className="profile-grid">{communicationChannels.map((item) => <div className="profile-card" key={item.id}><h3>{item.label}</h3><label>Tone<input value={profile.channels[item.id]?.tone ?? ""} onChange={(e) => channelField(item.id,"tone",e.target.value)} placeholder="Use global tone" /></label><label>Channel rules<textarea value={profile.channels[item.id]?.guidance ?? ""} onChange={(e) => channelField(item.id,"guidance",e.target.value)} placeholder="For example: shorter, more formal, no emojis…" /></label></div>)}</div></>}
       {section === "situations" && <><div className="profile-explainer"><strong>How you adapt to the situation</strong><span>Situation guidance takes priority over channel and core defaults.</span></div><div className="profile-grid">{communicationSituations.map((item) => <div className="profile-card" key={item.id}><h3>{item.label}</h3><label>Tone<input value={profile.situations[item.id]?.tone ?? ""} onChange={(e) => situationField(item.id,"tone",e.target.value)} placeholder="Use channel or global tone" /></label><label>Situation rules<textarea value={profile.situations[item.id]?.guidance ?? ""} onChange={(e) => situationField(item.id,"guidance",e.target.value)} placeholder="What should a good response do here?" /></label></div>)}</div></>}
       {section === "people" && <><div className="profile-explainer"><strong>How you communicate with specific people</strong><span>Person-specific guidance has highest priority. AI never changes it.</span></div>{people.length ? <><label>Choose a person<select value={selectedPerson} onChange={(e) => setSelectedPerson(e.target.value)}>{people.map((person) => <option value={person.id} key={person.id}>{person.name}{person.relationship ? ` — ${person.relationship}` : ""}{person.organization ? `, ${person.organization}` : ""}</option>)}</select></label>{selected && <><label>Tone with {selected.name}<input value={selected.tone} onChange={(e) => personField("tone",e.target.value)} placeholder="Use situation, channel or global tone" /></label><label>Rules for {selected.name}<textarea value={selected.guidance} onChange={(e) => personField("guidance",e.target.value)} placeholder="Relationship context, boundaries, preferred style…" /></label></>}</> : <p className="subtitle">People will appear here after they have been added through a connected channel or communication case.</p>}</>}
-      <div className="case-form-footer"><span className={`form-message ${message.includes("saved") ? "success" : message ? "error" : ""}`}>{message}</span><button className="btn primary" type="button" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save universal profile"}</button></div>
+      <div className="case-form-footer"><span className={`form-message ${message.startsWith("Saved and verified") ? "success" : message ? "error" : ""}`}>{message}</span><button className="btn primary" type="button" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save universal profile"}</button></div>
     </div>
   </div>;
 }
