@@ -50,7 +50,7 @@ export interface SyncedEmailConversation {
   relevanceReasons?: string[];
   memories?: PersonMemory[];
   threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
-  analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; relationshipSuggestion?: { type: string; confidence: number; reason: string }; forwardingSuggestion?: { recommended: boolean; recipientRole: "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "other" | "none"; reason: string; introduction: string }; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number } };
+  analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; relationshipSuggestion?: { type: string; confidence: number; reason: string }; forwardingSuggestion?: { recommended: boolean; recipientRole: "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "other" | "none"; reason: string; introduction: string }; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number }; actionSuggestion?: { detected: boolean; type: "contact_lookup" | "web_research" | "website_task" | "form_completion" | "none"; task: string; reason: string; targetUrl: string; requiresLogin: boolean; contactIds: string[]; confidence: number } };
   deepAnalysis?: DeepAnalysis;
 }
 
