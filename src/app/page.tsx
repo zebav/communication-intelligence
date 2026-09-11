@@ -13,6 +13,17 @@ function deduplicateStoredSources(sources: DeepAnalysis["sources"] | undefined) 
   return valid.filter((source, index) => valid.findIndex((candidate) => key(candidate) === key(source)) === index).slice(0, 8);
 }
 
+function normalizedConversationText(value: unknown) {
+  return String(value ?? "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function isSyntheticTestConversation(row: { title?: unknown; messages?: unknown }) {
+  const messages = Array.isArray(row.messages) ? row.messages as Array<{ body_text?: unknown }> : [];
+  const title = normalizedConversationText(row.title);
+  const bodies = messages.map((message) => normalizedConversationText(message.body_text)).filter(Boolean);
+  return title === "test" && bodies.length > 0 && bodies.every((body) => body === "test");
+}
+
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -57,7 +68,7 @@ export default async function Home() {
     .order("updated_at", { ascending: false });
   const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source as Source | undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
 
-  const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
+  const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email" && !isSyntheticTestConversation(row)).map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
     const messages = Array.isArray(row.messages) ? row.messages : [];
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
@@ -66,7 +77,8 @@ export default async function Home() {
     return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
-    const key = `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
+    const messageFingerprint = normalizedConversationText(item.message);
+    const key = messageFingerprint ? `${item.personName.trim().toLocaleLowerCase()}:${messageFingerprint}` : `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
     const current = grouped.get(key);
     if (!current || item.createdAt > current.createdAt) grouped.set(key, item);
     return grouped;
@@ -112,10 +124,10 @@ export default async function Home() {
   });
 
   const intelligentPeople: IntelligentPerson[] = (personRows ?? []).map((person) => {
-    const allPersonConversations = (rows ?? []).filter((row) => {
+    const allPersonConversations = (rows ?? []).filter((row) => !isSyntheticTestConversation(row) && (() => {
       const linked = Array.isArray(row.people) ? row.people[0] : row.people;
       return linked?.id === person.id;
-    });
+    })());
     const personConversations = [...allPersonConversations.reduce((grouped, row) => {
       const key = row.source === "email" ? `email:${row.id}` : `${row.source}:imported-thread`;
       const current = grouped.get(key);
