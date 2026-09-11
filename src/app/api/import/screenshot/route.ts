@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { analyzeImportedConversation } from "@/lib/connectors/import-analysis";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
+import { importedConversationHistory } from "@/lib/connectors/import-history";
 
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 export const maxDuration = 60;
@@ -30,7 +31,11 @@ export async function POST(request: NextRequest) {
     let lastError: unknown;
     for (const model of models) {
       try {
-        return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, model, content, personaContext }));
+        const initial = await analyzeImportedConversation({ ownerId: user.id, model, content, personaContext });
+        const historicalContext = await importedConversationHistory(supabase, user.id, initial);
+        if (!historicalContext) return NextResponse.json(initial);
+        const refined = await analyzeImportedConversation({ ownerId: user.id, model, personaContext, historicalContext, content: [{ type: "input_text", text: `Current conversation only:\n${initial.transcript}` }] });
+        return NextResponse.json({ ...refined, source: initial.source, participantName: initial.participantName, ownerName: initial.ownerName, accountLabel: initial.accountLabel, transcript: initial.transcript });
       } catch (error) {
         lastError = error;
         if (!(error instanceof Error) || !error.message.includes("_404_model_not_found")) throw error;

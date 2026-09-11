@@ -3,6 +3,7 @@ import { z } from "zod";
 import { analyzeImportedConversation } from "@/lib/connectors/import-analysis";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
+import { importedConversationHistory } from "@/lib/connectors/import-history";
 
 const requestSchema = z.object({ transcript: z.string().trim().min(1).max(100_000) });
 
@@ -20,6 +21,10 @@ export async function POST(request: NextRequest) {
     const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
     const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
     const personaContext = JSON.stringify({ identitySummary: universalProfile.identitySummary, values: universalProfile.values, defaultTone: universalProfile.defaultTone, preferredLength: universalProfile.preferredLength, principles: universalProfile.principles, signOff: universalProfile.signOff, channels: universalProfile.channels, situations: universalProfile.situations });
-    return NextResponse.json(await analyzeImportedConversation({ ownerId: user.id, personaContext, content: [{ type: "input_text", text: parsed.data.transcript }] }));
+    const initial = await analyzeImportedConversation({ ownerId: user.id, personaContext, content: [{ type: "input_text", text: parsed.data.transcript }] });
+    const historicalContext = await importedConversationHistory(supabase, user.id, initial);
+    if (!historicalContext) return NextResponse.json(initial);
+    const refined = await analyzeImportedConversation({ ownerId: user.id, personaContext, historicalContext, content: [{ type: "input_text", text: `Current conversation only:\n${initial.transcript}` }] });
+    return NextResponse.json({ ...refined, source: initial.source, participantName: initial.participantName, ownerName: initial.ownerName, accountLabel: initial.accountLabel, transcript: initial.transcript });
   } catch { return NextResponse.json({ error: "The conversation could not be analyzed. Try again." }, { status: 502 }); }
 }

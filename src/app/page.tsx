@@ -13,6 +13,17 @@ function deduplicateStoredSources(sources: DeepAnalysis["sources"] | undefined) 
   return valid.filter((source, index) => valid.findIndex((candidate) => key(candidate) === key(source)) === index).slice(0, 8);
 }
 
+function normalizedConversationText(value: unknown) {
+  return String(value ?? "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function isSyntheticTestConversation(row: { title?: unknown; messages?: unknown }) {
+  const messages = Array.isArray(row.messages) ? row.messages as Array<{ body_text?: unknown }> : [];
+  const title = normalizedConversationText(row.title);
+  const bodies = messages.map((message) => normalizedConversationText(message.body_text)).filter(Boolean);
+  return title === "test" && bodies.length > 0 && bodies.every((body) => body === "test");
+}
+
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -28,14 +39,15 @@ export default async function Home() {
   const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(1000);
   const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", priority: Number(person.manual_priority ?? person.overall_priority ?? 0), lastContactAt: person.last_contact_at ?? undefined }));
 
-  const { data: rows } = await supabase
-    .from("conversations")
-    .select("id,title,source,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)";
+  const [{ data: emailRows }, { data: channelRows }] = await Promise.all([
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(50),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(1000),
+  ]);
+  const rows = [...(emailRows ?? []), ...(channelRows ?? [])];
 
-  const { data: identityRows } = await supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(500);
-  const { data: memoryRows } = await supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);
+  const { data: identityRows } = await supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(5000);
+  const { data: memoryRows } = await supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(2000);
   const { data: commitmentRows } = await supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200);
   const { data: learningRows } = await supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(200);
   const learningSignals: LearningSignal[] = (learningRows ?? []).map((item) => { const person = Array.isArray(item.people) ? item.people[0] : item.people; const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations; return { id: item.id, personName: person?.display_name ?? undefined, conversationTitle: conversation?.title ?? undefined, source: item.source as Source, signalType: item.signal_type as LearningSignal["signalType"], observation: item.observation, proposedRule: item.proposed_rule, confidence: Number(item.confidence ?? 0), status: item.status as LearningSignal["status"], createdAt: item.created_at }; });
@@ -56,16 +68,17 @@ export default async function Home() {
     .order("updated_at", { ascending: false });
   const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source as Source | undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
 
-  const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email").map((row) => {
+  const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email" && !isSyntheticTestConversation(row)).map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
     const messages = Array.isArray(row.messages) ? row.messages : [];
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata) ? latestMessage.metadata as { ai_analysis?: CommunicationCase["analysis"] } : {};
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
-    return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
+    return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
-    const key = `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
+    const messageFingerprint = normalizedConversationText(item.message);
+    const key = messageFingerprint ? `${item.personName.trim().toLocaleLowerCase()}:${messageFingerprint}` : `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
     const current = grouped.get(key);
     if (!current || item.createdAt > current.createdAt) grouped.set(key, item);
     return grouped;
@@ -111,10 +124,10 @@ export default async function Home() {
   });
 
   const intelligentPeople: IntelligentPerson[] = (personRows ?? []).map((person) => {
-    const allPersonConversations = (rows ?? []).filter((row) => {
+    const allPersonConversations = (rows ?? []).filter((row) => !isSyntheticTestConversation(row) && (() => {
       const linked = Array.isArray(row.people) ? row.people[0] : row.people;
       return linked?.id === person.id;
-    });
+    })());
     const personConversations = [...allPersonConversations.reduce((grouped, row) => {
       const key = row.source === "email" ? `email:${row.id}` : `${row.source}:imported-thread`;
       const current = grouped.get(key);

@@ -17,6 +17,7 @@ export interface CommunicationCase {
   priorityScore?: number;
   recommendedAction?: string;
   threadMessages?: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
+  conversationType?: string;
   analysis?: { summary?: string; intent?: string; priorityReason?: string; requiresReply?: boolean; draftResponse?: string; draftTone?: string };
 }
 
