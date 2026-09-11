@@ -28,11 +28,12 @@ export default async function Home() {
   const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(1000);
   const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", priority: Number(person.manual_priority ?? person.overall_priority ?? 0), lastContactAt: person.last_contact_at ?? undefined }));
 
-  const { data: rows } = await supabase
-    .from("conversations")
-    .select("id,title,source,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)")
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const conversationFields = "id,title,source,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)";
+  const [{ data: emailRows }, { data: channelRows }] = await Promise.all([
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(50),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(1000),
+  ]);
+  const rows = [...(emailRows ?? []), ...(channelRows ?? [])];
 
   const { data: identityRows } = await supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(500);
   const { data: memoryRows } = await supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(300);

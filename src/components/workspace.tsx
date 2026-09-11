@@ -23,7 +23,7 @@ import { relationshipLabels, relationshipTypes } from "@/lib/relationship-types"
 
 type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
-  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
+  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
 const sources: { label: string; source: Source }[] = [
   { label: "Email", source: "email" },
