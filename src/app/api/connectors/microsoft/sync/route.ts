@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
     // progress toward a complete mailbox snapshot.
     while (pagesProcessed < 4) {
       const graphResponse = await fetch(pageUrl, {
-        headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' },
+        headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="html"' },
         signal: AbortSignal.timeout(20_000),
       });
       if (graphResponse.status === 401) return jsonError("Outlook needs to be connected again.", 409);
