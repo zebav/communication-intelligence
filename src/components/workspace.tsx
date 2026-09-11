@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
-import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
+import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type Source, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
 import { conversations } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, deeplyAnalyzeEmailWithAI, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
@@ -25,7 +25,16 @@ type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | 
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
   { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
-const sources = ["Email", "iMessage", "Instagram", "WhatsApp", "Messenger", "Tinder", "TikTok", "LinkedIn"];
+const sources: { label: string; source: Source }[] = [
+  { label: "Email", source: "email" },
+  { label: "iMessage", source: "imessage" },
+  { label: "Instagram", source: "instagram" },
+  { label: "WhatsApp", source: "whatsapp" },
+  { label: "Messenger", source: "messenger" },
+  { label: "Tinder", source: "tinder" },
+  { label: "TikTok", source: "tiktok" },
+  { label: "LinkedIn", source: "linkedin" },
+];
 const EMAIL_CATEGORIES = ["Relevant", "Filtered out", "All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
 export function Workspace({ userEmail, communicationCases, connections, syncedEmails, followUps, outcomes, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
@@ -36,6 +45,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const automaticAnalysisFailures = useRef(new Set<string>());
   const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>("today");
+  const [selectedSource, setSelectedSource] = useState<Source | null>(null);
   const [activePersona, setActivePersona] = useState(persona);
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
@@ -46,19 +56,21 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication<br />Intelligence</span></div>
       <button className="command-button" onClick={() => setCommandOpen(true)}><Search size={13} /> Search or command <kbd>⌘K</kbd></button>
       <div className="nav-label">Workspace</div>
-      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
+      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
       <div className="nav-label">Sources</div>
-      {sources.map((source) => <button key={source} className="nav-button" onClick={() => setView("inbox")}><MessageCircle size={14} />{source}{source === "Email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
+      {sources.map((item) => <button key={item.source} className={`nav-button ${selectedSource === item.source ? "active" : ""}`} onClick={() => { setSelectedSource(item.source); setView(item.source === "email" ? "inbox" : "cases"); }}><MessageCircle size={14} />{item.label}{item.source === "email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
-    <main className="main">{view === "today" && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} onOpenInbox={() => setView("inbox")} />}{view === "cases" && <CommunicationCases cases={communicationCases} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} people={profilePeople} />}{view === "people" && <People items={people} />}{view === "followups" && <FollowUps items={followUps} />}{view === "outcomes" && <Outcomes items={outcomes} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} onSaved={setActivePersona} />}</main>
-    <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><item.icon size={17} />{item.label}</button>)}<button onClick={() => setView("settings")}><MoreHorizontal size={17} />More</button></nav>
-    {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setView(next); setCommandOpen(false); }} />}
+    <main className="main">{view === "today" && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} onOpenInbox={() => { setSelectedSource("email"); setView("inbox"); }} />}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} people={profilePeople} />}{view === "people" && <People items={people} />}{view === "followups" && <FollowUps items={followUps} />}{view === "outcomes" && <Outcomes items={outcomes} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} onSaved={setActivePersona} />}</main>
+    <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id && selectedSource === null ? "active" : ""} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={17} />{item.label}</button>)}<button onClick={() => { setSelectedSource(null); setView("settings"); }}><MoreHorizontal size={17} />More</button></nav>
+    {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setSelectedSource(null); setView(next); setCommandOpen(false); }} />}
   </div>;
 }
 
-function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
-  const grouped = Object.entries(cases.reduce<Record<string, Record<string, CommunicationCase[]>>>((sources, item) => {
+function CommunicationCases({ cases, source }: { cases: CommunicationCase[]; source?: Source }) {
+  const visibleCases = source ? cases.filter((item) => item.source === source) : cases;
+  const sourceLabel = sources.find((item) => item.source === source)?.label;
+  const grouped = Object.entries(visibleCases.reduce<Record<string, Record<string, CommunicationCase[]>>>((sources, item) => {
     const source = item.source || "manual";
     const person = item.personName.trim().toLocaleLowerCase();
     sources[source] ??= {};
@@ -66,11 +78,10 @@ function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
     sources[source][person].push(item);
     return sources;
   }, {}));
-  return <div className="page"><PageHeader eyebrow="Manual & Imported Conversation Connector V1" title="Analyze a conversation" subtitle="Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply." />
-    <div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div>
-    <ConversationImportForm />
-    <div className="section-title">People and conversations by source <span className="count">{cases.length}</span></div>
-    {grouped.length === 0 ? <div className="empty-card">No imported conversations yet. Upload a screenshot or paste a conversation above.</div> : <div className="source-folders">{grouped.map(([source, people]) => <section className="source-folder" key={source}><div className="source-folder-head"><MessageCircle size={15} /><strong>{source}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); return <CommunicationCaseCard item={ordered[0]} key={`${source}-${ordered[0].personName}`} />; })}</div></section>)}</div>}
+  return <div className="page"><PageHeader eyebrow={sourceLabel ? `${sourceLabel} conversations` : "Manual & Imported Conversation Connector V1"} title={sourceLabel ?? "Analyze a conversation"} subtitle={sourceLabel ? `Messages imported from ${sourceLabel}, with automatic analysis and suggested replies.` : "Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply."} />
+    {!source && <><div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div><ConversationImportForm /></>}
+    <div className="section-title">{sourceLabel ? `${sourceLabel} conversations` : "People and conversations by source"} <span className="count">{visibleCases.length}</span></div>
+    {grouped.length === 0 ? <div className="empty-card">{sourceLabel ? `No ${sourceLabel} conversations have been imported yet.` : "No imported conversations yet. Upload a screenshot or paste a conversation above."}</div> : <div className="source-folders">{grouped.map(([groupSource, people]) => <section className="source-folder" key={groupSource}><div className="source-folder-head"><MessageCircle size={15} /><strong>{groupSource}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); return <CommunicationCaseCard item={ordered[0]} key={`${groupSource}-${ordered[0].personName}`} />; })}</div></section>)}</div>}
   </div>;
 }
 
