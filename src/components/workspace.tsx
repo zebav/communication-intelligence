@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Network, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
-import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
+import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type Source, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
 import { conversations } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, deeplyAnalyzeEmailWithAI, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
@@ -25,7 +25,16 @@ type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | 
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
   { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Communication cases", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
-const sources = ["Email", "iMessage", "Instagram", "WhatsApp", "Messenger", "Tinder", "TikTok", "LinkedIn"];
+const sources: { label: string; source: Source }[] = [
+  { label: "Email", source: "email" },
+  { label: "iMessage", source: "imessage" },
+  { label: "Instagram", source: "instagram" },
+  { label: "WhatsApp", source: "whatsapp" },
+  { label: "Messenger", source: "messenger" },
+  { label: "Tinder", source: "tinder" },
+  { label: "TikTok", source: "tiktok" },
+  { label: "LinkedIn", source: "linkedin" },
+];
 const EMAIL_CATEGORIES = ["Relevant", "Filtered out", "All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
 export function Workspace({ userEmail, communicationCases, connections, syncedEmails, followUps, outcomes, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
@@ -36,6 +45,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const automaticAnalysisFailures = useRef(new Set<string>());
   const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>("today");
+  const [selectedSource, setSelectedSource] = useState<Source | null>(null);
   const [activePersona, setActivePersona] = useState(persona);
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
@@ -46,19 +56,21 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication<br />Intelligence</span></div>
       <button className="command-button" onClick={() => setCommandOpen(true)}><Search size={13} /> Search or command <kbd>⌘K</kbd></button>
       <div className="nav-label">Workspace</div>
-      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => setView(item.id)}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
+      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
       <div className="nav-label">Sources</div>
-      {sources.map((source) => <button key={source} className="nav-button" onClick={() => setView("inbox")}><MessageCircle size={14} />{source}{source === "Email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
+      {sources.map((item) => <button key={item.source} className={`nav-button ${selectedSource === item.source ? "active" : ""}`} onClick={() => { setSelectedSource(item.source); setView(item.source === "email" ? "inbox" : "cases"); }}><MessageCircle size={14} />{item.label}{item.source === "email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
-    <main className="main">{view === "today" && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} onOpenInbox={() => setView("inbox")} />}{view === "cases" && <CommunicationCases cases={communicationCases} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} people={profilePeople} />}{view === "people" && <People items={people} />}{view === "followups" && <FollowUps items={followUps} />}{view === "outcomes" && <Outcomes items={outcomes} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} onSaved={setActivePersona} />}</main>
-    <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><item.icon size={17} />{item.label}</button>)}<button onClick={() => setView("settings")}><MoreHorizontal size={17} />More</button></nav>
-    {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setView(next); setCommandOpen(false); }} />}
+    <main className="main">{view === "today" && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} channelCases={communicationCases} onOpenInbox={() => { setSelectedSource("email"); setView("inbox"); }} onOpenSource={(source) => { setSelectedSource(source); setView("cases"); }} />}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} people={profilePeople} />}{view === "people" && <People items={people} />}{view === "followups" && <FollowUps items={followUps} />}{view === "outcomes" && <Outcomes items={outcomes} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} onSaved={setActivePersona} />}</main>
+    <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id && selectedSource === null ? "active" : ""} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={17} />{item.label}</button>)}<button onClick={() => { setSelectedSource(null); setView("settings"); }}><MoreHorizontal size={17} />More</button></nav>
+    {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setSelectedSource(null); setView(next); setCommandOpen(false); }} />}
   </div>;
 }
 
-function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
-  const grouped = Object.entries(cases.reduce<Record<string, Record<string, CommunicationCase[]>>>((sources, item) => {
+function CommunicationCases({ cases, source }: { cases: CommunicationCase[]; source?: Source }) {
+  const visibleCases = source ? cases.filter((item) => item.source === source) : cases;
+  const sourceLabel = sources.find((item) => item.source === source)?.label;
+  const grouped = Object.entries(visibleCases.reduce<Record<string, Record<string, CommunicationCase[]>>>((sources, item) => {
     const source = item.source || "manual";
     const person = item.personName.trim().toLocaleLowerCase();
     sources[source] ??= {};
@@ -66,11 +78,10 @@ function CommunicationCases({ cases }: { cases: CommunicationCase[] }) {
     sources[source][person].push(item);
     return sources;
   }, {}));
-  return <div className="page"><PageHeader eyebrow="Manual & Imported Conversation Connector V1" title="Analyze a conversation" subtitle="Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply." />
-    <div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div>
-    <ConversationImportForm />
-    <div className="section-title">People and conversations by source <span className="count">{cases.length}</span></div>
-    {grouped.length === 0 ? <div className="empty-card">No imported conversations yet. Upload a screenshot or paste a conversation above.</div> : <div className="source-folders">{grouped.map(([source, people]) => <section className="source-folder" key={source}><div className="source-folder-head"><MessageCircle size={15} /><strong>{source}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); return <CommunicationCaseCard item={ordered[0]} key={`${source}-${ordered[0].personName}`} />; })}</div></section>)}</div>}
+  return <div className="page"><PageHeader eyebrow={sourceLabel ? `${sourceLabel} conversations` : "Manual & Imported Conversation Connector V1"} title={sourceLabel ?? "Analyze a conversation"} subtitle={sourceLabel ? `Messages imported from ${sourceLabel}, with automatic analysis and suggested replies.` : "Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply."} />
+    {!source && <><div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div><ConversationImportForm /></>}
+    <div className="section-title">{sourceLabel ? `${sourceLabel} conversations` : "People and conversations by source"} <span className="count">{visibleCases.length}</span></div>
+    {grouped.length === 0 ? <div className="empty-card">{sourceLabel ? `No ${sourceLabel} conversations have been imported yet.` : "No imported conversations yet. Upload a screenshot or paste a conversation above."}</div> : <div className="source-folders">{grouped.map(([groupSource, people]) => <section className="source-folder" key={groupSource}><div className="source-folder-head"><MessageCircle size={15} /><strong>{groupSource}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); return <CommunicationCaseCard item={ordered[0]} key={`${groupSource}-${ordered[0].personName}`} />; })}</div></section>)}</div>}
   </div>;
 }
 
@@ -80,17 +91,19 @@ function CommunicationCaseCard({ item }: { item: CommunicationCase }) {
   return <article className="case-item communication-case-card"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div className="case-card-content"><button className="case-card-toggle" onClick={() => setExpanded((value) => !value)}><div className="case-title"><strong>{item.personName}</strong><span className="tag">1 {item.source} thread</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><span className="case-person">{item.title} · {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</span><p>{item.message}</p></button>{expanded && <div className="case-intelligence">{item.threadMessages && item.threadMessages.length > 1 && <div className="case-thread">{item.threadMessages.slice(-12).map((entry) => <div key={entry.id} className={`message ${entry.direction === "out" ? "out" : ""}`}><div className="message-bubble">{entry.body}</div></div>)}</div>}{item.analysis ? <><div className="intel-label">AI assessment</div><strong>{item.analysis.summary}</strong><p>{item.analysis.priorityReason}</p>{item.recommendedAction && <span className="pill">{actionLabels[item.recommendedAction as RecommendedAction] ?? item.recommendedAction}</span>}<div className="intel-label case-reply-label">Suggested reply · {item.analysis.draftTone || "Natural"}</div><textarea value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Suggested reply to ${item.personName}`} />{item.source === "instagram" ? <button className="btn primary" disabled={sending || !draft.trim()} onClick={() => void sendInstagramReply()}><Send size={12} />{sending ? "Sending…" : "Review and send on Instagram"}</button> : <button className="btn" onClick={() => void navigator.clipboard.writeText(draft)}>Copy reply</button>}{status && <p className={status.startsWith("Reply sent") ? "positive" : "negative"}>{status}</p>}</> : <div className="learning-notice"><div><strong>Analysis is being prepared</strong><p>New Instagram messages are analyzed automatically. Refresh shortly if the reply is not visible yet.</p></div></div>}</div>}</div></article>;
 }
 
-function Today({ emails, onOpenInbox }: { emails: SyncedEmailConversation[]; onOpenInbox: () => void }) {
+function Today({ emails, channelCases, onOpenInbox, onOpenSource }: { emails: SyncedEmailConversation[]; channelCases: CommunicationCase[]; onOpenInbox: () => void; onOpenSource: (source: Source) => void }) {
   const ordered = prioritizeEmails(emails);
   const summary = emailDashboardSummary(emails);
   const critical = ordered.filter((email) => email.classification === "Critical");
   const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical");
   const lowAttention = ordered.filter((email) => email.priorityScore < 4);
-  return <div className="page"><span className="eyebrow">Live Outlook intelligence</span><h1>Your communication today</h1><p className="subtitle">{emails.length > 0 ? <>You have <strong style={{color:"white"}}>{summary.needsResponse} conversations</strong> that may need a response.</> : "Import Outlook messages to replace the empty dashboard with live communication."}</p>
+  const otherChannels = [...channelCases].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
+  return <div className="page"><span className="eyebrow">Universal communication intelligence</span><h1>Your communication today</h1><p className="subtitle">Email, Instagram and your other connected channels are prioritized together.</p>
     <div className="summary-bar"><div className="summary-stat"><strong>{summary.unread}</strong><span>unread</span></div><div className="summary-stat"><strong>{summary.needsResponse}</strong><span>may need response</span></div><div className="summary-stat"><strong>{summary.critical}</strong><span>critical</span></div><div className="summary-stat"><strong>{summary.lowAttention}</strong><span>low attention</span></div></div>
     {emails.length === 0 && <div className="empty-card">No synchronized Outlook messages yet. Open Connections and run the first import.</div>}
     {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#fb7185" /> Critical <span className="count">{critical.length}</span></div><div className="cards">{critical.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
     {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">{respond.length}</span></div><div className="cards">{respond.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {otherChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#a78bfa" /> Other channels <span className="count">{otherChannels.length}</span></div><div className="cards">{otherChannels.map((item) => <button className="card email-card" key={item.id} onClick={() => onOpenSource(item.source)}><div className="card-top"><span>{item.title}</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><div className="card-person"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{item.personName}</strong><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{item.analysis?.summary || item.message}</p><span className="pill">Open conversation <ChevronRight size={10} /></span></button>)}</div></>}
     {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Low attention <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
   </div>;
 }
