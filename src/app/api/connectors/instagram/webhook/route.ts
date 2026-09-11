@@ -1,7 +1,7 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { instagramConnector } from "@/lib/connectors/instagram";
-import { parseInstagramWebhook, validInstagramWebhookSignature } from "@/lib/connectors/instagram-webhook";
+import { findInstagramWebhookConnection, parseInstagramWebhook, validInstagramWebhookSignature } from "@/lib/connectors/instagram-webhook";
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 
 export const maxDuration = 60;
@@ -27,16 +27,27 @@ export async function POST(request: NextRequest) {
 
   const database = createAdminClient();
   const { data: connections, error: connectionError } = await database.from("connections").select("id,owner_id,account_name,account_identifier,token_metadata").eq("provider", instagramConnector.id).eq("status", "connected");
-  if (connectionError) return NextResponse.json({ error: "Instagram connections could not be loaded." }, { status: 500 });
+  if (connectionError) {
+    console.error("Instagram webhook connection lookup failed", {
+      code: connectionError.code,
+      message: connectionError.message,
+      details: connectionError.details,
+      hint: connectionError.hint,
+    });
+    return NextResponse.json({ error: "Instagram connections could not be loaded." }, { status: 500 });
+  }
   let imported = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
 
   for (const event of events) {
-    const connection = (connections ?? []).find((item) => {
-      const metadata = item.token_metadata && typeof item.token_metadata === "object" && !Array.isArray(item.token_metadata) ? item.token_metadata as Record<string, unknown> : {};
-      return String(metadata.instagram_user_id ?? "") === event.accountId;
-    });
-    if (!connection) continue;
+    const connection = findInstagramWebhookConnection(connections ?? [], event.accountId);
+    if (!connection) {
+      console.warn("Instagram webhook account did not match a unique connection", {
+        accountId: event.accountId,
+        connectedAccounts: connections?.length ?? 0,
+      });
+      continue;
+    }
     const identityKey = `instagram:${event.participantId}`;
     let { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_identifier", identityKey).maybeSingle();
     if (!identity) {

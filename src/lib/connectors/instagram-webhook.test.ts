@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseInstagramWebhook, validInstagramWebhookSignature } from "./instagram-webhook";
+import { findInstagramWebhookConnection, parseInstagramWebhook, validInstagramWebhookSignature } from "./instagram-webhook";
 
 describe("Instagram webhook", () => {
   it("verifies Meta signatures", () => {
@@ -30,5 +30,20 @@ describe("Instagram webhook", () => {
     const [item] = parseInstagramWebhook(JSON.stringify({ object: "instagram", entry: [{ id: "100", messaging: [{ sender: { id: "200" }, recipient: { id: "100" }, message: { mid: "media-1", attachments: [{ type: "image", payload: { url: "https://temporary.example/secret" } }] } }] }] }));
     expect(item.message.providerMetadata).toMatchObject({ attachment_types: ["image"], media_analysis_status: "pending" });
     expect(JSON.stringify(item)).not.toContain("temporary.example");
+  });
+
+  it("matches all supported Meta account identifiers", () => {
+    const connections = [
+      { id: "oauth", account_identifier: "@artist", token_metadata: { instagram_user_id: "100" } },
+      { id: "business", account_identifier: "@business", token_metadata: { instagram_business_account_id: "200" } },
+    ];
+    expect(findInstagramWebhookConnection(connections, "100")?.id).toBe("oauth");
+    expect(findInstagramWebhookConnection(connections, "200")?.id).toBe("business");
+  });
+
+  it("uses the sole Instagram connection for a differing scoped Meta id", () => {
+    const connections = [{ id: "only", account_identifier: "@artist", token_metadata: { instagram_user_id: "oauth-id" } }];
+    expect(findInstagramWebhookConnection(connections, "webhook-id")?.id).toBe("only");
+    expect(findInstagramWebhookConnection([...connections, { ...connections[0], id: "second" }], "webhook-id")).toBeUndefined();
   });
 });

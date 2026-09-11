@@ -21,6 +21,31 @@ export type InstagramWebhookMessage = {
   message: ReturnType<typeof normalizeCommunicationMessage>;
 };
 
+export type InstagramWebhookConnection = {
+  account_identifier?: string | null;
+  token_metadata?: unknown;
+};
+
+function connectionAccountIds(connection: InstagramWebhookConnection) {
+  const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
+    ? connection.token_metadata as Record<string, unknown>
+    : {};
+  return [
+    metadata.instagram_user_id,
+    metadata.instagram_business_account_id,
+    metadata.instagram_account_id,
+    connection.account_identifier?.replace(/^@/, ""),
+  ].filter((value): value is string | number => typeof value === "string" || typeof value === "number").map(String);
+}
+
+export function findInstagramWebhookConnection<T extends InstagramWebhookConnection>(connections: T[], accountId: string) {
+  const exact = connections.find((connection) => connectionAccountIds(connection).includes(accountId));
+  // A Meta payload can use a different Instagram-scoped identifier from the
+  // one returned during OAuth. Falling back is safe only when this owner has a
+  // single connected Instagram account; multiple accounts must be explicit.
+  return exact ?? (connections.length === 1 ? connections[0] : undefined);
+}
+
 export function validInstagramWebhookSignature(rawBody: string, signature: string | null, appSecret: string) {
   if (!signature?.startsWith("sha256=") || !appSecret) return false;
   const supplied = Buffer.from(signature.slice(7), "hex");
