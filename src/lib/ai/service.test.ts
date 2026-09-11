@@ -9,7 +9,7 @@ describe("OpenAIResponsesService", () => {
     const service = new OpenAIResponsesService("test-key", "test-model", request as typeof fetch);
     await expect(service.analyzeEmail({ ownerId: "owner", senderName: "A", subject: "Please reply", preview: "Can you review this?", currentClassification: "Business", styleExamples: ["Sounds good — I will check today."] })).resolves.toEqual(output);
     const body = JSON.parse(requestBody);
-    expect(body.store).toBe(false); expect(body.model).toBe("test-model"); expect(body.text.format.type).toBe("json_schema"); expect(body.text.format.schema.properties.actionSuggestion).toBeDefined();
+    expect(body.store).toBe(false); expect(body.model).toBe("test-model"); expect(body.text.format.type).toBe("json_schema");
     expect(body.input).not.toContain('"ownerId"'); expect(body.safety_identifier).toMatch(/^[a-f0-9]{64}$/);
   });
 

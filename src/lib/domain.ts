@@ -14,6 +14,10 @@ export interface CommunicationCase {
   source: Source;
   message: string;
   createdAt: string;
+  priorityScore?: number;
+  recommendedAction?: string;
+  threadMessages?: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
+  analysis?: { summary?: string; intent?: string; priorityReason?: string; requiresReply?: boolean; draftResponse?: string; draftTone?: string };
 }
 
 export type CommunicationSituation = "business" | "conflict" | "followUp" | "personal" | "romantic" | "logistics" | "sensitive";

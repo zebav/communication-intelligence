@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/outlook-intelligence",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/instagram-intelligence",
+      "schedule": "15 6 * * *"
     }
   ]
 }
