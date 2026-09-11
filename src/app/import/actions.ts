@@ -21,7 +21,7 @@ const schema = z.object({
 export async function importConversation(_: ImportConversationState, formData: FormData): Promise<ImportConversationState> {
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Review the import fields." };
-  const lines = parseImportedConversation(parsed.data.transcript).slice(0, 1000);
+  const lines = parseImportedConversation(parsed.data.transcript).slice(0, 5000);
   if (!lines.length) return { error: "No messages could be found in the import." };
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
