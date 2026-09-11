@@ -11,7 +11,9 @@ declare global {
   }
 }
 
-type Config = { appId: string; configId: string; version: string };
+type Config =
+  | { mode: "direct" }
+  | { mode: "embedded"; appId: string; configId: string; version: string };
 
 export function WhatsAppConnectButton({ connected }: { connected: boolean }) {
   const router = useRouter();
@@ -38,6 +40,10 @@ export function WhatsAppConnectButton({ connected }: { connected: boolean }) {
       const response = await fetch("/api/connectors/whatsapp/config");
       const setup = await response.json() as Config & { error?: string };
       if (!response.ok) throw new Error(setup.error || "WhatsApp coexistence is not configured yet.");
+      if (setup.mode === "direct") {
+        if (active) { config.current = setup; setReady(true); }
+        return;
+      }
       await new Promise<void>((resolve, reject) => {
         if (window.FB) return resolve();
         window.fbAsyncInit = () => { window.FB?.init({ appId: setup.appId, autoLogAppEvents: true, xfbml: false, version: setup.version }); resolve(); };
@@ -55,7 +61,14 @@ export function WhatsAppConnectButton({ connected }: { connected: boolean }) {
 
   const connect = () => {
     const setup = config.current;
-    if (!setup || !window.FB) { setStatus("The secure Meta connection is still loading. Try again in a moment."); return; }
+    if (!setup) { setStatus("The secure WhatsApp connection is still loading. Try again in a moment."); return; }
+    if (setup.mode === "direct") {
+      setBusy(true);
+      setStatus("Connecting your verified WhatsApp Business account…");
+      window.location.assign("/api/connectors/whatsapp/start");
+      return;
+    }
+    if (!window.FB) { setStatus("The secure Meta connection is still loading. Try again in a moment."); return; }
     setBusy(true); session.current = null;
       setStatus("Choose your existing WhatsApp Business account in Meta…");
       const completeLogin = async (login: { authResponse?: { code?: string } }) => {
