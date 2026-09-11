@@ -21,7 +21,7 @@ Each connector declares exactly what it can do. Reading history, incremental syn
 | Manual/file/screenshot import | Available | Reviewed text, CSV, JSON, PNG, JPEG, or WebP imports linked to an exact account label |
 | iMessage | Manual import available | No Apple account access requested |
 | Gmail / Google Workspace | Implemented | OAuth, separate multi-account identity, bounded history import, incremental re-check |
-| Instagram Professional | Planned | Official Meta integration for eligible professional accounts |
+| Instagram Professional | Connection foundation implemented | Official Meta OAuth for eligible professional accounts; message webhooks, history import, and approved sending remain gated until Meta review |
 | Messenger Page | Planned | Official Meta Page integration |
 | WhatsApp Business | Planned | Official business platform and webhooks |
 | LinkedIn / TikTok / Tinder | Manual import available | No account automation without an approved provider API |
@@ -31,6 +31,8 @@ Each connection represents one specific account, not merely one provider. Multip
 Microsoft OAuth always starts and returns on the stable production domain. Requests initiated from a temporary Vercel Preview are first redirected to production so PKCE/state cookies and the Entra redirect URI remain on the same host.
 
 Google OAuth follows the same stable-domain rule. Gmail V1 requests read-only access, imports the Inbox in bounded pages from the last year, encrypts refresh credentials, prefixes provider message/thread IDs by Google account, and never sends, archives, or deletes mail. Outlook uses the same one-year relationship-history window. Unread messages receive an explicit unhandled-message relevance signal; repeated conversations and prior owner replies strengthen the contact signal without overriding explicit owner rules.
+
+Instagram OAuth also returns through the stable production domain. The connection requests only basic professional-account identity and message-management access, encrypts the resulting token, and keeps each Instagram username as a separate connection. Signed Meta webhook events are normalized and deduplicated before they are linked to a person and account-specific conversation. Sending is only available through a signed-in, MFA-verified owner action. A Meta app, the exact production callback and webhook URLs, an eligible professional Instagram account, and Meta permission review are required before live messaging can be enabled.
 
 Conversation screenshots are sent to the configured OpenAI API after the owner deliberately selects an image, with storage disabled, to extract visible text. The image itself is not persisted by the application. Large or HEIC/HEIF iPhone selections are normalized locally in the browser to a bounded JPEG before upload. Successful mobile screenshot analysis automatically stores the structured transcript, links it through a stable channel/person identity, and creates an unverified conversation-context memory that remains distinguishable from owner-verified facts.
 
