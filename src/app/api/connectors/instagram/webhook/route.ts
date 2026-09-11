@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { instagramConnector } from "@/lib/connectors/instagram";
 import { findInstagramWebhookConnection, parseInstagramWebhook, validInstagramWebhookSignature } from "@/lib/connectors/instagram-webhook";
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
+import { decryptCredential } from "@/lib/connectors/credential-crypto";
+import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 
 export const maxDuration = 60;
 
@@ -26,7 +28,7 @@ export async function POST(request: NextRequest) {
   if (!events.length) return NextResponse.json({ received: true, imported: 0 });
 
   const database = createAdminClient();
-  const { data: connections, error: connectionError } = await database.from("connections").select("id,owner_id,account_name,account_identifier,token_metadata").eq("provider", instagramConnector.id).eq("status", "connected");
+  const { data: connections, error: connectionError } = await database.from("connections").select("id,owner_id,account_name,account_identifier,token_metadata,encrypted_credentials").eq("provider", instagramConnector.id).eq("status", "connected");
   if (connectionError) {
     console.error("Instagram webhook connection lookup failed", {
       code: connectionError.code,
@@ -50,12 +52,28 @@ export async function POST(request: NextRequest) {
     }
     const identityKey = `instagram:${event.participantId}`;
     let { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_identifier", identityKey).maybeSingle();
+    let profile: { name?: string; username?: string } | null = null;
+    try {
+      const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
+      if (encryptionKey && connection.encrypted_credentials) {
+        const credentials = decryptCredential<{ accessToken?: string }>(connection.encrypted_credentials, encryptionKey);
+        if (credentials.accessToken) {
+          const profileResponse = await fetch(instagramUserProfileUrl(event.participantId), { headers: { authorization: `Bearer ${credentials.accessToken}` }, signal: AbortSignal.timeout(10_000) });
+          if (profileResponse.ok) profile = await profileResponse.json() as { name?: string; username?: string };
+        }
+      }
+    } catch (error) {
+      console.warn("Instagram sender profile lookup failed", { reason: error instanceof Error ? error.message : "unknown" });
+    }
+    const profileName = profile?.name?.trim() || (profile?.username?.trim() ? `@${profile.username.trim()}` : "");
     if (!identity) {
-      const { data: person, error: personError } = await database.from("people").insert({ owner_id: connection.owner_id, display_name: `Instagram contact ${event.participantId.slice(-6)}`, relationship_type: "unknown", entity_type: "person" }).select("id").single();
+      const { data: person, error: personError } = await database.from("people").insert({ owner_id: connection.owner_id, display_name: profileName || `Instagram contact ${event.participantId.slice(-6)}`, relationship_type: "unknown", entity_type: "person" }).select("id").single();
       if (personError || !person) continue;
       const identityResult = await database.from("identities").insert({ owner_id: connection.owner_id, person_id: person.id, source: "instagram", external_identifier: identityKey, metadata: { instagram_scoped_id: event.participantId, connection_id: connection.id }, verified_match: false, confidence: 0.7 }).select("id,person_id").single();
       if (identityResult.error || !identityResult.data) continue;
       identity = identityResult.data;
+    } else if (profileName) {
+      await database.from("people").update({ display_name: profileName, updated_at: new Date().toISOString() }).eq("id", identity.person_id).eq("owner_id", connection.owner_id).like("display_name", "Instagram contact %");
     }
     const conversationKey = `instagram:${connection.id}:${event.participantId}`;
     const { data: existingConversation } = await database.from("conversations").select("id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_conversation_id", conversationKey).maybeSingle();
