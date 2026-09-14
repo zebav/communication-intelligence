@@ -5,6 +5,16 @@ import { whatsappConnector } from "@/lib/connectors/whatsapp";
 
 export const dynamic = "force-dynamic";
 
+type SocialSource = "instagram" | "whatsapp";
+
+type SocialPersistence = {
+  source: SocialSource;
+  identities: number;
+  conversations: number;
+  messages: number;
+  latestMessageAt: string | null;
+};
+
 export default async function ChannelDiagnosticsPage() {
   const database = await createClient();
   const { data: { user } } = await database.auth.getUser();
@@ -25,5 +35,15 @@ export default async function ChannelDiagnosticsPage() {
     label: connection.account_name || connection.account_identifier || "WhatsApp Business",
   }));
 
-  return <ChannelDiagnostics whatsappConnections={whatsappConnections} />;
+  const persistence = await Promise.all((["instagram", "whatsapp"] as const).map(async (source): Promise<SocialPersistence> => {
+    const [{ count: identities }, { count: conversations }, { count: messages }, { data: latest }] = await Promise.all([
+      database.from("identities").select("id", { count: "exact", head: true }).eq("owner_id", user.id).eq("source", source),
+      database.from("conversations").select("id", { count: "exact", head: true }).eq("owner_id", user.id).eq("source", source),
+      database.from("messages").select("id", { count: "exact", head: true }).eq("owner_id", user.id).eq("source", source),
+      database.from("messages").select("sent_at").eq("owner_id", user.id).eq("source", source).order("sent_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    return { source, identities: identities ?? 0, conversations: conversations ?? 0, messages: messages ?? 0, latestMessageAt: latest?.sent_at ?? null };
+  }));
+
+  return <ChannelDiagnostics whatsappConnections={whatsappConnections} persistence={persistence} />;
 }
