@@ -9,6 +9,7 @@ export type ChannelPersonResolutionInput = {
   username?: string | null;
   profileUrl?: string | null;
   connectionId?: string | null;
+  preferredPersonId?: string | null;
   identityMetadata?: Record<string, unknown>;
   confidence?: number;
   contactAt?: string;
@@ -30,6 +31,31 @@ function cleanDisplayName(value?: string | null) {
   return name && name.length <= 200 ? name : "";
 }
 
+async function touchPerson(input: ChannelPersonResolutionInput, personId: string, now: string, displayName: string) {
+  const { data: person, error: personLookupError } = await input.database
+    .from("people")
+    .select("id,display_name,first_contact_at,last_contact_at")
+    .eq("id", personId)
+    .eq("owner_id", input.ownerId)
+    .maybeSingle();
+  if (personLookupError) throw personLookupError;
+  if (!person) return null;
+
+  const shouldReplacePlaceholder = displayName && (person.display_name?.startsWith(placeholderPrefix(input.source)) || person.display_name === "Unknown person");
+  const { error: personUpdateError } = await input.database
+    .from("people")
+    .update({
+      ...(shouldReplacePlaceholder ? { display_name: displayName } : {}),
+      first_contact_at: person.first_contact_at ?? now,
+      last_contact_at: !person.last_contact_at || String(person.last_contact_at) < now ? now : person.last_contact_at,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", person.id)
+    .eq("owner_id", input.ownerId);
+  if (personUpdateError) throw personUpdateError;
+  return person;
+}
+
 export async function resolveOrCreateChannelPerson(input: ChannelPersonResolutionInput): Promise<ChannelPersonResolution> {
   const externalIdentifier = input.externalIdentifier.trim();
   if (!externalIdentifier) throw new Error("A channel identity requires an external identifier.");
@@ -49,27 +75,8 @@ export async function resolveOrCreateChannelPerson(input: ChannelPersonResolutio
   if (identityLookupError) throw identityLookupError;
 
   if (existingIdentity) {
-    const { data: person, error: personLookupError } = await input.database
-      .from("people")
-      .select("id,display_name,first_contact_at,last_contact_at")
-      .eq("id", existingIdentity.person_id)
-      .eq("owner_id", input.ownerId)
-      .maybeSingle();
-    if (personLookupError) throw personLookupError;
+    const person = await touchPerson(input, existingIdentity.person_id, now, displayName);
     if (!person) throw new Error("The channel identity points to a missing person.");
-
-    const shouldReplacePlaceholder = displayName && (person.display_name?.startsWith(placeholderPrefix(input.source)) || person.display_name === "Unknown person");
-    const { error: personUpdateError } = await input.database
-      .from("people")
-      .update({
-        ...(shouldReplacePlaceholder ? { display_name: displayName } : {}),
-        first_contact_at: person.first_contact_at ?? now,
-        last_contact_at: !person.last_contact_at || String(person.last_contact_at) < now ? now : person.last_contact_at,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", person.id)
-      .eq("owner_id", input.ownerId);
-    if (personUpdateError) throw personUpdateError;
 
     const nextMetadata = existingIdentity.metadata && typeof existingIdentity.metadata === "object" && !Array.isArray(existingIdentity.metadata)
       ? { ...existingIdentity.metadata, ...metadata }
@@ -84,37 +91,51 @@ export async function resolveOrCreateChannelPerson(input: ChannelPersonResolutio
     return { personId: person.id, identityId: existingIdentity.id, createdPerson: false, createdIdentity: false };
   }
 
-  const fallbackName = `${placeholderPrefix(input.source)}${externalIdentifier.replace(/^.*:/, "").slice(-6)}`;
-  const { data: person, error: personError } = await input.database
-    .from("people")
-    .insert({
-      owner_id: input.ownerId,
-      display_name: displayName || fallbackName,
-      relationship_type: "unknown",
-      entity_type: "person",
-      first_contact_at: now,
-      last_contact_at: now,
-    })
-    .select("id")
-    .single();
-  if (personError || !person) throw personError ?? new Error("Could not create a person for the channel identity.");
+  let personId = input.preferredPersonId?.trim() || "";
+  let createdPerson = false;
+  if (personId) {
+    const person = await touchPerson(input, personId, now, displayName);
+    if (!person) personId = "";
+  }
+
+  if (!personId) {
+    const fallbackName = `${placeholderPrefix(input.source)}${externalIdentifier.replace(/^.*:/, "").slice(-6)}`;
+    const { data: person, error: personError } = await input.database
+      .from("people")
+      .insert({
+        owner_id: input.ownerId,
+        display_name: displayName || fallbackName,
+        relationship_type: "unknown",
+        entity_type: "person",
+        first_contact_at: now,
+        last_contact_at: now,
+      })
+      .select("id")
+      .single();
+    if (personError || !person) throw personError ?? new Error("Could not create a person for the channel identity.");
+    personId = person.id;
+    createdPerson = true;
+  }
 
   const { data: identity, error: identityError } = await input.database
     .from("identities")
     .insert({
       owner_id: input.ownerId,
-      person_id: person.id,
+      person_id: personId,
       source: input.source,
       external_identifier: externalIdentifier,
       username,
       profile_url: profileUrl,
       metadata,
-      verified_match: false,
+      verified_match: Boolean(input.preferredPersonId),
       confidence: input.confidence ?? 0.8,
     })
     .select("id")
     .single();
-  if (identityError || !identity) throw identityError ?? new Error("Could not create the channel identity.");
+  if (identityError || !identity) {
+    if (createdPerson) await input.database.from("people").delete().eq("id", personId).eq("owner_id", input.ownerId);
+    throw identityError ?? new Error("Could not create the channel identity.");
+  }
 
-  return { personId: person.id, identityId: identity.id, createdPerson: true, createdIdentity: true };
+  return { personId, identityId: identity.id, createdPerson, createdIdentity: true };
 }
