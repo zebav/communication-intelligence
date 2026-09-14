@@ -32,6 +32,9 @@ export async function POST(request: NextRequest) {
 
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!encryptionKey || !connection.encrypted_credentials) return NextResponse.json({ error: "The WhatsApp credentials are not available. Reconnect WhatsApp." }, { status: 409 });
+  const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+  if (!verifyToken) return NextResponse.json({ error: "WHATSAPP_WEBHOOK_VERIFY_TOKEN is missing in the deployment environment." }, { status: 409 });
+
   const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
   const businessAccountId = String(metadata.business_account_id ?? "");
   if (!/^\d+$/.test(businessAccountId)) return NextResponse.json({ error: "The WhatsApp Business Account ID is missing. Reconnect WhatsApp." }, { status: 409 });
@@ -40,21 +43,29 @@ export async function POST(request: NextRequest) {
     const credentials = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
     if (!credentials.accessToken) return NextResponse.json({ error: "The WhatsApp token is missing. Reconnect WhatsApp." }, { status: 409 });
     const version = process.env.META_GRAPH_API_VERSION || "v26.0";
+    const configuredBaseUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin).replace(/\/$/, "");
+    const callbackUrl = `${configuredBaseUrl}/api/connectors/whatsapp/webhook`;
+
     const response = await fetch(whatsappSubscribedAppsUrl(businessAccountId, version), {
       method: "POST",
-      headers: { authorization: `Bearer ${credentials.accessToken}` },
+      headers: { authorization: `Bearer ${credentials.accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ override_callback_uri: callbackUrl, verify_token: verifyToken }),
       signal: AbortSignal.timeout(15_000),
     });
     const result = await response.json().catch(() => null) as { success?: boolean; error?: { message?: string; code?: number } } | null;
     if (!response.ok || result?.success !== true) {
-      console.error("WhatsApp webhook repair failed", { connectionId: connection.id, status: response.status, code: result?.error?.code, message: result?.error?.message });
+      console.error("WhatsApp webhook repair failed", { connectionId: connection.id, status: response.status, code: result?.error?.code, message: result?.error?.message, callbackUrl });
       return NextResponse.json({ error: result?.error?.message || "Meta did not activate live WhatsApp delivery." }, { status: 409 });
     }
 
     const now = new Date().toISOString();
-    await database.from("connections").update({ token_metadata: { ...metadata, webhook_subscription: "subscribed", webhook_subscribed_at: now }, health_status: "healthy", updated_at: now }).eq("id", connection.id).eq("owner_id", user.id);
-    await database.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, actor_type: "user", action: "connection.webhook_subscribed", object_type: "connection", object_id: connection.id, source: "whatsapp", new_value: { business_account_id: businessAccountId, subscribed_at: now } });
-    return NextResponse.json({ success: true, subscribed: true });
+    await database.from("connections").update({
+      token_metadata: { ...metadata, webhook_subscription: "subscribed", webhook_subscribed_at: now, webhook_callback_url: callbackUrl },
+      health_status: "healthy",
+      updated_at: now,
+    }).eq("id", connection.id).eq("owner_id", user.id);
+    await database.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, actor_type: "user", action: "connection.webhook_subscribed", object_type: "connection", object_id: connection.id, source: "whatsapp", new_value: { business_account_id: businessAccountId, subscribed_at: now, callback_url: callbackUrl } });
+    return NextResponse.json({ success: true, subscribed: true, callbackUrl });
   } catch (caught) {
     console.error("WhatsApp webhook repair failed", caught instanceof Error ? caught.message : "unknown");
     return NextResponse.json({ error: "WhatsApp live delivery could not be activated. Reconnect the account if the token has expired." }, { status: 500 });
