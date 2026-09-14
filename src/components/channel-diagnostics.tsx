@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, RefreshCw, Wrench } from "lucide-react";
+import { CheckCircle2, Database, RefreshCw, Wrench } from "lucide-react";
 
 type WhatsAppConnection = { id: string; label: string };
 type HealthAccount = { id: string; account_name?: string | null; account_identifier?: string | null; live_delivery?: "subscribed" | "not_subscribed" | "unknown"; live_delivery_error?: string | null };
 type HealthResponse = { accounts?: HealthAccount[]; configured?: Record<string, boolean>; error?: string };
 type ReconcileResponse = { success?: boolean; checked?: number; createdPeople?: number; createdIdentities?: number; relinkedConversations?: number; relinkedMessages?: number; skipped?: number; error?: string };
+type SocialPersistence = { source: "instagram" | "whatsapp"; identities: number; conversations: number; messages: number; latestMessageAt: string | null };
 
-export function ChannelDiagnostics({ whatsappConnections }: { whatsappConnections: WhatsAppConnection[] }) {
+export function ChannelDiagnostics({ whatsappConnections, persistence }: { whatsappConnections: WhatsAppConnection[]; persistence: SocialPersistence[] }) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState("");
@@ -30,7 +31,7 @@ export function ChannelDiagnostics({ whatsappConnections }: { whatsappConnection
       const response = await fetch("/api/connectors/whatsapp/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId }) });
       const result = await response.json() as { error?: string; subscribed?: boolean };
       if (!response.ok || !result.subscribed) throw new Error(result.error ?? "Live WhatsApp delivery could not be activated.");
-      setMessage("WhatsApp live message delivery is subscribed. Send a new WhatsApp message and then refresh the app.");
+      setMessage("WhatsApp live message delivery is subscribed. Send a new WhatsApp message and then refresh this page to verify that it reached the database.");
       await checkHealth();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Live WhatsApp delivery could not be activated."); }
     finally { setWorking(""); }
@@ -42,7 +43,7 @@ export function ChannelDiagnostics({ whatsappConnections }: { whatsappConnection
       const response = await fetch("/api/contacts/reconcile-social", { method: "POST" });
       const result = await response.json() as ReconcileResponse;
       if (!response.ok) throw new Error(result.error ?? "Social contacts could not be reconciled.");
-      setMessage(`Social contacts repaired: ${result.checked ?? 0} conversations checked, ${result.createdPeople ?? 0} people created, ${result.createdIdentities ?? 0} identities created, ${result.relinkedConversations ?? 0} conversations relinked and ${result.relinkedMessages ?? 0} messages relinked.`);
+      setMessage(`Social contacts repaired: ${result.checked ?? 0} conversations checked, ${result.createdPeople ?? 0} people created, ${result.createdIdentities ?? 0} identities created, ${result.relinkedConversations ?? 0} conversations relinked and ${result.relinkedMessages ?? 0} messages relinked. Refresh this page to see updated database counts.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Social contacts could not be reconciled."); }
     finally { setWorking(""); }
   };
@@ -50,6 +51,15 @@ export function ChannelDiagnostics({ whatsappConnections }: { whatsappConnection
   return <div className="page" style={{ maxWidth: 900 }}>
     <span className="eyebrow">Channel diagnostics</span><h1>WhatsApp & social contacts</h1><p className="subtitle">Safe diagnostics for live message delivery and the Person graph. No message is sent and no external content is deleted.</p>
     {message && <div className="empty-card" style={{ marginTop: 16 }}>{message}</div>}
+
+    <div className="section-title">Persisted channel data</div>
+    <div className="cards" style={{ marginBottom: 24 }}>
+      {persistence.map((item) => <div className="card" key={item.source}>
+        <Database size={17} /><h3 style={{ textTransform: "capitalize" }}>{item.source}</h3>
+        <p>{item.messages} messages · {item.conversations} conversations · {item.identities} identities</p>
+        <span className="pill">{item.latestMessageAt ? `Latest ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.latestMessageAt))}` : "No persisted messages"}</span>
+      </div>)}
+    </div>
 
     <div className="section-title">WhatsApp live delivery</div>
     <div className="card">
