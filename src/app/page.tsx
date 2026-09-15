@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
-import { Workspace } from "@/components/workspace";
+import { WorkspaceSnapshot } from "@/components/workspace-snapshot";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
+import { recentWindowStartIso } from "@/lib/recent-window";
 import type { ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -32,26 +33,49 @@ export default async function Home() {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (!assurance || assurance.currentLevel !== "aal2") redirect("/auth/mfa");
 
-  const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();
-  const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: Partial<UniversalCommunicationProfile> } : {};
-  const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
-
-  const { data: personRows } = await supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(1000);
-  const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", priority: Number(person.manual_priority ?? person.overall_priority ?? 0), lastContactAt: person.last_contact_at ?? undefined }));
-
   const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)";
-  const [{ data: emailRows }, { data: channelRows }] = await Promise.all([
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(50),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(1000),
+  const overviewCutoff = recentWindowStartIso(31);
+  const initialLoadSignal = AbortSignal.timeout(8_000);
+  const [
+    { data: profileRows, error: profileError },
+    { data: personRows, error: personError },
+    { data: emailRows, error: emailError },
+    { data: channelRows, error: channelError },
+    { data: identityRows, error: identityError },
+    { data: memoryRows, error: memoryError },
+    { data: commitmentRows, error: commitmentError },
+    { data: learningRows, error: learningError },
+    { data: outcomeRows, error: outcomeError },
+    { data: connectionRows, error: connectionError },
+  ] = await Promise.all([
+    supabase.rpc("get_universal_communication_profile").abortSignal(initialLoadSignal),
+    supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(300).abortSignal(initialLoadSignal),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(AbortSignal.timeout(20_000)),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
+    supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(1500).abortSignal(initialLoadSignal),
+    supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(500).abortSignal(initialLoadSignal),
+    supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
+    supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(100).abortSignal(initialLoadSignal),
+    supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100).abortSignal(initialLoadSignal),
+    supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(initialLoadSignal),
   ]);
+  const profile = Array.isArray(profileRows) ? profileRows[0] : profileRows;
+  const loadResults = [
+    ["Profil", profileError], ["Kontakter", personError], ["E-post", emailError],
+    ["Övriga meddelanden", channelError], ["Identiteter", identityError],
+    ["Minnen", memoryError], ["Follow-ups", commitmentError],
+    ["Intelligence", learningError], ["Outcomes", outcomeError], ["Anslutningar", connectionError],
+  ] as const;
+  const failedSections = loadResults.filter(([, error]) => error).map(([section]) => section);
+  for (const [section, error] of loadResults) {
+    if (error) console.error("workspace_load_failed", { section, code: error.code || "request_failed" });
+  }
+  const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: Partial<UniversalCommunicationProfile> } : {};
+  if (emailError) console.error("workspace_email_load_failed", { code: emailError.code, message: emailError.message });
+  const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
+  const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", priority: Number(person.manual_priority ?? person.overall_priority ?? 0), lastContactAt: person.last_contact_at ?? undefined }));
   const rows = [...(emailRows ?? []), ...(channelRows ?? [])];
-
-  const { data: identityRows } = await supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(5000);
-  const { data: memoryRows } = await supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(2000);
-  const { data: commitmentRows } = await supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200);
-  const { data: learningRows } = await supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(200);
   const learningSignals: LearningSignal[] = (learningRows ?? []).map((item) => { const person = Array.isArray(item.people) ? item.people[0] : item.people; const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations; return { id: item.id, personName: person?.display_name ?? undefined, conversationTitle: conversation?.title ?? undefined, source: item.source as Source, signalType: item.signal_type as LearningSignal["signalType"], observation: item.observation, proposedRule: item.proposed_rule, confidence: Number(item.confidence ?? 0), status: item.status as LearningSignal["status"], createdAt: item.created_at }; });
-  const { data: outcomeRows } = await supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(200);
   const outcomes: CommunicationOutcome[] = (outcomeRows ?? []).map((item) => { const person = Array.isArray(item.people) ? item.people[0] : item.people; const conversation = Array.isArray(item.conversations) ? item.conversations[0] : item.conversations; return { id: item.id, personName: person?.display_name ?? "Unknown person", conversationTitle: conversation?.title ?? "Untitled conversation", desiredOutcome: item.desired_outcome, status: item.status as CommunicationOutcome["status"], ownerRating: item.owner_rating as CommunicationOutcome["ownerRating"], responseTimeMinutes: item.response_time_minutes == null ? undefined : Number(item.response_time_minutes), userConfirmed: item.user_confirmed, createdAt: item.created_at, updatedAt: item.updated_at }; });
   const openCommitmentMessages = new Set((commitmentRows ?? []).filter((item) => item.status === "open" && item.source_message_id).map((item) => item.source_message_id));
   const followUps: FollowUpCommitment[] = (commitmentRows ?? []).filter((item) => item.status !== "suggested" || !item.source_message_id || !openCommitmentMessages.has(item.source_message_id)).map((item) => {
@@ -60,12 +84,6 @@ export default async function Home() {
     return { id: item.id, sourceMessageId: item.source_message_id ?? undefined, conversationId: item.conversation_id, personName: person?.display_name ?? "Unknown person", conversationTitle: conversation?.title ?? "Untitled conversation", description: item.description, owner: item.commitment_owner === "user" || item.commitment_owner === "sender" ? item.commitment_owner : "unknown", dueAt: item.due_at ?? undefined, status: item.status === "open" ? "open" : "suggested", confidence: Number(item.confidence ?? 0) };
   });
 
-  const { data: connectionRows } = await supabase
-    .from("connections")
-    .select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities")
-    .eq("owner_id", user.id)
-    .eq("status", "connected")
-    .order("updated_at", { ascending: false });
   const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source as Source | undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
 
   const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email" && !isSyntheticTestConversation(row)).map((row) => {
@@ -74,11 +92,13 @@ export default async function Home() {
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata) ? latestMessage.metadata as { ai_analysis?: CommunicationCase["analysis"] } : {};
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
-    return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
+    const whatsappIdentities = (identityRows ?? []).filter((identity) => row.source === "whatsapp" && identity.source === "whatsapp" && identity.person_id === person?.id);
+    const whatsappRecipient = whatsappIdentities.length === 1 ? whatsappIdentities[0].external_identifier : undefined;
+    return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
     const messageFingerprint = normalizedConversationText(item.message);
-    const key = messageFingerprint ? `${item.personName.trim().toLocaleLowerCase()}:${messageFingerprint}` : `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
+    const key = messageFingerprint ? `${item.source}:${item.personId ?? item.id}:${messageFingerprint}` : `${item.source}:${item.personId ?? item.id}`;
     const current = grouped.get(key);
     if (!current || item.createdAt > current.createdAt) grouped.set(key, item);
     return grouped;
@@ -152,16 +172,9 @@ export default async function Home() {
     };
   }).sort((a, b) => (b.lastContactAt ?? "").localeCompare(a.lastContactAt ?? ""));
 
-  return <Workspace
-    userEmail={user.email ?? "Private owner"}
-    communicationCases={communicationCases}
-    connections={connections}
-    syncedEmails={syncedEmails}
-    followUps={followUps}
-    people={intelligentPeople}
-    learningSignals={learningSignals}
-    outcomes={outcomes}
-    persona={persona}
-    profilePeople={profilePeople}
-  />;
+  return <WorkspaceSnapshot key={user.id} failedSections={failedSections} data={{
+    userEmail: user.email ?? "Private owner", communicationCases, connections,
+    syncedEmails, followUps, people: intelligentPeople, learningSignals, outcomes,
+    persona, profilePeople,
+  }} />;
 }

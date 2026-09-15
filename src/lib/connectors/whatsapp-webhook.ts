@@ -1,24 +1,17 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { normalizeCommunicationMessage } from "./normalization";
 import { whatsappConnector } from "./whatsapp";
+import type { WhatsAppProviderAdapter, WhatsAppProviderMessage, WhatsAppProviderStatus } from "./whatsapp-provider";
 
 type WhatsAppMessage = { id?: string; from?: string; timestamp?: string; type?: string; text?: { body?: string }; image?: unknown; audio?: unknown; video?: unknown; document?: unknown; sticker?: unknown; location?: unknown; contacts?: unknown; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } } };
 type WhatsAppValue = { metadata?: { display_phone_number?: string; phone_number_id?: string }; contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>; messages?: WhatsAppMessage[]; statuses?: Array<{ id?: string; status?: string; timestamp?: string; recipient_id?: string; errors?: unknown }> };
 type WhatsAppPayload = { object?: string; entry?: Array<{ id?: string; changes?: Array<{ field?: string; value?: WhatsAppValue }> }> };
 
-export type WhatsAppWebhookMessage = {
-  businessAccountId: string;
-  phoneNumberId: string;
-  displayPhoneNumber?: string;
-  participantId: string;
-  participantName?: string;
-  message: ReturnType<typeof normalizeCommunicationMessage>;
-};
-
-export type WhatsAppStatusUpdate = { phoneNumberId: string; externalMessageId: string; status: string; timestamp?: string; recipientId?: string; errors?: unknown };
+export type WhatsAppWebhookMessage = WhatsAppProviderMessage;
+export type WhatsAppStatusUpdate = WhatsAppProviderStatus;
 
 export function validWhatsAppWebhookSignature(rawBody: string, signature: string | null, appSecret: string) {
-  if (!signature?.startsWith("sha256=") || !appSecret) return false;
+  if (!signature || !/^sha256=[a-fA-F0-9]{64}$/.test(signature) || !appSecret) return false;
   const supplied = Buffer.from(signature.slice(7), "hex");
   const expected = Buffer.from(createHmac("sha256", appSecret).update(rawBody).digest("hex"), "hex");
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
@@ -34,7 +27,7 @@ function messageBody(message: WhatsAppMessage) {
 export function parseWhatsAppWebhook(rawBody: string): { messages: WhatsAppWebhookMessage[]; statuses: WhatsAppStatusUpdate[] } {
   let payload: WhatsAppPayload;
   try { payload = JSON.parse(rawBody) as WhatsAppPayload; } catch { return { messages: [], statuses: [] }; }
-  if (payload.object !== "whatsapp_business_account" || !Array.isArray(payload.entry)) return { messages: [], statuses: [] };
+  if (!payload || payload.object !== "whatsapp_business_account" || !Array.isArray(payload.entry)) return { messages: [], statuses: [] };
   const messages: WhatsAppWebhookMessage[] = [];
   const statuses: WhatsAppStatusUpdate[] = [];
   for (const entry of payload.entry) for (const change of entry.changes ?? []) {
@@ -56,10 +49,20 @@ export function parseWhatsAppWebhook(rawBody: string): { messages: WhatsAppWebho
   return { messages, statuses };
 }
 
+export const metaDirectWhatsAppProvider: WhatsAppProviderAdapter = {
+  id: "meta-direct",
+  capabilities: { receivesMessages: true, receivesMobileReplies: false, receivesStatuses: true, sendsMessages: true },
+  verifyWebhook: validWhatsAppWebhookSignature,
+  parseWebhook(rawBody) {
+    return { provider: "meta-direct", ...parseWhatsAppWebhook(rawBody) };
+  },
+};
+
 export type WhatsAppWebhookConnection = { token_metadata?: unknown };
 export function findWhatsAppWebhookConnection<T extends WhatsAppWebhookConnection>(connections: T[], phoneNumberId: string) {
-  return connections.find((connection) => {
+  const matches = connections.filter((connection) => {
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
     return String(metadata.phone_number_id ?? "") === phoneNumberId;
   });
+  return matches.length === 1 ? matches[0] : undefined;
 }

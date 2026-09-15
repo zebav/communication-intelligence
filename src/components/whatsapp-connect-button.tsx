@@ -42,14 +42,23 @@ export function WhatsAppConnectButton({ connected }: { connected: boolean }) {
         if (!existing) { const script = document.createElement("script"); script.id = "facebook-jssdk"; script.src = "https://connect.facebook.net/en_US/sdk.js"; script.async = true; script.defer = true; script.onerror = () => reject(new Error("Meta's connection window could not be loaded.")); document.body.appendChild(script); }
       });
       setStatus("Choose your existing WhatsApp Business account in Meta…");
-      window.FB?.login(async (login) => {
+      window.FB?.login((login) => {
+        void (async () => {
+        try {
         const code = login.authResponse?.code;
+        // Meta delivers the code callback and session message independently.
+        if (code) {
+          const deadline = Date.now() + 5000;
+          while (!session.current && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
         const selected = session.current;
         if (!code || !selected) { setBusy(false); setStatus("The connection was cancelled or Meta did not return the selected WhatsApp number."); return; }
         const complete = await fetch("/api/connectors/whatsapp/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, ...selected }) });
         const result = await complete.json() as { error?: string; accountIdentifier?: string };
         if (!complete.ok) { setBusy(false); setStatus(result.error || "The WhatsApp connection could not be completed."); return; }
         setBusy(false); setStatus(`Connected securely${result.accountIdentifier ? ` · ${result.accountIdentifier}` : ""}.`); router.refresh();
+        } catch { setBusy(false); setStatus("The WhatsApp connection could not be completed. Try again."); }
+        })();
       }, { config_id: setup.configId, response_type: "code", override_default_response_type: true, extras: { setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" } });
     } catch (caught) { setBusy(false); setStatus(caught instanceof Error ? caught.message : "The WhatsApp connection could not be started."); }
   };

@@ -1,15 +1,25 @@
 const validId = (value: string) => /^\d+$/.test(value);
 
+function validVersion(version: string) {
+  if (!/^v\d+\.\d+$/.test(version)) throw new Error("invalid_meta_graph_version");
+}
+
 export function whatsappMessagesUrl(phoneNumberId: string, version = process.env.META_GRAPH_API_VERSION || "v23.0") {
   if (!validId(phoneNumberId)) throw new Error("invalid_whatsapp_phone_number_id");
-  if (!/^v\d+\.\d+$/.test(version)) throw new Error("invalid_meta_graph_version");
+  validVersion(version);
   return `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 }
 
 export function whatsappPhoneUrl(phoneNumberId: string, version = process.env.META_GRAPH_API_VERSION || "v23.0") {
   if (!validId(phoneNumberId)) throw new Error("invalid_whatsapp_phone_number_id");
-  if (!/^v\d+\.\d+$/.test(version)) throw new Error("invalid_meta_graph_version");
+  validVersion(version);
   return `https://graph.facebook.com/${version}/${phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`;
+}
+
+export function whatsappSubscribedAppsUrl(businessAccountId: string, version = process.env.META_GRAPH_API_VERSION || "v23.0") {
+  if (!validId(businessAccountId)) throw new Error("invalid_whatsapp_business_account_id");
+  validVersion(version);
+  return `https://graph.facebook.com/${version}/${businessAccountId}/subscribed_apps`;
 }
 
 export function whatsappSendBody(recipient: string, text: string) {

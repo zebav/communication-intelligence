@@ -5,6 +5,7 @@ import { findInstagramWebhookConnection, parseInstagramWebhook, validInstagramWe
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
+import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 
 export const maxDuration = 60;
 
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const secret = process.env.INSTAGRAM_APP_SECRET ?? "";
   if (!validInstagramWebhookSignature(rawBody, request.headers.get("x-hub-signature-256"), secret)) {
+    console.warn("Instagram webhook rejected: invalid signature");
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 401 });
   }
   const events = parseInstagramWebhook(rawBody);
@@ -38,56 +40,102 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ error: "Instagram connections could not be loaded." }, { status: 500 });
   }
+
   let imported = 0;
+  let failed = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
 
   for (const event of events) {
-    const connection = findInstagramWebhookConnection(connections ?? [], event.accountId);
-    if (!connection) {
-      console.warn("Instagram webhook account did not match a unique connection", {
-        accountId: event.accountId,
-        connectedAccounts: connections?.length ?? 0,
-      });
-      continue;
-    }
-    const identityKey = `instagram:${event.participantId}`;
-    let { data: identity } = await database.from("identities").select("id,person_id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_identifier", identityKey).maybeSingle();
-    let profile: { name?: string; username?: string } | null = null;
     try {
-      const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
-      if (encryptionKey && connection.encrypted_credentials) {
-        const credentials = decryptCredential<{ accessToken?: string }>(connection.encrypted_credentials, encryptionKey);
-        if (credentials.accessToken) {
-          const profileResponse = await fetch(instagramUserProfileUrl(event.participantId), { headers: { authorization: `Bearer ${credentials.accessToken}` }, signal: AbortSignal.timeout(10_000) });
-          if (profileResponse.ok) profile = await profileResponse.json() as { name?: string; username?: string };
+      const connection = findInstagramWebhookConnection(connections ?? [], event.accountId);
+      if (!connection) {
+        failed += 1;
+        console.warn("Instagram webhook account did not match a unique connection", {
+          accountId: event.accountId,
+          connectedAccounts: connections?.length ?? 0,
+        });
+        continue;
+      }
+
+      let profile: { name?: string; username?: string } | null = null;
+      try {
+        const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
+        if (encryptionKey && connection.encrypted_credentials) {
+          const credentials = decryptCredential<{ accessToken?: string }>(connection.encrypted_credentials, encryptionKey);
+          if (credentials.accessToken) {
+            const profileResponse = await fetch(instagramUserProfileUrl(event.participantId), { headers: { authorization: `Bearer ${credentials.accessToken}` }, signal: AbortSignal.timeout(10_000) });
+            if (profileResponse.ok) profile = await profileResponse.json() as { name?: string; username?: string };
+          }
         }
+      } catch (error) {
+        console.warn("Instagram sender profile lookup failed", { reason: error instanceof Error ? error.message : "unknown" });
+      }
+
+      const username = profile?.username?.trim() || null;
+      const profileName = profile?.name?.trim() || (username ? `@${username}` : "");
+      const identityKey = `instagram:${event.participantId}`;
+      const resolved = await resolveOrCreateChannelPerson({
+        database,
+        ownerId: connection.owner_id,
+        source: "instagram",
+        externalIdentifier: identityKey,
+        displayName: profileName,
+        username,
+        connectionId: connection.id,
+        confidence: 0.7,
+        contactAt: event.message.sentAt,
+        identityMetadata: { instagram_scoped_id: event.participantId },
+      });
+
+      const conversationKey = `instagram:${connection.id}:${event.participantId}`;
+      const { data: existingConversation, error: conversationLookupError } = await database.from("conversations").select("id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_conversation_id", conversationKey).maybeSingle();
+      if (conversationLookupError) throw conversationLookupError;
+      const conversationValues: Record<string, unknown> = {
+        owner_id: connection.owner_id,
+        person_id: resolved.personId,
+        connection_id: connection.id,
+        source: "instagram",
+        external_conversation_id: conversationKey,
+        title: `Instagram · ${connection.account_identifier ?? connection.account_name ?? "account"}`,
+        conversation_type: "direct_message",
+        last_message_at: event.message.sentAt,
+        ...(event.message.direction === "in" ? { last_other_message_at: event.message.sentAt } : { last_user_message_at: event.message.sentAt }),
+        updated_at: new Date().toISOString(),
+      };
+      const conversationResult = existingConversation?.id
+        ? await database.from("conversations").update(conversationValues).eq("id", existingConversation.id).eq("owner_id", connection.owner_id).select("id").single()
+        : await database.from("conversations").insert(conversationValues).select("id").single();
+      if (conversationResult.error || !conversationResult.data) throw conversationResult.error ?? new Error("Instagram conversation could not be saved.");
+
+      const { data: savedMessage, error: messageError } = await database.from("messages").upsert({
+        owner_id: connection.owner_id,
+        conversation_id: conversationResult.data.id,
+        external_message_id: event.message.externalId,
+        direction: event.message.direction,
+        sender_identity_id: event.message.direction === "in" ? resolved.identityId : null,
+        source: "instagram",
+        body_text: event.message.body,
+        sent_at: event.message.sentAt,
+        attachment_count: event.message.attachmentCount,
+        metadata: { ...event.message.providerMetadata, connection_id: connection.id },
+        processed_at: null,
+      }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
+      if (messageError) throw messageError;
+      if (savedMessage) {
+        imported += 1;
+        if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
       }
     } catch (error) {
-      console.warn("Instagram sender profile lookup failed", { reason: error instanceof Error ? error.message : "unknown" });
-    }
-    const profileName = profile?.name?.trim() || (profile?.username?.trim() ? `@${profile.username.trim()}` : "");
-    if (!identity) {
-      const { data: person, error: personError } = await database.from("people").insert({ owner_id: connection.owner_id, display_name: profileName || `Instagram contact ${event.participantId.slice(-6)}`, relationship_type: "unknown", entity_type: "person" }).select("id").single();
-      if (personError || !person) continue;
-      const identityResult = await database.from("identities").insert({ owner_id: connection.owner_id, person_id: person.id, source: "instagram", external_identifier: identityKey, metadata: { instagram_scoped_id: event.participantId, connection_id: connection.id }, verified_match: false, confidence: 0.7 }).select("id,person_id").single();
-      if (identityResult.error || !identityResult.data) continue;
-      identity = identityResult.data;
-    } else if (profileName) {
-      await database.from("people").update({ display_name: profileName, updated_at: new Date().toISOString() }).eq("id", identity.person_id).eq("owner_id", connection.owner_id).like("display_name", "Instagram contact %");
-    }
-    const conversationKey = `instagram:${connection.id}:${event.participantId}`;
-    const { data: existingConversation } = await database.from("conversations").select("id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_conversation_id", conversationKey).maybeSingle();
-    const conversationValues: Record<string, unknown> = { owner_id: connection.owner_id, person_id: identity.person_id, connection_id: connection.id, source: "instagram", external_conversation_id: conversationKey, title: `Instagram · ${connection.account_identifier ?? connection.account_name ?? "account"}`, conversation_type: "direct_message", last_message_at: event.message.sentAt, ...(event.message.direction === "in" ? { last_other_message_at: event.message.sentAt } : { last_user_message_at: event.message.sentAt }), updated_at: new Date().toISOString() };
-    const conversationResult = existingConversation?.id
-      ? await database.from("conversations").update(conversationValues).eq("id", existingConversation.id).eq("owner_id", connection.owner_id).select("id").single()
-      : await database.from("conversations").insert(conversationValues).select("id").single();
-    if (conversationResult.error || !conversationResult.data) continue;
-    const { data: savedMessage, error: messageError } = await database.from("messages").upsert({ owner_id: connection.owner_id, conversation_id: conversationResult.data.id, external_message_id: event.message.externalId, direction: event.message.direction, sender_identity_id: event.message.direction === "in" ? identity.id : null, source: "instagram", body_text: event.message.body, sent_at: event.message.sentAt, attachment_count: event.message.attachmentCount, metadata: { ...event.message.providerMetadata, connection_id: connection.id }, processed_at: null }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
-    if (!messageError && savedMessage) {
-      imported += 1;
-      if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
+      failed += 1;
+      console.error("Instagram webhook event ingestion failed", {
+        accountId: event.accountId,
+        participantId: event.participantId,
+        messageId: event.message.externalId,
+        reason: error instanceof Error ? error.message : "unknown",
+      });
     }
   }
+
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item))); });
-  return NextResponse.json({ received: true, imported });
+  return NextResponse.json({ received: true, imported, failed });
 }

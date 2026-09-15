@@ -167,6 +167,7 @@ export async function POST(request: NextRequest) {
       const { data: history } = await supabase.from("conversations").select("id,last_user_message_at").eq("owner_id", userId).eq("person_id", personId).limit(100);
       const { data: senderPreferences } = await supabase.from("people").select("relationship_type,manual_priority,email_handling_rule,sender_preferences_verified").eq("id", personId).eq("owner_id", userId).maybeSingle();
       const relevance = senderRelevance({
+        classification, text: content.text,
         basePriority,
         relationshipType: senderPreferences?.sender_preferences_verified ? senderPreferences.relationship_type : null,
         manualPriority: senderPreferences?.sender_preferences_verified && senderPreferences.manual_priority != null ? Number(senderPreferences.manual_priority) : null,
