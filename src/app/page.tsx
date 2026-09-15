@@ -41,7 +41,7 @@ export default async function Home() {
 
   const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)";
   const [{ data: emailRows }, { data: channelRows }] = await Promise.all([
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(50),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(500),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(1000),
   ]);
   const rows = [...(emailRows ?? []), ...(channelRows ?? [])];

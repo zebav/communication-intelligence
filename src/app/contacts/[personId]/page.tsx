@@ -1,6 +1,7 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { BackToWorkspaceButton } from "@/components/back-to-workspace-button";
+import { ContactProfileEditor } from "@/components/contact-profile-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
   const initials = String(person.display_name ?? "?").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 
   return <main className="page contact-profile-page" style={{ maxWidth: 980, margin: "0 auto" }}>
-    <div className="toolbar" style={{ marginBottom: 16 }}><Link className="btn" href="/">← Back to workspace</Link></div>
+    <div className="contact-profile-toolbar"><BackToWorkspaceButton /><ContactProfileEditor person={person} /></div>
     <div className="person-detail">
       <div className="person-detail-head"><div className="avatar">{initials}</div><div><span className="eyebrow">Contact profile</span><h1 style={{ marginTop: 4 }}>{person.display_name}</h1><p className="subtitle">{[person.organization, person.relationship_type].filter(Boolean).join(" · ") || "Unified person profile"}</p></div></div>
       <div className="person-metrics" style={{ marginTop: 18 }}><div className="summary-stat"><strong>{priority || "–"}</strong><span>priority</span></div><div className="summary-stat"><strong>{identities?.length ?? 0}</strong><span>identities</span></div><div className="summary-stat"><strong>{conversations?.length ?? 0}</strong><span>conversations</span></div><div className="summary-stat"><strong>{commitments?.length ?? 0}</strong><span>open loops</span></div></div>

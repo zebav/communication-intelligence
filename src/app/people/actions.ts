@@ -45,5 +45,6 @@ export async function savePersonIntelligence(input: { personId: string; name: st
   }
   await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "person.intelligence_updated", object_type: "person", object_id: parsed.data.personId, actor_type: "user", previous_value: previous, new_value: values });
   revalidatePath("/");
+  revalidatePath(`/contacts/${parsed.data.personId}`);
   return { success: true };
 }

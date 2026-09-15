@@ -24,10 +24,11 @@ import { accountDisplayLabel } from "@/lib/connectors/account-label";
 import { relationshipLabels, relationshipTypes } from "@/lib/relationship-types";
 import { PersonLink } from "@/components/person-link";
 import { WhatsAppConnectButton } from "@/components/whatsapp-connect-button";
+import { communicationPeriods, isWithinCommunicationPeriod, type CommunicationPeriod } from "@/lib/communication-period";
 
 type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
-  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
+  { id: "today", label: "Overview", icon: LayoutDashboard }, { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
 const sources: { label: string; source: Source }[] = [
   { label: "Email", source: "email" },
@@ -98,19 +99,30 @@ function CommunicationCaseCard({ item }: { item: CommunicationCase }) {
 }
 
 function Today({ emails, channelCases, onOpenInbox, onOpenSource }: { emails: SyncedEmailConversation[]; channelCases: CommunicationCase[]; onOpenInbox: () => void; onOpenSource: (source: Source) => void }) {
-  const ordered = prioritizeEmails(emails);
-  const summary = emailDashboardSummary(emails);
+  const [period, setPeriod] = useState<CommunicationPeriod>("today");
+  const pendingEmails = emails.filter((email) => email.threadMessages.at(-1)?.direction === "in");
+  const visibleEmails = pendingEmails.filter((email) => isWithinCommunicationPeriod(email.receivedAt, period));
+  const visibleChannelCases = channelCases.filter((item) => {
+    const latest = item.threadMessages?.at(-1);
+    const timestamp = latest?.sentAt ?? item.createdAt;
+    return item.conversationType !== "imported" && latest?.direction === "in" && isWithinCommunicationPeriod(timestamp, period);
+  });
+  const ordered = prioritizeEmails(visibleEmails);
+  const summary = emailDashboardSummary(visibleEmails);
   const critical = ordered.filter((email) => email.classification === "Critical");
-  const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical");
-  const lowAttention = ordered.filter((email) => email.priorityScore < 4);
-  const otherChannels = channelCases.filter((item) => item.conversationType !== "imported" && item.threadMessages?.at(-1)?.direction === "in").sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
-  return <div className="page"><span className="eyebrow">Universal communication intelligence</span><h1>Your communication today</h1><p className="subtitle">Email, Instagram and your other connected channels are prioritized together.</p>
+  const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical" && email.priorityScore >= 4);
+  const lowAttention = ordered.filter((email) => email.priorityScore < 4 && email.classification !== "Critical");
+  const otherChannels = visibleChannelCases.sort((a, b) => (b.threadMessages?.at(-1)?.sentAt ?? b.createdAt).localeCompare(a.threadMessages?.at(-1)?.sentAt ?? a.createdAt));
+  const periodLabel = communicationPeriods.find((item) => item.id === period)?.label ?? "Today";
+  const totalPending = visibleEmails.length + visibleChannelCases.length;
+  return <div className="page"><span className="eyebrow">Universal communication intelligence</span><h1>Your communication overview</h1><p className="subtitle">Unanswered email, Instagram, WhatsApp and other connected channels—prioritized together without losing older items.</p>
+    <div className="overview-periods" aria-label="Communication time period">{communicationPeriods.map((item) => <button type="button" className={period === item.id ? "active" : ""} aria-pressed={period === item.id} key={item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
     <div className="summary-bar"><div className="summary-stat"><strong>{summary.unread}</strong><span>unread</span></div><div className="summary-stat"><strong>{summary.needsResponse}</strong><span>may need response</span></div><div className="summary-stat"><strong>{summary.critical}</strong><span>critical</span></div><div className="summary-stat"><strong>{summary.lowAttention}</strong><span>low attention</span></div></div>
-    {emails.length === 0 && <div className="empty-card">No synchronized Outlook messages yet. Open Connections and run the first import.</div>}
-    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#fb7185" /> Critical <span className="count">{critical.length}</span></div><div className="cards">{critical.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
-    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">{respond.length}</span></div><div className="cards">{respond.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {totalPending === 0 && <div className="empty-card">No unanswered relevant messages for {periodLabel.toLowerCase()}.</div>}
+    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#fb7185" /> Critical <span className="count">{critical.length}</span></div><div className="cards">{critical.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">{respond.length}</span></div><div className="cards">{respond.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
     {otherChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#a78bfa" /> Other channels <span className="count">{otherChannels.length}</span></div><div className="cards">{otherChannels.map((item) => <article className="card email-card" key={item.id}><div className="card-top"><span>{item.title}</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><div className="card-person"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><PersonLink personId={item.personId} name={item.personName} /><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{item.analysis?.summary || item.message}</p><button className="pill" onClick={() => onOpenSource(item.source)}>Open conversation <ChevronRight size={10} /></button></article>)}</div></>}
-    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Low attention <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Low attention <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
   </div>;
 }
 
