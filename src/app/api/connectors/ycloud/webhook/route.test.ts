@@ -19,3 +19,10 @@ it("only ingests a unique WABA plus business-number match", async () => {
  const chain = { select: () => chain, eq: () => chain, then: (resolve: (v: unknown) => void) => Promise.resolve({ data, error: null }).then(resolve) }; mocks.admin.mockReturnValue({ from: () => chain }); mocks.ingest.mockResolvedValue(Response.json({ received: true }));
  expect((await POST(request())).status).toBe(200); expect(mocks.ingest.mock.calls[0][0].messages[0].phoneNumberId).toBe("456");
 });
+it("authenticates but ignores YCloud deliveries when Meta Direct is active", async () => {
+ vi.stubEnv("WHATSAPP_ACTIVE_PROVIDER", "meta-direct");
+ const response = await POST(request());
+ expect(response.status).toBe(200);
+ expect(await response.json()).toMatchObject({ ignored: true, provider: "ycloud", activeProvider: "meta-direct" });
+ expect(mocks.admin).not.toHaveBeenCalled();
+});
