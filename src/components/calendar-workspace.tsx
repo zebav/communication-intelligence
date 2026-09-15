@@ -6,6 +6,7 @@ import { meetingDefaults } from "@/lib/calendar/types";
 import { schedulingIntent } from "@/lib/calendar/intent";
 import type { SchedulingCandidate } from "@/lib/calendar/scheduling";
 import "./calendar-workspace.css";
+import {CalendarBoard} from "./calendar-board";
 
 type Source={id:string;account_id:string;name:string;is_master:boolean;enabled:boolean;snapshot:CalendarEvent[];reviewed_snapshot:CalendarEvent[]|null;synced_at:string|null;sync_error:string|null};
 type Hold={id:string;title:string;starts_at:string;ends_at:string;status:string;expires_at:string;preparation_minutes:number;recovery_minutes:number};
@@ -47,6 +48,7 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
   {error&&<div className="calendar-notice error" role="alert">{error}</div>}{status&&<p role="status" className="calendar-notice">{status}</p>}
   {consentResult&&<p className="calendar-notice" role="status">{consentResult==="connected"?"Kalenderkontot är anslutet. Hämta kalenderlistan nedan.":consentResult==="callback_setup"?"Testversionens returadress behöver registreras hos Google/Microsoft och anges i Vercel innan kalendern kan anslutas.":consentResult==="missing_permissions"?"Alla kalenderbehörigheter godkändes inte. Din mejlanslutning är oförändrad.":"Kalenderanslutningen blev inte klar. Kontrollera konfigurationen innan du försöker igen."}</p>}
   {!data&&!error&&<p role="status">Hämtar kalendern…</p>}
+  <CalendarBoard date={date} onDate={value=>{setDate(value);setSlots([]);}} timezone={timezone} events={[...(master?.snapshot??[]),...(data?.holds??[]).filter(h=>h.status==='active'&&Date.parse(h.expires_at)>now).map(h=>({id:h.id,calendarId:'holds',title:h.title,timezone,start:h.starts_at,end:h.ends_at,allDay:false,status:'tentative' as const,blocksAvailability:true}))]}/>
   <details className="calendar-panel" open={!master}><summary>Anslutningar och masterkalender</summary>
    <p>Kalenderåtkomst godkänns separat från mejlen. Inga befintliga bokningar ändras när du ansluter.</p>
    <div className="calendar-actions"><a className="btn" href="/api/calendar/connect/google">Anslut Google Kalender</a><a className="btn" href="/api/calendar/connect/microsoft">Anslut Outlook-kalender</a></div>

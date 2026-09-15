@@ -6,18 +6,19 @@ import { microsoftConfig } from "../connectors/microsoft-oauth";
 import { encryptCredential,decryptCredential } from "../connectors/credential-crypto";
 import { validateCalendarGrant, grantedGoogleScopes } from "./google-consent";
 import { calendarSession } from "./auth";
+import { calendarStartDestination } from "./callback";
 export type CalendarProvider="google"|"microsoft";
 export const microsoftCalendarConsentScopes=["openid","profile","offline_access","User.Read","Calendars.Read"];
 function calendarConfig(origin:string,provider:CalendarProvider) {
   const config=provider==="google"?googleConfig(origin):microsoftConfig(origin);
   const override=provider==="google"?process.env.GOOGLE_CALENDAR_REDIRECT_URI:process.env.MICROSOFT_CALENDAR_REDIRECT_URI;
-  return {...config,redirectUri:override||config.redirectUri};
+  return {...config,redirectUri:override?.trim()||config.redirectUri};
 }
 export async function startCalendarConsent(request:NextRequest,provider:CalendarProvider) {
   const {owner}=await calendarSession();
   const config=calendarConfig(request.nextUrl.origin,provider);
-  const origin=new URL(config.redirectUri).origin;
-  if(origin!==request.nextUrl.origin) return NextResponse.redirect(new URL("/?view=calendar&calendar=callback_setup",request.url));
+  const destination=calendarStartDestination(config.redirectUri,request.url,request.headers.get("host"));
+  if(destination) return NextResponse.redirect(destination);
   const attempt=createGoogleOAuthAttempt(), jar=await cookies();
   const path=`/api/connectors/${provider}`;
   const options={httpOnly:true,secure:true,sameSite:"lax" as const,maxAge:600,path};
