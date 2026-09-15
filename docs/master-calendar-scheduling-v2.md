@@ -18,11 +18,21 @@ Do not merge into main before the foundation and the remaining release gates bel
 
 ## Required next implementation, before user acceptance testing
 
+### Second integrated block (local, not activated)
+
+- Durable per-account background queue, 90-second fenced leases, exponential retry, one bounded source fetch per tick and snapshot compare-and-set. Failed or superseded fetches cannot erase newer data. Credential refresh is serialized per account.
+- Dedicated authenticated POST `/api/cron/calendar-sync`, disabled until `CALENDAR_BACKGROUND_SYNC_ENABLED=true` and `CALENDAR_SYNC_SECRET` are configured. A scheduler is **not installed**. Intended activation is a server-side scheduler calling this endpoint, not browser polling; verify the scheduler and secrets before enabling it.
+- Persisted conversation proposals with exact message quotations, stable input hashes and dismissals. No booking tool is exposed to the model. Dates not literally grounded in evidence require manual clarification. Uses the existing Responses API with `OPENAI_CALENDAR_MODEL` or `OPENAI_FAST_MODEL`; no new SDK or live model calls in verification.
+- Prepared rename/cancel actions for one-off master events without attendees. Fresh provider read, immutable review plan, explicit approval, `If-Match`, no invitations, and uncertain-write recovery without automatic duplicate writes. Moving event times is not implemented yet.
+- Additional release migrations: `20260915225449_calendar_background_sync.sql`, `20260915225656_calendar_approved_actions.sql`, `20260915225904_calendar_intent_proposals.sql`. Apply in order with the coherent release, not independently of its code.
+
+The list below describes remaining acceptance gates; parts noted above have local implementations, not live verification.
+
 1. Background sync: decide a scheduler compatible with the actual deployment plan. Add durable per-account claims, bounded retries, last attempt/success, renewal where relevant, no overlapping refresh-token writes, preserve snapshots on failure. No frequent Hobby cron or UI polling presented as background sync.
 2. Complete commitment lifecycle: approved copy is implemented, but changed/cancelled originals still need persistent review items, exclusion decisions and explicit master update/cancel plans. Add mocked end-to-end service tests including provider timeouts and changed source between read/write. No silent move or delete.
 3. AI intent proposals grounded in actual conversation/message IDs and timestamp, timezone and evidence. Ambiguous dates/locations require clarification; cancellation never becomes a new booking. Prepared replies may cite only verified offered slots.
 4. Physical scheduling: time-bound origin/next destination, validate **both** route legs, persist approved route evidence with expiry and plan fingerprint; repeat conflict/route checks before confirm. Current `physical` holds intentionally remain disabled.
-5. Approved master updates/cancellations with etags, uncertainty handling and audit. Invitations and outgoing messages require separate explicit approval. No provider event edits or notifications in current block.
+5. Finish time-moving plans and verify the implemented rename/cancel flow end-to-end. Invitations and outgoing messages require separate explicit approval. Provider edits exist in code but were not run against real calendars.
 6. Surface pending scheduling plans in Overview with links to the native calendar, not a disconnected second application.
 7. Full local API + UI tests with provider failure/timeout scenarios, then one coherent preview. Do not ask user to test paid Maps features before configuration is complete.
 

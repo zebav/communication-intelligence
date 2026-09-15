@@ -6,22 +6,33 @@ import { googleConfig } from "../connectors/google-oauth";
 import { microsoftConfig } from "../connectors/microsoft-oauth";
 import type { TimeRange } from "./types";
 
-export async function calendarToken(db:SupabaseClient,owner:string,accountId:string) {
+export async function calendarToken(db:SupabaseClient,owner:string,accountId:string,signal?:AbortSignal) {
   const {data:account,error}=await db.from("calendar_accounts").select("*").eq("owner_id",owner).eq("id",accountId).single();
   if(error||!account) throw new Error("Kalenderkontot kunde inte läsas.");
   const key=process.env.CREDENTIAL_ENCRYPTION_KEY;
   if(!key) throw new Error("Kalenderns kryptering är inte konfigurerad.");
   const credentials=decryptCredential<{accessToken:string;refreshToken:string;expiresAt:string}>(account.encrypted_credentials,key);
   if(Date.parse(credentials.expiresAt)>Date.now()+60000) return {account,token:credentials.accessToken};
+  const lease=crypto.randomUUID();
+  const {data:claimed,error:claimError}=await db.rpc("claim_calendar_refresh",{p_owner:owner,p_account:accountId,p_token:lease});
+  if(claimError||!claimed)throw new Error("Kalenderåtkomsten förnyas redan. Försök igen om en liten stund.");
+  try {
+  const {data:current,error:currentError}=await db.from("calendar_accounts").select("encrypted_credentials").eq("id",accountId).eq("owner_id",owner).single();
+  if(currentError||!current)throw new Error("Kalenderåtkomsten kunde inte läsas.");
+  const latest=decryptCredential<{accessToken:string;refreshToken:string;expiresAt:string}>(current.encrypted_credentials,key);
+  if(Date.parse(latest.expiresAt)>Date.now()+60000)return {account,token:latest.accessToken};
   const config=account.provider==="google"?googleConfig("https://unused.invalid"):microsoftConfig("https://unused.invalid");
   const url=account.provider==="google"?"https://oauth2.googleapis.com/token":`https://login.microsoftonline.com/${microsoftConfig("https://unused.invalid").tenant}/oauth2/v2.0/token`;
-  const response=await fetch(url,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:config.clientId,client_secret:config.clientSecret,grant_type:"refresh_token",refresh_token:credentials.refreshToken}),signal:AbortSignal.timeout(15000)});
+  const response=await fetch(url,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:config.clientId,client_secret:config.clientSecret,grant_type:"refresh_token",refresh_token:latest.refreshToken}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});
   if(!response.ok) throw new Error("Återanslut kalenderkontot för att förnya åtkomsten.");
   const next=await response.json();
   if(!next.access_token||!Number.isFinite(next.expires_in)) throw new Error("Kalenderåtkomsten kunde inte förnyas.");
-  const {error:save}=await db.from("calendar_accounts").update({encrypted_credentials:encryptCredential({accessToken:next.access_token,refreshToken:next.refresh_token||credentials.refreshToken,expiresAt:new Date(Date.now()+next.expires_in*1000).toISOString()},key)}).eq("id",accountId).eq("owner_id",owner);
-  if(save) throw new Error("Förnyad kalenderåtkomst kunde inte sparas.");
+  const {data:saved,error:save}=await db.from("calendar_accounts").update({encrypted_credentials:encryptCredential({accessToken:next.access_token,refreshToken:next.refresh_token||latest.refreshToken,expiresAt:new Date(Date.now()+next.expires_in*1000).toISOString()},key)}).eq("id",accountId).eq("owner_id",owner).eq("encrypted_credentials",current.encrypted_credentials).eq("refresh_lease",lease).gt("refresh_lease_until",new Date().toISOString()).select("id").maybeSingle();
+  if(save||!saved) throw new Error("Kalenderåtkomsten ändrades under förnyelsen. Försök igen.");
   return {account,token:next.access_token as string};
+  } finally {
+    await db.from("calendar_accounts").update({refresh_lease:null,refresh_lease_until:null}).eq("owner_id",owner).eq("id",accountId).eq("refresh_lease",lease);
+  }
 }
 export async function discoverCalendars(db:SupabaseClient,owner:string,accountId:string) {
   const {account,token}=await calendarToken(db,owner,accountId);
@@ -44,8 +55,10 @@ export async function syncCalendar(db:SupabaseClient,owner:string,sourceId:strin
     const events=account.provider==="google"?await new GoogleCalendarReader(token).getEvents(s.external_id,range,s.timezone):await new OutlookCalendarReader(token).getEvents(s.external_id,range);
     if(events.length>10000) throw new Error("För många bokningar. Välj en kortare period.");
     // One update publishes the complete snapshot; failures retain previous data.
-    const {error:save}=await db.from("calendar_sources").update({snapshot:events.sort((a,b)=>a.id.localeCompare(b.id)),window_start:range.start,window_end:range.end,synced_at:new Date().toISOString(),sync_error:null}).eq("id",s.id).eq("owner_id",owner);
+    const saveQuery=db.from("calendar_sources").update({snapshot:events.sort((a,b)=>a.id.localeCompare(b.id)),window_start:range.start,window_end:range.end,synced_at:new Date().toISOString(),sync_error:null}).eq("id",s.id).eq("owner_id",owner);
+    const {data:saved,error:save}=await (s.synced_at?saveQuery.eq("synced_at",s.synced_at):saveQuery.is("synced_at",null)).select("id").maybeSingle();
     if(save) throw new Error("Synkroniseringen kunde inte sparas.");
+    if(!saved)return events.length; // A newer complete snapshot won; do not release holds using older data.
     if(s.is_master) {
       const {data:booked,error:readHolds}=await db.from("calendar_holds").select("id,external_event_id,starts_at,ends_at").eq("owner_id",owner).eq("status","confirmed").gte("starts_at",range.start).lte("ends_at",range.end);
       if(readHolds) throw new Error("Bokningsstatus kunde inte stämmas av.");
@@ -59,7 +72,8 @@ export async function syncCalendar(db:SupabaseClient,owner:string,sourceId:strin
     }
     return events.length;
   } catch(error) {
-    await db.from("calendar_sources").update({sync_error:"Synkroniseringen misslyckades. Tidigare data visas."}).eq("id",s.id).eq("owner_id",owner);
+    const errorQuery=db.from("calendar_sources").update({sync_error:"Synkroniseringen misslyckades. Tidigare data visas."}).eq("id",s.id).eq("owner_id",owner);
+    await (s.synced_at?errorQuery.eq("synced_at",s.synced_at):errorQuery.is("synced_at",null));
     throw error;
   }
 }

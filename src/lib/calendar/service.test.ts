@@ -8,7 +8,7 @@ function fakeDb(status="active",provisioning="idle") {
  const db={from:(table:string)=>{
   let write:Record<string,unknown>|undefined;
   const result=()=>({data:table==="calendar_holds"?{...hold,status}:table==="calendar_sources"?{id:"master",is_master:true,account_id:"account",external_id:"google-master",timezone:"UTC",window_start:"2026-09-30T00:00:00Z",window_end:"2026-10-03T00:00:00Z"}:table==="calendar_accounts"?{id:"account",provider:"google",encrypted_credentials:"cipher"}:provisioning==="idle"?{owner_id:owner}:null,error:null});
-  const q={select:()=>q,eq:()=>q,gt:()=>q,gte:()=>q,lte:()=>q,update:(value:Record<string,unknown>)=>{write=value;writes.push({table,...value});return q;},insert:(value:Record<string,unknown>)=>{write=value;writes.push({table,...value});return q;},single:async()=>result(),maybeSingle:async()=>result(),then:(resolve:(x:unknown)=>unknown)=>Promise.resolve({data:write??[],error:null}).then(resolve)};
+  const q={select:()=>q,eq:()=>q,is:()=>q,gt:()=>q,gte:()=>q,lte:()=>q,update:(value:Record<string,unknown>)=>{write=value;writes.push({table,...value});return q;},insert:(value:Record<string,unknown>)=>{write=value;writes.push({table,...value});return q;},single:async()=>result(),maybeSingle:async()=>result(),then:(resolve:(x:unknown)=>unknown)=>Promise.resolve({data:write??[],error:null}).then(resolve)};
   return q;
  }};
  return {db:db as unknown as SupabaseClient,writes};
