@@ -7,6 +7,7 @@ import { schedulingIntent } from "@/lib/calendar/intent";
 import type { SchedulingCandidate } from "@/lib/calendar/scheduling";
 import "./calendar-workspace.css";
 import {CalendarBoard} from "./calendar-board";
+import {calendarDisplay} from "@/lib/calendar/display";
 
 type Source={id:string;account_id:string;name:string;is_master:boolean;enabled:boolean;snapshot:CalendarEvent[];reviewed_snapshot:CalendarEvent[]|null;synced_at:string|null;sync_error:string|null};
 type Hold={id:string;title:string;starts_at:string;ends_at:string;status:string;expires_at:string;preparation_minutes:number;recovery_minutes:number};
@@ -40,6 +41,7 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
  const fmt=(value:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,dateStyle:"medium",timeStyle:"short"}).format(new Date(value));
  const day=(value:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(value));
  const master=data?.sources.find(s=>s.is_master);
+ const display=calendarDisplay(data?.sources??[],data?.accounts??[]);
  const external=data?.sources.filter(s=>!s.is_master&&s.enabled)??[];
  const selectedConversation=conversations.find(c=>c.id===conversationId);
  const eventRows=(master?.snapshot??[]).filter(e=>e.status!=="cancelled").filter(e=>tab==="day"?day(e.start)<=date&&day(e.end)>=date:tab==="week"?day(e.start)>=date&&day(e.start)<new Date(Date.parse(date)+7*86400000).toISOString().slice(0,10):day(e.end)>=date).sort((a,b)=>a.start.localeCompare(b.start));
@@ -48,7 +50,7 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
   {error&&<div className="calendar-notice error" role="alert">{error}</div>}{status&&<p role="status" className="calendar-notice">{status}</p>}
   {consentResult&&<p className="calendar-notice" role="status">{consentResult==="connected"?"Kalenderkontot är anslutet. Hämta kalenderlistan nedan.":consentResult==="callback_setup"?"Testversionens returadress behöver registreras hos Google/Microsoft och anges i Vercel innan kalendern kan anslutas.":consentResult==="missing_permissions"?"Alla kalenderbehörigheter godkändes inte. Din mejlanslutning är oförändrad.":"Kalenderanslutningen blev inte klar. Kontrollera konfigurationen innan du försöker igen."}</p>}
   {!data&&!error&&<p role="status">Hämtar kalendern…</p>}
-  <CalendarBoard date={date} onDate={value=>{setDate(value);setSlots([]);}} timezone={timezone} events={[...(master?.snapshot??[]),...(data?.holds??[]).filter(h=>h.status==='active'&&Date.parse(h.expires_at)>now).map(h=>({id:h.id,calendarId:'holds',title:h.title,timezone,start:h.starts_at,end:h.ends_at,allDay:false,status:'tentative' as const,blocksAvailability:true}))]}/>
+  <CalendarBoard calendars={[...display.calendars,{id:'holds',label:'Preliminära reservationer',master:true,color:'#f4d37b'}]} date={date} onDate={value=>{setDate(value);setSlots([]);}} timezone={timezone} events={[...display.events,...(data?.holds??[]).filter(h=>h.status==='active'&&Date.parse(h.expires_at)>now).map(h=>({id:h.id,calendarId:'holds',title:h.title,timezone,start:h.starts_at,end:h.ends_at,allDay:false,status:'tentative' as const,blocksAvailability:true}))]}/>
   <details className="calendar-panel" open={!master}><summary>Anslutningar och masterkalender</summary>
    <p>Kalenderåtkomst godkänns separat från mejlen. Inga befintliga bokningar ändras när du ansluter.</p>
    <div className="calendar-actions"><a className="btn" href="/api/calendar/connect/google">Anslut Google Kalender</a><a className="btn" href="/api/calendar/connect/microsoft">Anslut Outlook-kalender</a></div>
