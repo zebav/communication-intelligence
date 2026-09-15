@@ -99,6 +99,7 @@ export async function createMaster(db:SupabaseClient,owner:string,accountId:stri
 export async function confirmHold(db:SupabaseClient,owner:string,holdId:string) {
   const {data:h,error}=await db.from("calendar_holds").select("*").eq("owner_id",owner).eq("id",holdId).single();
   if(error||!h) throw new Error("Reservationen finns inte.");
+  if(h.purpose==="move") throw new Error("Denna tid hör till en flytt. Godkänn flyttförslaget i den befintliga bokningen.");
   if(h.status==="confirmed") return;
   if(h.status!=="active"&&h.status!=="executing") throw new Error("Reservationen är inte aktiv.");
   const {data:master}=await db.from("calendar_sources").select("*").eq("owner_id",owner).eq("is_master",true).single();

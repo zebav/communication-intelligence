@@ -2,7 +2,8 @@ import { z } from "zod";
 import type {SupabaseClient} from "@supabase/supabase-js";
 import {calendarToken,syncCalendar} from "./service";
 import {normalizeGoogleEvent} from "./google-calendar";
-export const eventActionRequest=z.object({sourceId:z.string().uuid(),eventId:z.string().min(1).max(2000),kind:z.enum(["rename","cancel"]),newTitle:z.string().trim().min(1).max(300).optional()});
+import {calendarSuggestions} from "./suggestions-service";
+export const eventActionRequest=z.object({sourceId:z.string().uuid(),eventId:z.string().min(1).max(2000),kind:z.enum(["rename","cancel","move"]),newTitle:z.string().trim().min(1).max(300).optional(),targetStart:z.iso.datetime({offset:true}).optional(),targetEnd:z.iso.datetime({offset:true}).optional(),noTravelRequired:z.literal(true).optional()});
 export type EventActionRequest=z.infer<typeof eventActionRequest>;
 const editableEvent=z.object({id:z.string(),etag:z.string().min(1),status:z.string().optional(),summary:z.string().optional(),attendees:z.array(z.unknown()).optional(),recurrence:z.array(z.string()).optional(),recurringEventId:z.string().optional(),extendedProperties:z.object({private:z.record(z.string(),z.string()).optional()}).optional()}).passthrough();
 export function validateEditableEvent(raw:unknown) {
@@ -18,6 +19,17 @@ async function context(db:SupabaseClient,owner:string,sourceId:string,eventId:st
  const endpoint=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(source.external_id)}/events/${encodeURIComponent(eventId)}`;
  return {source,endpoint,headers:{authorization:`Bearer ${token}`}};
 }
+async function checkMove(db:SupabaseClient,owner:string,start:string,end:string,holdId?:string) {
+ const {data:settings,error}=await db.from("calendar_workspace").select("timezone").eq("owner_id",owner).single();
+ if(error||!settings)throw new Error("Kalenderns tidszon kunde inte läsas.");
+ const duration=(Date.parse(end)-Date.parse(start))/60000;
+ if(!Number.isInteger(duration)||duration<5||duration>600)throw new Error("Välj en giltig möteslängd mellan 5 och 600 minuter.");
+ const date=new Intl.DateTimeFormat("sv-SE",{timeZone:settings.timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(start));
+ const checked=await calendarSuggestions(db,owner,{date,duration,preparation:0,recovery:0,physical:false},holdId);
+ if(!checked.slots.some(s=>s.bookable&&Date.parse(s.start)===Date.parse(start)&&Date.parse(s.end)===Date.parse(end)))throw new Error("Den nya tiden är inte ledig enligt synkronisering, avstämning och planeringsregler. Välj ett nytt tidsförslag.");
+ return checked;
+}
+const freshRange=()=>({start:new Date(Date.now()-7*86400000).toISOString(),end:new Date(Date.now()+60*86400000).toISOString()});
 export async function prepareEventAction(db:SupabaseClient,owner:string,input:EventActionRequest) {
  if(input.kind==="rename"&&!input.newTitle)throw new Error("Ange den nya rubriken.");
  const c=await context(db,owner,input.sourceId,input.eventId);
@@ -25,8 +37,18 @@ export async function prepareEventAction(db:SupabaseClient,owner:string,input:Ev
  if(!response.ok)throw new Error("Bokningen kunde inte hämtas för granskning.");
  const event=validateEditableEvent(await response.json());
  const before=normalizeGoogleEvent(event,c.source.external_id,c.source.timezone);
- const {data:plan,error}=await db.from("calendar_event_actions").insert({owner_id:owner,source_id:input.sourceId,event_id:input.eventId,kind:input.kind,new_title:input.kind==="rename"?input.newTitle:null,expected_etag:event.etag,before_event:before}).select("*").single();
- if(error||!plan)throw new Error("Förslaget kunde inte sparas. Inget har ändrats i kalendern.");
+ let holdId:string|null=null;
+ if(input.kind==="move") {
+  if(!input.targetStart||!input.targetEnd||!input.noTravelRequired)throw new Error("Välj ny tid och bekräfta att ingen resa krävs.");
+  if(before.allDay||before.location?.trim())throw new Error("Heldagar och bokningar med plats behöver ett separat rese- och tidsunderlag innan de kan flyttas.");
+  await syncCalendar(db,owner,c.source.id,freshRange());
+  const checked=await checkMove(db,owner,input.targetStart,input.targetEnd);
+  const {data:hold,error:reserve}=await db.from("calendar_holds").insert({owner_id:owner,purpose:"move",title:before.title,starts_at:input.targetStart,ends_at:input.targetEnd,preparation_minutes:checked.preparation,recovery_minutes:checked.recovery}).select("id").single();
+  if(reserve||!hold)throw new Error("Den nya tiden kunde inte reserveras. Inget har flyttats.");
+  holdId=hold.id;
+ }
+ const {data:plan,error}=await db.from("calendar_event_actions").insert({owner_id:owner,source_id:input.sourceId,event_id:input.eventId,kind:input.kind,new_title:input.kind==="rename"?input.newTitle:null,expected_etag:event.etag,before_event:before,hold_id:holdId,target_start:input.kind==="move"?input.targetStart:null,target_end:input.kind==="move"?input.targetEnd:null}).select("*").single();
+ if(error||!plan){if(holdId)await db.from("calendar_holds").update({status:"released"}).eq("owner_id",owner).eq("id",holdId).eq("status","active");throw new Error("Förslaget kunde inte sparas. Inget har ändrats i kalendern.");}
  return plan;
 }
 export async function executeEventAction(db:SupabaseClient,owner:string,planId:string) {
@@ -41,7 +63,8 @@ export async function executeEventAction(db:SupabaseClient,owner:string,planId:s
  const raw=response.ok?await response.json():null;
  if(plan.status==="executing") {
   applied=plan.kind==="cancel"?(gone||raw?.status==="cancelled"):
-   Boolean(raw&&raw.status!=="cancelled"&&raw.extendedProperties?.private?.ciActionId===plan.id&&raw.summary===plan.new_title);
+   Boolean(raw&&raw.status!=="cancelled"&&raw.extendedProperties?.private?.ciActionId===plan.id&&(plan.kind==="move"?
+    Date.parse(raw.start?.dateTime)===Date.parse(plan.target_start)&&Date.parse(raw.end?.dateTime)===Date.parse(plan.target_end):raw.summary===plan.new_title));
   if(!applied)throw new Error("Ett tidigare försök har osäkert resultat. Inget nytt ändringsanrop skickas. Kontrollera Google Kalender.");
  } else {
   if(!response.ok||Date.parse(plan.expires_at)<=Date.now()||raw?.etag!==plan.expected_etag) {
@@ -49,10 +72,14 @@ export async function executeEventAction(db:SupabaseClient,owner:string,planId:s
    throw new Error("Bokningen har ändrats eller förslaget har gått ut. Granska den igen.");
   }
   const event=validateEditableEvent(raw);
+  if(plan.kind==="move") {
+   await syncCalendar(db,owner,c.source.id,freshRange());
+   await checkMove(db,owner,plan.target_start,plan.target_end,plan.hold_id);
+  }
   const {data:claimed,error:claim}=await db.from("calendar_event_actions").update({status:"executing",approved_at:new Date().toISOString()}).eq("id",plan.id).eq("owner_id",owner).eq("status","proposed").select("id").maybeSingle();
   if(claim||!claimed)throw new Error("En ändring pågår redan. Uppdatera och kontrollera resultatet.");
   const result=await fetch(c.endpoint+"?sendUpdates=none",{method:plan.kind==="cancel"?"DELETE":"PATCH",headers:{...c.headers,"If-Match":plan.expected_etag,"content-type":"application/json"},
-    ...(plan.kind==="rename"?{body:JSON.stringify({summary:plan.new_title,extendedProperties:{private:{...event.extendedProperties?.private,ciActionId:plan.id}}})}:{}),signal:AbortSignal.timeout(10000)});
+    ...(plan.kind!=="cancel"?{body:JSON.stringify({...(plan.kind==="rename"?{summary:plan.new_title}:{start:{dateTime:plan.target_start,timeZone:c.source.timezone},end:{dateTime:plan.target_end,timeZone:c.source.timezone}}),extendedProperties:{private:{...event.extendedProperties?.private,ciActionId:plan.id}}})}:{}),signal:AbortSignal.timeout(10000)});
   if(result.status===412) {
    await db.from("calendar_event_actions").update({status:"stale"}).eq("id",plan.id).eq("owner_id",owner);
    throw new Error("Någon ändrade bokningen samtidigt. Din ändring har inte skrivits över den.");

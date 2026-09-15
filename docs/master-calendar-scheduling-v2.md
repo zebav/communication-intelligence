@@ -26,13 +26,21 @@ Do not merge into main before the foundation and the remaining release gates bel
 - Prepared rename/cancel actions for one-off master events without attendees. Fresh provider read, immutable review plan, explicit approval, `If-Match`, no invitations, and uncertain-write recovery without automatic duplicate writes. Moving event times is not implemented yet.
 - Additional release migrations: `20260915225449_calendar_background_sync.sql`, `20260915225656_calendar_approved_actions.sql`, `20260915225904_calendar_intent_proposals.sql`. Apply in order with the coherent release, not independently of its code.
 
+### Third integrated block (local, not activated)
+
+- Master event moves reuse serialized reservations and require a separate approval. The original event remains unchanged until a conditional PATCH succeeds. A move hold cannot be confirmed as a new booking. Completed/uncertain moves recover only at the exact approved time; dismissal releases the target reservation atomically.
+- Saved proposed/executing actions can be reopened from the same master event after navigation. One-off events without attendees or a physical location only. The original slot remains occupied during planning, so overlapping shifts are conservatively excluded.
+- Two-leg travel assessment ties exact selected place IDs, departure, meeting, onward-arrival deadline and mode together. Both routes, buffers, stale estimates and conflicts during travel are checked. Research returns `canReserve:false`: it is not yet a persisted authorization for physical booking. No paid calls made.
+- Migration `20260915230729_calendar_move_plans.sql` adds immutable move targets and atomic reservation status transitions. Verified with local PGlite, including conflicting reservations and declined-plan release.
+- Synthetic browser tested: select move → choose day → select slot → review old/new times → approve → visible confirmation. This verifies the client contract, not live Google writes. Real provider service tests use mocked responses separately.
+
 The list below describes remaining acceptance gates; parts noted above have local implementations, not live verification.
 
 1. Background sync: decide a scheduler compatible with the actual deployment plan. Add durable per-account claims, bounded retries, last attempt/success, renewal where relevant, no overlapping refresh-token writes, preserve snapshots on failure. No frequent Hobby cron or UI polling presented as background sync.
 2. Complete commitment lifecycle: approved copy is implemented, but changed/cancelled originals still need persistent review items, exclusion decisions and explicit master update/cancel plans. Add mocked end-to-end service tests including provider timeouts and changed source between read/write. No silent move or delete.
 3. AI intent proposals grounded in actual conversation/message IDs and timestamp, timezone and evidence. Ambiguous dates/locations require clarification; cancellation never becomes a new booking. Prepared replies may cite only verified offered slots.
 4. Physical scheduling: time-bound origin/next destination, validate **both** route legs, persist approved route evidence with expiry and plan fingerprint; repeat conflict/route checks before confirm. Current `physical` holds intentionally remain disabled.
-5. Finish time-moving plans and verify the implemented rename/cancel flow end-to-end. Invitations and outgoing messages require separate explicit approval. Provider edits exist in code but were not run against real calendars.
+5. Verify rename/cancel/move flows end-to-end in a configured preview with explicit approval for test events. Invitations and outgoing messages require separate explicit approval. Provider edits exist in code but were not run against real calendars.
 6. Surface pending scheduling plans in Overview with links to the native calendar, not a disconnected second application.
 7. Full local API + UI tests with provider failure/timeout scenarios, then one coherent preview. Do not ask user to test paid Maps features before configuration is complete.
 

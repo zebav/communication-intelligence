@@ -3,12 +3,15 @@ import { z } from "zod";
 import { calendarSession } from "@/lib/calendar/auth";
 import { defaultPlanningPreferences, planningPreferencesSchema } from "@/lib/calendar/planning-preferences";
 import { GooglePlacesRoutes, routeRequestSchema } from "@/lib/calendar/places-routing";
+import {travelPlanRequest} from "@/lib/calendar/travel-plan";
+import {calendarTravelAssessment} from "@/lib/calendar/travel-service";
 
 export const maxDuration = 30;
 const action = z.discriminatedUnion("action", [
   z.object({action:z.literal("preferences"),rules:planningPreferencesSchema}),
   z.object({action:z.literal("places"),query:z.string().trim().min(3).max(300)}),
   z.object({action:z.literal("route"),route:routeRequestSchema}),
+  z.object({action:z.literal("travel_plan"),plan:travelPlanRequest}),
 ]);
 const mapsEnabled = () => process.env.CALENDAR_MAPS_ENABLED === "true" && Boolean(process.env.GOOGLE_MAPS_SERVER_API_KEY);
 export async function GET() {
@@ -32,6 +35,7 @@ export async function POST(request:Request) {
     }
     if(!mapsEnabled()) return NextResponse.json({error:"Google Maps är förberett men inte aktiverat. Kostnader och nyckel måste godkännas först."},{status:503});
     const service = new GooglePlacesRoutes(process.env.GOOGLE_MAPS_SERVER_API_KEY!);
+    if(a.action==="travel_plan")return NextResponse.json({assessment:await calendarTravelAssessment(db,owner,a.plan,service)},{headers:{"Cache-Control":"no-store"}});
     return NextResponse.json(a.action === "places" ? {places:await service.search(a.query)} : {route:await service.estimate(a.route)}, {headers:{"Cache-Control":"no-store"}});
   } catch { return NextResponse.json({error:"Planeringsåtgärden kunde inte slutföras. Inga kalenderbokningar har ändrats."},{status:409}); }
 }

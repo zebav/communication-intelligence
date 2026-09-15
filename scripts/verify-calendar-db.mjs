@@ -14,6 +14,7 @@ await db.exec(readFileSync('supabase/migrations/20260915223834_calendar_scheduli
 await db.exec(readFileSync('supabase/migrations/20260915225449_calendar_background_sync.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260915225656_calendar_approved_actions.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260915225904_calendar_intent_proposals.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260915230729_calendar_move_plans.sql','utf8'));
 const owner='00000000-0000-0000-0000-000000000001',other='00000000-0000-0000-0000-000000000002';
 await db.exec(`insert into auth.users values('${owner}'),('${other}');set role authenticated;select set_config('request.jwt.claim.sub','${owner}',false);select set_config('request.jwt.claim.aal','aal2',false);`);
 await db.query('insert into calendar_workspace(owner_id) values($1)',[owner]);
@@ -99,4 +100,20 @@ assert.equal((await db.query('select * from calendar_intent_proposals')).rows.le
 console.log('PASS: migration, holds, overlap rejection, release, stale sync, master conflict, reconciliation, single master, owner isolation, MFA and anonymous denial');
 console.log('PASS: background queue role isolation, leases, retry backoff, snapshot retention, stale-worker fencing and serialized token refresh');
 console.log('PASS: action approval transitions, immutable facts, master-only writes and proposal ownership');
+await db.exec(`select set_config('request.jwt.claim.sub','${owner}',false)`);
+await db.query("update calendar_sources set synced_at=now(),sync_error=null,reviewed_snapshot=snapshot where owner_id=$1",[owner]);
+const moveHold=(await db.query(`insert into calendar_holds(owner_id,purpose,title,starts_at,ends_at) values($1,'move','Move test',now()+interval '2 days',now()+interval '2 days 1 hour') returning *`,[owner])).rows[0];
+const move=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event,hold_id,target_start,target_end) values($1,$2,'move-event','move','v1','{}',$3,$4,$5) returning id`,[owner,source,moveHold.id,moveHold.starts_at,moveHold.ends_at])).rows[0].id;
+await assert.rejects(db.query("update calendar_event_actions set target_start=target_start+interval '5 minutes' where id=$1",[move]),/Move facts/);
+await assert.rejects(db.query("update calendar_holds set purpose='booking' where id=$1",[moveHold.id]),/purpose cannot change/);
+await db.query("update calendar_event_actions set status='executing',approved_at=now() where id=$1",[move]);
+assert.equal((await db.query('select status from calendar_holds where id=$1',[moveHold.id])).rows[0].status,'executing');
+await assert.rejects(db.query(`insert into calendar_holds(owner_id,title,starts_at,ends_at) values($1,'conflict',$2,$3)`,[owner,moveHold.starts_at,moveHold.ends_at]),/Reservation conflict/);
+await db.query("update calendar_event_actions set status='completed',completed_at=now() where id=$1",[move]);
+assert.equal((await db.query('select external_event_id from calendar_holds where id=$1',[moveHold.id])).rows[0].external_event_id,'move-event');
+const declinedHold=(await db.query(`insert into calendar_holds(owner_id,purpose,title,starts_at,ends_at) values($1,'move','Declined move',now()+interval '3 days',now()+interval '3 days 1 hour') returning *`,[owner])).rows[0];
+const declined=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event,hold_id,target_start,target_end) values($1,$2,'declined-event','move','v1','{}',$3,$4,$5) returning id`,[owner,source,declinedHold.id,declinedHold.starts_at,declinedHold.ends_at])).rows[0].id;
+await db.query("update calendar_event_actions set status='stale' where id=$1",[declined]);
+assert.equal((await db.query('select status from calendar_holds where id=$1',[declinedHold.id])).rows[0].status,'released');
+console.log('PASS: atomic move claim, conflict reservation, immutable move target and recovery confirmation');
 await db.close();
