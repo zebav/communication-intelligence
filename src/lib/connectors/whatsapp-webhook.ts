@@ -18,7 +18,7 @@ export type WhatsAppWebhookMessage = {
 export type WhatsAppStatusUpdate = { phoneNumberId: string; externalMessageId: string; status: string; timestamp?: string; recipientId?: string; errors?: unknown };
 
 export function validWhatsAppWebhookSignature(rawBody: string, signature: string | null, appSecret: string) {
-  if (!signature?.startsWith("sha256=") || !appSecret) return false;
+  if (!signature || !/^sha256=[a-fA-F0-9]{64}$/.test(signature) || !appSecret) return false;
   const supplied = Buffer.from(signature.slice(7), "hex");
   const expected = Buffer.from(createHmac("sha256", appSecret).update(rawBody).digest("hex"), "hex");
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
@@ -34,7 +34,7 @@ function messageBody(message: WhatsAppMessage) {
 export function parseWhatsAppWebhook(rawBody: string): { messages: WhatsAppWebhookMessage[]; statuses: WhatsAppStatusUpdate[] } {
   let payload: WhatsAppPayload;
   try { payload = JSON.parse(rawBody) as WhatsAppPayload; } catch { return { messages: [], statuses: [] }; }
-  if (payload.object !== "whatsapp_business_account" || !Array.isArray(payload.entry)) return { messages: [], statuses: [] };
+  if (!payload || payload.object !== "whatsapp_business_account" || !Array.isArray(payload.entry)) return { messages: [], statuses: [] };
   const messages: WhatsAppWebhookMessage[] = [];
   const statuses: WhatsAppStatusUpdate[] = [];
   for (const entry of payload.entry) for (const change of entry.changes ?? []) {
@@ -58,8 +58,9 @@ export function parseWhatsAppWebhook(rawBody: string): { messages: WhatsAppWebho
 
 export type WhatsAppWebhookConnection = { token_metadata?: unknown };
 export function findWhatsAppWebhookConnection<T extends WhatsAppWebhookConnection>(connections: T[], phoneNumberId: string) {
-  return connections.find((connection) => {
+  const matches = connections.filter((connection) => {
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
     return String(metadata.phone_number_id ?? "") === phoneNumberId;
   });
+  return matches.length === 1 ? matches[0] : undefined;
 }

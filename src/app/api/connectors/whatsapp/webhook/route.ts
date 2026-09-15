@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
 
   let statusUpdates = 0;
   let unmatchedStatuses = 0;
+  let failedStatuses = 0;
   for (const status of events.statuses) {
     const connection = findWhatsAppWebhookConnection(connections ?? [], status.phoneNumberId);
     if (!connection) {
@@ -57,10 +58,12 @@ export async function POST(request: NextRequest) {
       continue;
     }
     const { data: existing, error: messageLookupError } = await database.from("messages").select("id,metadata").eq("owner_id", connection.owner_id).eq("source", "whatsapp").eq("external_message_id", status.externalMessageId).maybeSingle();
-    if (messageLookupError || !existing) continue;
+    if (messageLookupError) { failedStatuses += 1; continue; }
+    if (!existing) continue;
     const metadata = existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata) ? existing.metadata : {};
     const { error: statusError } = await database.from("messages").update({ metadata: { ...metadata, delivery_status: status.status, delivery_status_at: status.timestamp ?? new Date().toISOString(), delivery_errors: status.errors ?? null } }).eq("id", existing.id).eq("owner_id", connection.owner_id);
     if (!statusError) statusUpdates += 1;
+    else failedStatuses += 1;
   }
 
   let imported = 0;
@@ -76,8 +79,7 @@ export async function POST(request: NextRequest) {
         console.warn("WhatsApp message did not match a connected phone number", {
           phoneNumberId: event.phoneNumberId,
           businessAccountId: event.businessAccountId,
-          participantId: event.participantId,
-          connectedAccounts: (connections ?? []).map((item) => ({ id: item.id, accountIdentifier: item.account_identifier, tokenMetadata: item.token_metadata })),
+          connectedAccountCount: (connections ?? []).length,
         });
         continue;
       }
@@ -139,16 +141,16 @@ export async function POST(request: NextRequest) {
       failed += 1;
       console.error("WhatsApp webhook message ingestion failed", {
         phoneNumberId: event.phoneNumberId,
-        participantId: event.participantId,
-        messageId: event.message.externalId,
-        reason: error instanceof Error ? error.message : "unknown",
+        code: error && typeof error === "object" && "code" in error ? error.code : "unknown",
       });
     }
   }
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage)); });
+  const retry = failed > 0 || failedStatuses > 0 || unmatchedMessages > 0;
+  console.info("WhatsApp webhook processed", { imported, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
   return NextResponse.json({
-    received: true,
+    received: !retry,
     parsedMessages: events.messages.length,
     parsedStatuses: events.statuses.length,
     imported,
@@ -156,5 +158,6 @@ export async function POST(request: NextRequest) {
     unmatchedMessages,
     statusUpdates,
     unmatchedStatuses,
-  });
+    failedStatuses,
+  }, { status: retry ? 503 : 200 });
 }

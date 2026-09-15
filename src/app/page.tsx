@@ -74,11 +74,11 @@ export default async function Home() {
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata) ? latestMessage.metadata as { ai_analysis?: CommunicationCase["analysis"] } : {};
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
-    return { id: row.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
+    return { id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
     const messageFingerprint = normalizedConversationText(item.message);
-    const key = messageFingerprint ? `${item.personName.trim().toLocaleLowerCase()}:${messageFingerprint}` : `${item.source}:${item.personName.trim().toLocaleLowerCase()}`;
+    const key = messageFingerprint ? `${item.source}:${item.personId ?? item.id}:${messageFingerprint}` : `${item.source}:${item.personId ?? item.id}`;
     const current = grouped.get(key);
     if (!current || item.createdAt > current.createdAt) grouped.set(key, item);
     return grouped;

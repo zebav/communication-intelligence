@@ -191,3 +191,6 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 @media (max-width: 900px) { .people-layout { grid-template-columns: 1fr; }.people-list { position: static; max-height: 360px; }.person-detail-grid { grid-template-columns: 1fr; }.person-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.person-detail-head { grid-template-columns: 44px 1fr; }.person-detail-head > small { grid-column: 2; } }
 @media (max-width: 760px) { .learning-list { grid-template-columns: 1fr; }.learning-actions .btn { flex: 1; }.learning-card-head { align-items: flex-start; } }
 @media (max-width: 760px) { .outcome-list, .outcome-fields { grid-template-columns: 1fr; }.outcome-actions .btn { flex: 1; }.outcome-meta { display: grid; } }
+
+.person-profile-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.person-profile-link:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }

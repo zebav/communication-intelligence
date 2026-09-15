@@ -27,12 +27,32 @@ export async function GET(request: NextRequest) {
   const configuredBaseUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin).replace(/\/$/, "");
   const expectedCallbackUrl = `${configuredBaseUrl}/api/connectors/whatsapp/webhook`;
 
+  const appId = process.env.WHATSAPP_APP_ID || process.env.INSTAGRAM_APP_ID;
+  const appSecret = process.env.WHATSAPP_APP_SECRET || process.env.INSTAGRAM_APP_SECRET;
+  let messagesField: "subscribed" | "not_subscribed" | "unknown" = "unknown";
+  let appCallbackUrl: string | null = null;
+  let appSubscriptionError: string | null = null;
+  if (appId && appSecret) {
+    try {
+      const response = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(appId)}/subscriptions`, {
+        headers: { authorization: `Bearer ${appId}|${appSecret}` },
+        signal: AbortSignal.timeout(10_000), cache: "no-store",
+      });
+      const result = await response.json() as { data?: Array<{ object?: string; active?: boolean; callback_url?: string; fields?: Array<{ name?: string }> }> };
+      if (response.ok && Array.isArray(result.data)) {
+        const subscription = result.data.find((item) => item.object === "whatsapp_business_account");
+        messagesField = subscription?.active && subscription.fields?.some((field) => field.name === "messages") ? "subscribed" : "not_subscribed";
+        appCallbackUrl = subscription?.callback_url ?? null;
+      } else appSubscriptionError = `Meta app subscription check returned ${response.status}`;
+    } catch { appSubscriptionError = "Meta app subscription check failed."; }
+  }
+
   const accounts = await Promise.all((connections ?? []).map(async (connection) => {
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
     const businessAccountId = String(metadata.business_account_id ?? "");
-    let liveDelivery: "subscribed" | "not_subscribed" | "unknown" = metadata.webhook_subscription === "subscribed" ? "subscribed" : "unknown";
+    let liveDelivery: "subscribed" | "not_subscribed" | "unknown" = "unknown";
     let liveDeliveryError: string | null = null;
-    let callbackUrl: string | null = typeof metadata.webhook_callback_url === "string" ? metadata.webhook_callback_url : null;
+    let callbackUrl: string | null = null;
 
     if (encryptionKey && connection.encrypted_credentials && /^\d+$/.test(businessAccountId)) {
       try {
@@ -43,10 +63,10 @@ export async function GET(request: NextRequest) {
             signal: AbortSignal.timeout(10_000),
           });
           const result = await response.json().catch(() => null) as { data?: Subscription[]; error?: { message?: string } } | null;
-          if (response.ok) {
-            liveDelivery = Array.isArray(result?.data) && result.data.length > 0 ? "subscribed" : "not_subscribed";
-            const subscription = Array.isArray(result?.data) ? result?.data[0] : undefined;
-            if (subscription?.override_callback_uri) callbackUrl = subscription.override_callback_uri;
+          if (response.ok && Array.isArray(result?.data) && appId) {
+            const subscription = result.data.find((item) => item.whatsapp_business_api_data?.id === appId);
+            liveDelivery = subscription ? "subscribed" : "not_subscribed";
+            callbackUrl = subscription ? subscription.override_callback_uri || appCallbackUrl : null;
           } else liveDeliveryError = result?.error?.message || `Meta returned ${response.status}`;
         }
       } catch (caught) {
@@ -64,9 +84,11 @@ export async function GET(request: NextRequest) {
       token_metadata: metadata,
       live_delivery: liveDelivery,
       live_delivery_error: liveDeliveryError,
+      messages_field: messagesField,
+      app_subscription_error: appSubscriptionError,
       callback_url: callbackUrl,
       expected_callback_url: expectedCallbackUrl,
-      callback_matches: Boolean(callbackUrl && callbackUrl === expectedCallbackUrl),
+      callback_matches: callbackUrl ? callbackUrl === expectedCallbackUrl : null,
     };
   }));
 

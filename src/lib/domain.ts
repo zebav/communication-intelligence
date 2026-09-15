@@ -8,6 +8,7 @@ export interface Message { id: string; direction: "in" | "out"; body: string; ti
 export interface Conversation { id: string; person: Person; subject: string; preview: string; timestamp: string; unread: boolean; messages: Message[]; attention: AttentionAnalysis; action: RecommendedAction; actionReason: string; draft?: string; openLoop?: string }
 
 export interface CommunicationCase {
+  personId?: string;
   id: string;
   personName: string;
   title: string;
