@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BackToWorkspaceButton } from "@/components/back-to-workspace-button";
 import { ContactProfileEditor } from "@/components/contact-profile-editor";
+import { ContactMergePicker } from "@/components/contact-merge-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
 
   return <main className="page contact-profile-page" style={{ maxWidth: 980, margin: "0 auto" }}>
     <div className="contact-profile-toolbar"><BackToWorkspaceButton /><ContactProfileEditor person={person} /></div>
+    <ContactMergePicker personId={personId} name={person.display_name ?? "kontakten"} />
     <div className="person-detail">
       {mergedProfiles?.map(merge => <section className="card" key={merge.id}><h2>Bevarade uppgifter från sammanförd kontakt</h2>{Object.entries(merge.source_profile as Record<string, unknown>).filter(([key, value]) => ["display_name", "organization", "notes", "relationship_summary", "professional_specialty", "jurisdiction", "relationship_type"].includes(key) && value).map(([key,value]) => <p key={key}><strong>{key}</strong>: {String(value)}</p>)}</section>)}
       <div className="person-detail-head"><div className="avatar">{initials}</div><div><span className="eyebrow">Contact profile</span><h1 style={{ marginTop: 4 }}>{person.display_name}</h1><p className="subtitle">{[person.organization, person.relationship_type].filter(Boolean).join(" · ") || "Unified person profile"}</p></div></div>

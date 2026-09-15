@@ -9,9 +9,16 @@ async function context() {
   if (!user || aal?.currentLevel !== "aal2") return null;
   return { db, user };
 }
-export async function GET() {
+export async function GET(request: Request) {
   const ctx = await context(); if (!ctx) return NextResponse.json({ error: "Logga in med tvåfaktor." }, { status: 401 });
   const { db, user } = ctx;
+  const search = new URL(request.url).searchParams.get("q");
+  if (search !== null) {
+    const term = search.trim().replace(/[%_]/g, "").slice(0, 100);
+    if (term.length < 2) return NextResponse.json({ contacts: [] });
+    const { data, error } = await db.from("people").select("id,display_name,organization").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").ilike("display_name", `%${term}%`).order("display_name").limit(30).abortSignal(AbortSignal.timeout(8000));
+    return error ? NextResponse.json({ error: "Kontakterna kunde inte sökas." }, { status: 503 }) : NextResponse.json({ contacts: data }, { headers: { "Cache-Control": "private, no-store" } });
+  }
   const { data: merges, error } = await db.from("contact_merges").select("id,source_id,target_id,source_profile,created_at,automatic").eq("owner_id", user.id).is("undone_at", null).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: "Kontaktfunktionen kräver att databasmigrationen är installerad." }, { status: 503 });
   const people: MatchPerson[] = [];
