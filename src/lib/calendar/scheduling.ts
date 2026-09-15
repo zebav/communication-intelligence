@@ -35,7 +35,9 @@ export function suggestSlots(input: {
   let iterations = 0;
   for (const window of input.windows) {
     const range = interval(window);
-    for (let start = Math.max(range.start, now) + p.preparationMinutes * minute; start + (p.durationMinutes + p.recoveryMinutes) * minute <= range.end; start += p.stepMinutes * minute) {
+    const anchor=range.start+p.preparationMinutes*minute;
+    const first=anchor+Math.max(0,Math.ceil((now+p.preparationMinutes*minute-anchor)/(p.stepMinutes*minute)))*p.stepMinutes*minute;
+    for (let start = first; start + (p.durationMinutes + p.recoveryMinutes) * minute <= range.end; start += p.stepMinutes * minute) {
       if (++iterations > 10000) throw new Error("Scheduling range too large");
       const end = start + p.durationMinutes * minute;
       if (seen.has(start) || busy.some(b => start - p.preparationMinutes * minute < b.end && end + p.recoveryMinutes * minute > b.start)) continue;

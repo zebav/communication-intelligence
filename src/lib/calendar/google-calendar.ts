@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { zonedInstant } from "./time";
+import type { TimeRange } from "./types";
 
 // Kept separate from Gmail: adding these to an authorization request requires
 // explicit Calendar consent. This module does not change current OAuth scopes.
@@ -60,6 +62,22 @@ export class GoogleCalendarReader {
       if (seen.size > 100) throw new Error("Calendar page limit exceeded");
     } while (cursor);
     return calendars;
+  }
+  async getEvents(calendarId:string, range:TimeRange, timezone:string) {
+    const events=[]; let cursor:string|undefined; const seen=new Set<string>();
+    do {
+      const query=new URLSearchParams({timeMin:range.start,timeMax:range.end,singleEvents:"true",showDeleted:"false",maxResults:"250",...(cursor?{pageToken:cursor}:{})});
+      const page=z.object({items:z.array(z.unknown()).default([]),nextPageToken:z.string().optional()}).parse(await this.read("calendars/"+encodeURIComponent(calendarId)+"/events?"+query));
+      for(const raw of page.items) {
+        const event=normalizeGoogleEvent(raw,calendarId,timezone);
+        if(!("start" in event)) continue;
+        events.push({...event,start:event.allDay?zonedInstant(event.start+"T00:00",event.timezone):event.start,end:event.allDay?zonedInstant(event.end+"T00:00",event.timezone):event.end});
+      }
+      cursor=page.nextPageToken;
+      if(cursor && (seen.has(cursor)||seen.size>=100)) throw new Error("Incomplete calendar snapshot");
+      if(cursor) seen.add(cursor);
+    } while(cursor);
+    return events;
   }
   async syncChanges(calendarId: string, syncToken?: string) {
     const events = []; let cursor: string | undefined;

@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     const attempt = createGoogleOAuthAttempt();
     const cookieStore = await cookies();
     const options = { httpOnly: true, secure: true, sameSite: "lax" as const, maxAge: 600, path: GOOGLE_OAUTH_COOKIE_PATH };
+    cookieStore.set("google_oauth_purpose", "gmail", options);
     cookieStore.set("google_oauth_state", attempt.state, options);
     cookieStore.set("google_oauth_verifier", attempt.verifier, options);
     return NextResponse.redirect(googleAuthorizationUrl(config, attempt.state, attempt.challenge));

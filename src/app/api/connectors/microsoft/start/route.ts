@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     const attempt = createOAuthAttempt();
     const cookieStore = await cookies();
     const options = { httpOnly: true, secure: true, sameSite: "lax" as const, maxAge: 600, path: MICROSOFT_OAUTH_COOKIE_PATH };
+    cookieStore.set("microsoft_oauth_purpose", "mail", options);
     cookieStore.set("microsoft_oauth_state", attempt.state, options);
     cookieStore.set("microsoft_oauth_verifier", attempt.verifier, options);
     return NextResponse.redirect(authorizationUrl(config, attempt.state, attempt.challenge));
