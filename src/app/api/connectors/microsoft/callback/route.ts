@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { finishCalendarConsent } from "@/lib/calendar/oauth";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { encryptCredential } from "@/lib/connectors/credential-crypto";
@@ -20,6 +21,7 @@ function resultRedirect(request: NextRequest, result: "connected" | "denied" | "
 }
 
 export async function GET(request: NextRequest) {
+  if((await cookies()).get("microsoft_oauth_purpose")?.value==="calendar") return finishCalendarConsent(request,"microsoft");
   if (request.nextUrl.searchParams.get("error")) return resultRedirect(request, "denied");
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
