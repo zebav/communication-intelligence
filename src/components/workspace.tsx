@@ -24,10 +24,11 @@ import { accountDisplayLabel } from "@/lib/connectors/account-label";
 import { relationshipLabels, relationshipTypes } from "@/lib/relationship-types";
 import { PersonLink } from "@/components/person-link";
 import { WhatsAppConnectButton } from "@/components/whatsapp-connect-button";
+import { communicationPeriods, isWithinCommunicationPeriod, type CommunicationPeriod } from "@/lib/communication-period";
 
 type View = "today" | "cases" | "inbox" | "people" | "followups" | "outcomes" | "cleanup" | "intelligence" | "connections" | "settings";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
-  { id: "today", label: "Today", icon: LayoutDashboard }, { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
+  { id: "today", label: "Overview", icon: LayoutDashboard }, { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "inbox", label: "Inbox", icon: Inbox }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "intelligence", label: "Intelligence", icon: Sparkles }, { id: "connections", label: "Connections", icon: Network }, { id: "settings", label: "Settings", icon: Settings },
 ];
 const sources: { label: string; source: Source }[] = [
   { label: "Email", source: "email" },
@@ -41,7 +42,7 @@ const sources: { label: string; source: Source }[] = [
 ];
 const EMAIL_CATEGORIES = ["Relevant", "Filtered out", "All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
-export function Workspace({ userEmail, communicationCases, connections, syncedEmails, followUps, outcomes, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
+export function Workspace({ userEmail, communicationCases, connections, syncedEmails, emailLoadFailed = false, followUps, outcomes, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; emailLoadFailed?: boolean; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
   const router = useRouter();
   const microsoftConnections = connections.filter((item) => item.provider === "microsoft-graph");
   const automaticSyncStarted = useRef(false);
@@ -65,7 +66,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
       {sources.map((item) => <button key={item.source} className={`nav-button ${selectedSource === item.source ? "active" : ""}`} onClick={() => { setSelectedSource(item.source); setView(item.source === "email" ? "inbox" : "cases"); }}><MessageCircle size={14} />{item.label}{item.source === "email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
-    <main className="main">{view === "today" && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} channelCases={communicationCases} onOpenInbox={() => { setSelectedSource("email"); setView("inbox"); }} onOpenSource={(source) => { setSelectedSource(source); setView("cases"); }} />}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} />}{view === "inbox" && <InboxView syncedEmails={syncedEmails} people={profilePeople} />}{view === "people" && <People items={people} />}{view === "followups" && <FollowUps items={followUps} />}{view === "outcomes" && <Outcomes items={outcomes} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} onSaved={setActivePersona} />}</main>
+    <main className="main">{emailLoadFailed && <div className="empty-card" role="alert"><strong>Mejlen kunde inte hämtas</strong><p>Inkorgen kunde inte läsas just nu. Detta betyder inte att den är tom eller att du behöver importera mejlen igen.</p><button className="btn" onClick={() => router.refresh()}>Försök hämta mejlen igen</button></div>}{view === "today" && !emailLoadFailed && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} channelCases={communicationCases} onOpenInbox={() => { setSelectedSource("email"); setView("inbox"); }} onOpenSource={(source) => { setSelectedSource(source); setView("cases"); }} />}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} />}{view === "inbox" && !emailLoadFailed && <InboxView syncedEmails={syncedEmails} people={profilePeople} />}{view === "people" && <People items={people} />}{view === "followups" && <FollowUps items={followUps} />}{view === "outcomes" && <Outcomes items={outcomes} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} onSaved={setActivePersona} />}</main>
     <nav className="mobile-bar">{navigation.slice(0, 4).map((item) => <button key={item.id} className={view === item.id && selectedSource === null ? "active" : ""} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={17} />{item.label}</button>)}<button onClick={() => { setSelectedSource(null); setView("settings"); }}><MoreHorizontal size={17} />More</button></nav>
     {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setSelectedSource(null); setView(next); setCommandOpen(false); }} />}
   </div>;
@@ -98,19 +99,30 @@ function CommunicationCaseCard({ item }: { item: CommunicationCase }) {
 }
 
 function Today({ emails, channelCases, onOpenInbox, onOpenSource }: { emails: SyncedEmailConversation[]; channelCases: CommunicationCase[]; onOpenInbox: () => void; onOpenSource: (source: Source) => void }) {
-  const ordered = prioritizeEmails(emails);
-  const summary = emailDashboardSummary(emails);
+  const [period, setPeriod] = useState<CommunicationPeriod>("today");
+  const pendingEmails = emails.filter((email) => email.threadMessages.at(-1)?.direction === "in");
+  const visibleEmails = pendingEmails.filter((email) => isWithinCommunicationPeriod(email.receivedAt, period));
+  const visibleChannelCases = channelCases.filter((item) => {
+    const latest = item.threadMessages?.at(-1);
+    const timestamp = latest?.sentAt ?? item.createdAt;
+    return item.conversationType !== "imported" && latest?.direction === "in" && isWithinCommunicationPeriod(timestamp, period);
+  });
+  const ordered = prioritizeEmails(visibleEmails);
+  const summary = emailDashboardSummary(visibleEmails);
   const critical = ordered.filter((email) => email.classification === "Critical");
-  const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical");
-  const lowAttention = ordered.filter((email) => email.priorityScore < 4);
-  const otherChannels = channelCases.filter((item) => item.conversationType !== "imported" && item.threadMessages?.at(-1)?.direction === "in").sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
-  return <div className="page"><span className="eyebrow">Universal communication intelligence</span><h1>Your communication today</h1><p className="subtitle">Email, Instagram and your other connected channels are prioritized together.</p>
+  const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical" && email.priorityScore >= 4);
+  const lowAttention = ordered.filter((email) => email.priorityScore < 4 && email.classification !== "Critical");
+  const otherChannels = visibleChannelCases.sort((a, b) => (b.threadMessages?.at(-1)?.sentAt ?? b.createdAt).localeCompare(a.threadMessages?.at(-1)?.sentAt ?? a.createdAt));
+  const periodLabel = communicationPeriods.find((item) => item.id === period)?.label ?? "Today";
+  const totalPending = visibleEmails.length + visibleChannelCases.length;
+  return <div className="page"><span className="eyebrow">Universal communication intelligence</span><h1>Your communication overview</h1><p className="subtitle">Unanswered email, Instagram, WhatsApp and other connected channels—prioritized together without losing older items.</p>
+    <div className="overview-periods" aria-label="Communication time period">{communicationPeriods.map((item) => <button type="button" className={period === item.id ? "active" : ""} aria-pressed={period === item.id} key={item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
     <div className="summary-bar"><div className="summary-stat"><strong>{summary.unread}</strong><span>unread</span></div><div className="summary-stat"><strong>{summary.needsResponse}</strong><span>may need response</span></div><div className="summary-stat"><strong>{summary.critical}</strong><span>critical</span></div><div className="summary-stat"><strong>{summary.lowAttention}</strong><span>low attention</span></div></div>
-    {emails.length === 0 && <div className="empty-card">No synchronized Outlook messages yet. Open Connections and run the first import.</div>}
-    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#fb7185" /> Critical <span className="count">{critical.length}</span></div><div className="cards">{critical.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
-    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">{respond.length}</span></div><div className="cards">{respond.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {totalPending === 0 && <div className="empty-card">No unanswered relevant messages for {periodLabel.toLowerCase()}.</div>}
+    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#fb7185" /> Critical <span className="count">{critical.length}</span></div><div className="cards">{critical.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#34d399" /> Respond <span className="count">{respond.length}</span></div><div className="cards">{respond.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
     {otherChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#a78bfa" /> Other channels <span className="count">{otherChannels.length}</span></div><div className="cards">{otherChannels.map((item) => <article className="card email-card" key={item.id}><div className="card-top"><span>{item.title}</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><div className="card-person"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><PersonLink personId={item.personId} name={item.personName} /><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{item.analysis?.summary || item.message}</p><button className="pill" onClick={() => onOpenSource(item.source)}>Open conversation <ChevronRight size={10} /></button></article>)}</div></>}
-    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Low attention <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.slice(0, 3).map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Low attention <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
   </div>;
 }
 
@@ -120,7 +132,7 @@ function ConversationCard({ conversation, onClick }: { conversation: Conversatio
 
 function InboxView({ syncedEmails, people }: { syncedEmails: SyncedEmailConversation[]; people: CommunicationPersonOption[] }) {
   if (syncedEmails.length > 0) return <SyncedInbox emails={syncedEmails} people={people} />;
-  return <div className="page"><PageHeader eyebrow="Live Outlook inbox" title="Inbox" subtitle="Synchronized Outlook conversations will appear here." /><div className="empty-card">No Outlook messages have been synchronized yet. Open Connections and run the first import.</div></div>;
+  return <div className="page"><PageHeader eyebrow="Email" title="Inbox" subtitle="Mejl från dina anslutna konton." /><div className="empty-card">Inga sparade mejl hittades. Du kan kontrollera kontonas synkronisering under Connections.</div></div>;
 }
 
 function ReadableMessage({ text }: { text: string }) {
