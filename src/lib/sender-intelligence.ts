@@ -1,3 +1,4 @@
+import { priorityV3 } from "./priority-v3";
 export type SenderHandlingRule = "normal" | "always_priority" | "low_priority";
 
 const relationshipBoost: Record<string, number> = {
@@ -5,7 +6,8 @@ const relationshipBoost: Record<string, number> = {
   family: 1, friend: 0.75, supplier: 0.25, unknown: 0,
 };
 
-export function senderRelevance(input: { basePriority: number; relationshipType?: string | null; manualPriority?: number | null; handlingRule?: string | null; unread?: boolean; historicalConversationCount?: number; hasOwnerReplies?: boolean }) {
+export function senderRelevance(input: { basePriority: number; classification?: string; text?: string; relationshipType?: string | null; manualPriority?: number | null; handlingRule?: string | null; unread?: boolean; historicalConversationCount?: number; hasOwnerReplies?: boolean }) {
+  if (input.classification) return priorityV3(input);
   const relationship = (input.relationshipType || "unknown").toLowerCase();
   let score = input.basePriority + (relationshipBoost[relationship] ?? 0);
   const reasons = [`Message category contributes ${input.basePriority}/10.`];

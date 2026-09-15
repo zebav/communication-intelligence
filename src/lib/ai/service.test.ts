@@ -7,7 +7,7 @@ describe("OpenAIResponsesService", () => {
     let requestBody = "";
     const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => { requestBody = String(init?.body); return new Response(JSON.stringify({ output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }] }), { status: 200 }); });
     const service = new OpenAIResponsesService("test-key", "test-model", request as typeof fetch);
-    await expect(service.analyzeEmail({ ownerId: "owner", senderName: "A", subject: "Please reply", preview: "Can you review this?", currentClassification: "Business", styleExamples: ["Sounds good — I will check today."] })).resolves.toEqual(output);
+    await expect(service.analyzeEmail({ ownerId: "owner", senderName: "A", subject: "Please reply", preview: "Can you review this?", currentClassification: "Business", styleExamples: ["Sounds good — I will check today."] })).resolves.toEqual({ ...output, priorityScore: 8.8, priorityReason: expect.any(String) });
     const body = JSON.parse(requestBody);
     expect(body.store).toBe(false); expect(body.model).toBe("test-model"); expect(body.text.format.type).toBe("json_schema");
     expect(body.input).not.toContain('"ownerId"'); expect(body.safety_identifier).toMatch(/^[a-f0-9]{64}$/);

@@ -1,0 +1,7 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+export function PriorityFeedback({ messageId, initialScore }: { messageId: string; initialScore: number }) {
+  const [score,setScore] = useState(initialScore); const [reason,setReason] = useState(""); const [status,setStatus] = useState(""); const [busy,setBusy] = useState(false); const router = useRouter();
+  return <details><summary>Korrigera prioriteringen</summary><p>Korrigeringen gäller detta meddelande. Efter två korrigerade exempel vägs din prioritet in för samma kontakt, källa och kategori.</p><label>Prioritet {score}/10<input aria-label="Meddelandets prioritet" type="range" min={1} max={10} step={1} value={score} onChange={e => setScore(Number(e.target.value))} /></label><label>Varför?<textarea value={reason} maxLength={1000} onChange={e => setReason(e.target.value)} /></label><button className="btn" disabled={busy || !reason.trim()} onClick={async () => { setBusy(true); setStatus(""); try { const r = await fetch("/api/priority", { method:"POST", headers:{"content-type":"application/json"},body:JSON.stringify({ messageId,score,reason }) }); const result = await r.json(); if (!r.ok) throw new Error(result.error); setStatus("Prioriteringen är sparad."); router.refresh(); } catch(e) { setStatus(e instanceof Error ? e.message : "Kunde inte spara."); } finally { setBusy(false); } }}>{busy ? "Sparar…" : "Spara prioritering"}</button><p role="status">{status}</p></details>;
+}

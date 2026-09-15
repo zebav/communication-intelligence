@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BackToWorkspaceButton } from "@/components/back-to-workspace-button";
 import { ContactProfileEditor } from "@/components/contact-profile-editor";
+import { ContactMergePicker } from "@/components/contact-merge-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
   if (!user) redirect("/login");
   const { data: assurance } = await database.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") redirect("/auth/mfa");
+  const { data: mergedInto } = await database.from("contact_merges").select("target_id").eq("owner_id", user.id).eq("source_id", personId).is("undone_at", null).maybeSingle();
+  if (mergedInto) redirect(`/contacts/${mergedInto.target_id}`);
+  const { data: mergedProfiles } = await database.from("contact_merges").select("id,source_profile").eq("owner_id", user.id).eq("target_id", personId).is("undone_at", null);
 
   const [{ data: person }, { data: identities }, { data: conversations }, { data: memories }, { data: commitments }] = await Promise.all([
     database.from("people").select("id,display_name,organization,relationship_type,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,manual_priority,overall_priority,first_contact_at,last_contact_at").eq("id", personId).eq("owner_id", user.id).maybeSingle(),
@@ -27,7 +31,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
 
   return <main className="page contact-profile-page" style={{ maxWidth: 980, margin: "0 auto" }}>
     <div className="contact-profile-toolbar"><BackToWorkspaceButton /><ContactProfileEditor person={person} /></div>
+    <ContactMergePicker personId={personId} name={person.display_name ?? "kontakten"} />
     <div className="person-detail">
+      {mergedProfiles?.map(merge => <section className="card" key={merge.id}><h2>Bevarade uppgifter från sammanförd kontakt</h2>{Object.entries(merge.source_profile as Record<string, unknown>).filter(([key, value]) => ["display_name", "organization", "notes", "relationship_summary", "professional_specialty", "jurisdiction", "relationship_type"].includes(key) && value).map(([key,value]) => <p key={key}><strong>{key}</strong>: {String(value)}</p>)}</section>)}
       <div className="person-detail-head"><div className="avatar">{initials}</div><div><span className="eyebrow">Contact profile</span><h1 style={{ marginTop: 4 }}>{person.display_name}</h1><p className="subtitle">{[person.organization, person.relationship_type].filter(Boolean).join(" · ") || "Unified person profile"}</p></div></div>
       <div className="person-metrics" style={{ marginTop: 18 }}><div className="summary-stat"><strong>{priority || "–"}</strong><span>priority</span></div><div className="summary-stat"><strong>{identities?.length ?? 0}</strong><span>identities</span></div><div className="summary-stat"><strong>{conversations?.length ?? 0}</strong><span>conversations</span></div><div className="summary-stat"><strong>{commitments?.length ?? 0}</strong><span>open loops</span></div></div>
 

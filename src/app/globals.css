@@ -210,3 +210,12 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 
 .person-profile-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .person-profile-link:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+/* Sent shares the inbox list/detail structure without leaving the workspace. */
+.sent-workspace { padding: 24px; min-width: 0; }
+.sent-inbox.inbox { display: grid; grid-template-columns: minmax(250px, 38%) minmax(0, 1fr); height: min(70vh, 800px); }
+.sent-inbox .conversation-row { width: 100%; text-align: left; color: inherit; background: transparent; }
+.sent-inbox .conversation-row.selected { background: rgba(99,102,241,.12); }
+.sent-inbox .inbox-col, .sent-detail { overflow: auto; min-width: 0; }
+.sent-detail { padding: 24px; }
+.sent-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; margin-top: 24px; }
+@media (max-width: 760px) { .sent-inbox.inbox { grid-template-columns: minmax(0,1fr); height: auto; } .sent-inbox .inbox-col { max-height: 300px; } .sent-workspace { padding: 12px; } }

@@ -26,6 +26,7 @@ const contains = (value: string, words: readonly string[]) => words.some((word) 
 
 export function classifyEmail(input: ClassificationInput): EmailClassification {
   const text = `${input.subject ?? ""} ${input.preview ?? ""} ${input.sender ?? ""}`.toLowerCase();
+  if (/\b(unsubscribe|nyhetsbrev|newsletter|manage preferences)\b/.test(text) && /\b(discount|sale|campaign|rabatt|erbjudande|offer)\b/.test(text)) return "Marketing";
   if (input.importance === "high" || contains(text, ["urgent", "security alert", "suspicious", "omedelbart", "brådskande"])) return "Critical";
   if (contains(text, ["invoice", "receipt", "kvitto", "faktura", "order confirmation"])) return "Receipt / Invoice";
   if (contains(text, ["payment", "bank", "konto", "betalning", "tax", "skatt"])) return "Financial";
