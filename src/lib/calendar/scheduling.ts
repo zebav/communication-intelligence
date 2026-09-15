@@ -1,4 +1,5 @@
 import type { CalendarEvent, CalendarHold, SchedulingPreferences, TimeRange } from "./types";
+import { occupiedMinutes } from "./planning-preferences";
 
 const minute = 60_000;
 function instant(value: string) {
@@ -18,6 +19,7 @@ export function suggestSlots(input: {
   windows: TimeRange[]; events: CalendarEvent[]; holds: CalendarHold[];
   preferences: SchedulingPreferences; physical: boolean;
   reconciled: boolean; syncFresh: boolean; now: string;
+  minimumNoticeMinutes?: number; maximumMeetingMinutesPerDay?: number;
 }): SchedulingCandidate[] {
   const p = input.preferences;
   new Intl.DateTimeFormat("en", { timeZone: p.timezone }).format();
@@ -26,6 +28,9 @@ export function suggestSlots(input: {
   }
   if (p.durationMinutes < 1 || p.stepMinutes < 1) throw new Error("Duration and step must be positive");
   const now = instant(input.now);
+  const notice = input.minimumNoticeMinutes ?? 0;
+  const maximum = input.maximumMeetingMinutesPerDay ?? 1440;
+  if (!Number.isInteger(notice) || notice < 0 || notice > 10080 || !Number.isInteger(maximum) || maximum < 1 || maximum > 1440) throw new Error("Invalid planning rules");
   const busy = [
     ...input.events.filter(e => e.blocksAvailability && e.status !== "cancelled"),
     ...input.holds.filter(h => h.status === "active" && instant(h.expiresAt) > now),
@@ -35,8 +40,9 @@ export function suggestSlots(input: {
   let iterations = 0;
   for (const window of input.windows) {
     const range = interval(window);
+    if (occupiedMinutes(busy.map(b => ({start:new Date(b.start).toISOString(),end:new Date(b.end).toISOString()})), window) + p.durationMinutes > maximum) continue;
     const anchor=range.start+p.preparationMinutes*minute;
-    const first=anchor+Math.max(0,Math.ceil((now+p.preparationMinutes*minute-anchor)/(p.stepMinutes*minute)))*p.stepMinutes*minute;
+    const first=anchor+Math.max(0,Math.ceil((now+(notice+p.preparationMinutes)*minute-anchor)/(p.stepMinutes*minute)))*p.stepMinutes*minute;
     for (let start = first; start + (p.durationMinutes + p.recoveryMinutes) * minute <= range.end; start += p.stepMinutes * minute) {
       if (++iterations > 10000) throw new Error("Scheduling range too large");
       const end = start + p.durationMinutes * minute;

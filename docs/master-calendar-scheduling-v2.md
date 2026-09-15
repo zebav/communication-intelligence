@@ -1,0 +1,51 @@
+# Master Calendar & Scheduling Intelligence V2
+
+Status: **in progress, local branch only; not ready for acceptance/deployment**.
+Branch: `phase/master-calendar-scheduling-v2`, based on calendar foundation PR #51.
+Do not merge into main before the foundation and the remaining release gates below are satisfied.
+
+## Implemented in the first integrated block
+
+- Owner/MFA-protected saved planning rules: weekdays, local start/end, notice, daily occupied-time budget and minimum preparation/recovery.
+- Suggestions apply these rules server-side. Reservations made through the calendar endpoint are rechecked against current rules; DB conflict/MFA guards remain in place.
+- Complete-snapshot, sequential sync-all UI with per-source progress and explicit partial failure. This is **manual**, not background sync.
+- External-commitment review: exact title/time/location match suggestions, conflicts, missing and informational events. No automatic merge, copy or approval.
+- Explicitly approved copy of a future missing commitment: stable Google event ID, source fingerprint recheck, source/master mapping, compare-and-set claim and shared DB lock against overlapping transfers/holds. Uncertain outcomes require lookup, never a blind second insert. No attendees/invitations; source remains unchanged.
+- Distinguish possible cancellation/change from proposals; multiple explicit dates remain ambiguous. This is a conservative rules-based discovery, **not the finished AI intent extraction**.
+- Provider-neutral Places/Routes interfaces and Google Places (New)/Routes adapters with minimal field masks, fixed hosts, bounded requests, separate travel/preparation/recovery, no persistent raw Places cache.
+- Place search and route research UI behind a disabled-by-default server feature gate. Research alone cannot authorize or book a physical meeting.
+- Additive preferences migration, tested in local PGlite. Not applied to production.
+
+## Required next implementation, before user acceptance testing
+
+1. Background sync: decide a scheduler compatible with the actual deployment plan. Add durable per-account claims, bounded retries, last attempt/success, renewal where relevant, no overlapping refresh-token writes, preserve snapshots on failure. No frequent Hobby cron or UI polling presented as background sync.
+2. Complete commitment lifecycle: approved copy is implemented, but changed/cancelled originals still need persistent review items, exclusion decisions and explicit master update/cancel plans. Add mocked end-to-end service tests including provider timeouts and changed source between read/write. No silent move or delete.
+3. AI intent proposals grounded in actual conversation/message IDs and timestamp, timezone and evidence. Ambiguous dates/locations require clarification; cancellation never becomes a new booking. Prepared replies may cite only verified offered slots.
+4. Physical scheduling: time-bound origin/next destination, validate **both** route legs, persist approved route evidence with expiry and plan fingerprint; repeat conflict/route checks before confirm. Current `physical` holds intentionally remain disabled.
+5. Approved master updates/cancellations with etags, uncertainty handling and audit. Invitations and outgoing messages require separate explicit approval. No provider event edits or notifications in current block.
+6. Surface pending scheduling plans in Overview with links to the native calendar, not a disconnected second application.
+7. Full local API + UI tests with provider failure/timeout scenarios, then one coherent preview. Do not ask user to test paid Maps features before configuration is complete.
+
+## Activation prerequisites (do not activate automatically)
+
+- Apply `20260915223834_calendar_scheduling_v2.sql` only with the coherent V2 release.
+- Google Maps billing/API activation requires user's explicit cost approval.
+- Server-only `GOOGLE_MAPS_SERVER_API_KEY`, restricted to Places API (New) and Routes API; never NEXT_PUBLIC.
+- `CALENDAR_MAPS_ENABLED=true` only after approval, quotas/rate limits and required Google Maps attribution/privacy review. Default unset/false makes **no paid API calls**.
+- Dedicated scheduler still to be selected and verified. No V2 cron has been registered.
+- Existing calendar OAuth setup is reused. Do not replace Gmail/Outlook mail scopes or create another master.
+
+## Verification evidence
+
+- Calendar unit suite including DST, notice, daily budgets, overlapping-event union, reconciliation, ambiguous dates, Places/Routes mocked responses and both travel legs.
+- PGlite: original calendar security/conflict tests plus preferences owner isolation.
+- TypeScript, scoped ESLint, Next webpack production build.
+- Local synthetic browser: planning fields render; saved minimum preparation flows back to suggestion inputs; Maps disabled notice renders. Synthetic browser test is not proof of live provider integration.
+
+## Known limitations to address before release
+
+- Planning rules are enforced at the app endpoints, not yet in the reservation DB trigger; direct owner-authenticated Data API writes can bypass planning preferences (not owner/MFA/conflict protections). Add server-owned proposal/approval validation before enabling autonomous execution.
+- Daily budget currently counts occupied minutes inside the configured planning window, including hold buffers. General event buffers and all-day handling need final acceptance rules.
+- A transferred recurring occurrence is a one-off master copy, not an independently cloned recurrence series. Original notes/attendees are not copied. The source mapping must support viewing original details in the finished UI.
+- Sync-all runs while the view remains open. No claim of automatic sync until a scheduler is operating.
+- Full V2 is not finished. No deployment, production migration, real calendar modification, invitation or paid Maps request was performed by this block.

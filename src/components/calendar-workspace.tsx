@@ -8,6 +8,9 @@ import type { SchedulingCandidate } from "@/lib/calendar/scheduling";
 import "./calendar-workspace.css";
 import {CalendarBoard} from "./calendar-board";
 import {calendarDisplay} from "@/lib/calendar/display";
+import {CalendarPlanning} from "./calendar-planning";
+import {reviewCommitments} from "@/lib/calendar/reconciliation";
+import {transferFingerprint} from "@/lib/calendar/transfer-format";
 
 type Source={id:string;account_id:string;name:string;is_master:boolean;enabled:boolean;snapshot:CalendarEvent[];reviewed_snapshot:CalendarEvent[]|null;synced_at:string|null;sync_error:string|null};
 type Hold={id:string;title:string;starts_at:string;ends_at:string;status:string;expires_at:string;preparation_minutes:number;recovery_minutes:number};
@@ -32,9 +35,24 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
  const run=async(body:Record<string,unknown>)=>{
   setBusy(true);setError("");setStatus("");
   try {
+   if(body.action==="sync_all") {
+    const sources=data?.sources.filter(s=>s.enabled)??[];
+    const failed:string[]=[];
+    for(let i=0;i<sources.length;i++) {
+     const source=sources[i];setStatus(`Synkroniserar ${i+1} av ${sources.length}: ${source.name}`);
+     try {
+      const response=await fetch("/api/calendar",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"sync",sourceId:source.id}),signal:AbortSignal.timeout(65000)});
+      if(!response.ok)failed.push(source.name);
+     }catch{failed.push(source.name);}
+    }
+    setSlots([]);await load();
+    if(failed.length)setError(`Kunde inte synkronisera: ${failed.join(", ")}. Tidigare data behålls. Inga tider får bokas på ofullständigt underlag.`);
+    setStatus(`${sources.length-failed.length} av ${sources.length} kalendrar synkroniserade.`);
+    return;
+   }
    const response=await fetch("/api/calendar",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}), result=await response.json();
    if(!response.ok) throw new Error(result.error||"Åtgärden kunde inte genomföras.");
-   if(result.slots) {setSlots(result.slots);setStatus(result.slots.length?"Tidsförslagen är framtagna.":"Inga tider hittades. Välj en annan dag.");}
+   if(result.slots) {setSlots(result.slots);if(result.preparation!==undefined)setPreparation(result.preparation);if(result.recovery!==undefined)setRecovery(result.recovery);setStatus(result.slots.length?"Tidsförslagen är framtagna.":"Inga tider hittades inom planeringsreglerna. Välj en annan dag eller granska reglerna.");}
    else {setSlots([]);setStatus("Åtgärden är sparad.");await load();setApproval(null);}
   }catch(e){setError(e instanceof Error?e.message:"Kalenderfel");}finally{setBusy(false);}
  };
@@ -58,7 +76,11 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
    {!master&&data&&<div className="calendar-form"><label>Google-konto för masterkalendern<select value={accountId} onChange={e=>setAccountId(e.target.value)}><option value="">Välj konto</option>{data.accounts.filter(a=>a.provider==="google").map(a=><option key={a.id} value={a.id}>{a.address}</option>)}</select></label><label>Tidszon<input value={timezone} onChange={e=>setTimezone(e.target.value)}/></label><button className="btn primary" disabled={busy||!accountId||Boolean(data.workspace&&data.workspace.provisioning!=="idle")} onClick={()=>run({action:"create_master",accountId,timezone,approved:true})}>Godkänn och skapa separat masterkalender</button><small>Skapar en ny kalender hos Google. Inga inbjudningar skickas.</small>{data.workspace?.provisioning==="uncertain"&&<p role="alert">Ett tidigare försök behöver kontrolleras hos Google innan en ny kalender skapas.</p>}</div>}
   </details>
   {data&&<>
-   <details className="calendar-panel"><summary>Mötesförfrågningar från konversationer</summary><p>Första urvalet bygger på tydliga mötesord. Datum och bokning måste granskas av dig.</p>{conversations.filter(c=>schedulingIntent(c.text).detected).slice(0,30).map(c=><div className="calendar-account" key={c.id}><div><strong>{c.person}</strong><small>{c.title}</small></div><button className="btn" onClick={()=>{const intent=schedulingIntent(c.text),defaults=meetingDefaults[intent.type];setConversationId(c.id);setTitle(c.title.slice(0,300));setDuration(defaults.durationMinutes);setPreparation(defaults.preparationMinutes);setRecovery(defaults.recoveryMinutes);if(intent.date)setDate(intent.date);setSlots([]);setStatus(intent.reason);}}>Ta fram tidsförslag</button></div>)}</details>
+   <CalendarPlanning timezone={timezone} onSaved={rules=>{setSlots([]);setPreparation(rules.preparationMinutes);setRecovery(rules.recoveryMinutes);}}/>
+   <section className="calendar-panel"><h2>Samlad synkronisering och avstämning</h2><p>Hämta alla aktiva kalendrar med ett klick. Detta är manuell synkronisering; bakgrundskörningen är ännu inte aktiverad.</p><button className="btn primary" disabled={busy} onClick={()=>run({action:"sync_all"})}>{busy?"Arbetar…":"Synkronisera alla kalendrar"}</button>
+    {external.map(source=>{const reviews=reviewCommitments(source.snapshot,master?.snapshot??[]);return <details key={source.id} className="calendar-source"><summary>{source.name} · {reviews.filter(r=>r.status==="missing").length} saknas i master · {reviews.filter(r=>r.status==="conflict").length} möjliga konflikter</summary><p>Matchningar är förslag baserade på titel, plats och exakt tid. En godkänd kopia ändrar inte originalet och skickar inga inbjudningar.</p><ul className="calendar-events">{reviews.slice(0,100).map(r=><li key={r.event.id}><strong>{r.event.title||"Utan rubrik"}</strong><span>{fmt(r.event.start)} – {fmt(r.event.end)}</span><small>{r.status==="matched"?"Motsvarande bokning finns i master – kontrollera att det är samma åtagande.":r.status==="conflict"?"Överlappar en masterbokning – behöver ditt beslut.":r.status==="missing"?"Saknas i master – behöver föras över eller undantas före avstämning.":"Informationspost – blockerar inte tid."}</small>{r.status==="missing"&&Date.parse(r.event.start)>now&&<button className="btn" disabled={busy||!master} onClick={()=>run({action:"transfer",sourceId:source.id,eventId:r.event.id,fingerprint:transferFingerprint(r.event),approved:true})}>Godkänn kopia i master / kontrollera tidigare försök</button>}</li>)}</ul>{reviews.length>100&&<p>Visar de första 100 av {reviews.length} poster. Granska resterande i kalendervyn innan avstämning.</p>}</details>;})}
+   </section>
+   <details className="calendar-panel"><summary>Mötesförfrågningar från konversationer</summary><p>Första urvalet bygger på tydliga mötesord. Datum och bokning måste granskas av dig.</p>{conversations.filter(c=>schedulingIntent(c.text).detected).slice(0,30).map(c=>{const intent=schedulingIntent(c.text);return <div className="calendar-account" key={c.id}><div><strong>{c.person}</strong><small>{c.title}</small><small>{intent.reason}</small></div>{intent.operation==="propose"?<button className="btn" onClick={()=>{const defaults=meetingDefaults[intent.type];setConversationId(c.id);setTitle(c.title.slice(0,300));setDuration(defaults.durationMinutes);setPreparation(defaults.preparationMinutes);setRecovery(defaults.recoveryMinutes);if(intent.date)setDate(intent.date);setSlots([]);setStatus(intent.reason);}}>Ta fram tidsförslag</button>:<span>Granska befintlig bokning i kalendern. Inget ändras automatiskt.</span>}</div>;})}</details>
    <section className="calendar-panel"><h2>1. Synkronisera och stäm av</h2><p>Synkronisering hämtar 7 dagar bakåt och 60 dagar framåt. Granska bokningarna nedan innan du godkänner att underlaget är avstämt.</p>
    {data.sources.map(s=><details className="calendar-source" key={s.id}><summary>{s.is_master?"Master · ":"Förslag · "}{s.name} — {data.accounts.find(a=>a.id===s.account_id)?.address}</summary><div className="calendar-actions"><button className="btn" disabled={busy||!s.enabled} onClick={()=>run({action:"sync",sourceId:s.id})}>Synkronisera</button>{!s.is_master&&<label><input type="checkbox" checked={s.enabled} disabled={busy} onChange={e=>run({action:"enabled",sourceId:s.id,enabled:e.target.checked})}/> Använd som underlag</label>}</div><p>{s.synced_at?`Senast hämtad: ${fmt(s.synced_at)}`:"Inte synkroniserad"}</p>{s.sync_error&&<p role="alert">{s.sync_error}</p>}{!s.is_master&&<><ul className="calendar-events">{s.snapshot.map(e=><li key={e.id}><strong>{e.title||"Utan rubrik"}</strong><span>{fmt(e.start)} – {fmt(e.end)}</span><small>{e.status==="cancelled"?"Avbokad":e.blocksAvailability?"Åtagande att granska":"Markerad som ledig/avböjd"}</small></li>)}</ul><button className="btn" disabled={busy||!s.synced_at||Boolean(s.sync_error)||!s.enabled} onClick={()=>run({action:"review",sourceId:s.id,syncedAt:s.synced_at})}>Jag har stämt av dessa åtaganden mot masterkalendern</button><small>{JSON.stringify(s.snapshot)===JSON.stringify(s.reviewed_snapshot)?"Avstämt":"Behöver avstämning. För över åtaganden som gäller innan du godkänner."}</small></>}</details>)}
    </section>
