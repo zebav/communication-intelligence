@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { normalizeCommunicationMessage } from "./normalization";
 import { whatsappConnector } from "./whatsapp";
-import type { WhatsAppWebhookMessage } from "./whatsapp-webhook";
+import type { WhatsAppProviderAdapter, WhatsAppProviderMessage } from "./whatsapp-provider";
 
 export function validYCloudSignature(body: string, header: string | null, secret: string, now = Date.now()) {
   if (!header || !secret) return false;
@@ -33,7 +33,7 @@ export function parseYCloudEvent(raw: string) {
   const value = message.parse(direction === "in" ? event.whatsappInboundMessage : event.whatsappMessage);
   return { eventId: event.id, direction, value, businessPhone: (direction === "in" ? value.to : value.from).replace(/^\+/, "") };
 }
-export function ycloudMessage(event: NonNullable<ReturnType<typeof parseYCloudEvent>>, phoneNumberId: string): WhatsAppWebhookMessage {
+export function ycloudMessage(event: NonNullable<ReturnType<typeof parseYCloudEvent>>, phoneNumberId: string): WhatsAppProviderMessage {
   const { value, direction } = event;
   const participantId = (direction === "in" ? value.from : value.to).replace(/^\+/, "");
   const body = value.type === "text" ? value.text?.body ?? "" : value.image?.caption || value.video?.caption || value.document?.caption || `[WhatsApp ${value.type}]`;
@@ -41,3 +41,13 @@ export function ycloudMessage(event: NonNullable<ReturnType<typeof parseYCloudEv
   return { businessAccountId: value.wabaId, phoneNumberId, participantId, participantName: value.customerProfile?.name,
     message: normalizeCommunicationMessage(whatsappConnector, { externalId: value.wamid, externalConversationId: participantId, direction, senderIdentifier: direction === "in" ? participantId : event.businessPhone, body, sentAt: value.sendTime, attachmentCount: value.type === "text" ? 0 : 1, metadata: { provider: "ycloud", ycloud_event_id: event.eventId, whatsapp_business_account_id: value.wabaId, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: value.type } }) };
 }
+
+export const ycloudWhatsAppProvider: WhatsAppProviderAdapter<{ phoneNumberId: string }> = {
+  id: "ycloud",
+  capabilities: { receivesMessages: true, receivesMobileReplies: true, receivesStatuses: false, sendsMessages: false },
+  verifyWebhook: validYCloudSignature,
+  parseWebhook(rawBody, context) {
+    const event = parseYCloudEvent(rawBody);
+    return { provider: "ycloud", messages: event ? [ycloudMessage(event, context.phoneNumberId)] : [], statuses: [] };
+  },
+};

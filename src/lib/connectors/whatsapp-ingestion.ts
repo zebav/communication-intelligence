@@ -1,11 +1,12 @@
 import { after, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { whatsappConnector } from "@/lib/connectors/whatsapp";
-import { findWhatsAppWebhookConnection, type WhatsAppWebhookMessage, type WhatsAppStatusUpdate } from "@/lib/connectors/whatsapp-webhook";
+import { findWhatsAppWebhookConnection } from "@/lib/connectors/whatsapp-webhook";
+import type { WhatsAppProviderEvents } from "@/lib/connectors/whatsapp-provider";
 import { analyzeIncomingWhatsAppMessage } from "@/lib/connectors/whatsapp-intelligence";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 
-export async function ingestWhatsAppEvents(events: { messages: WhatsAppWebhookMessage[]; statuses: WhatsAppStatusUpdate[] }) {
+export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   if (!events.messages.length && !events.statuses.length) {
     console.info("WhatsApp webhook received without message/status events");
     return NextResponse.json({ received: true, imported: 0, parsedMessages: 0, parsedStatuses: 0 });
@@ -48,6 +49,7 @@ export async function ingestWhatsAppEvents(events: { messages: WhatsAppWebhookMe
 
   let imported = 0;
   let failed = 0;
+  let duplicates = 0;
   let unmatchedMessages = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
 
@@ -61,6 +63,14 @@ export async function ingestWhatsAppEvents(events: { messages: WhatsAppWebhookMe
           businessAccountId: event.businessAccountId,
           connectedAccountCount: (connections ?? []).length,
         });
+        continue;
+      }
+
+      const existingMessageQuery = () => database.from("messages").select("id").eq("owner_id", connection.owner_id).eq("source", "whatsapp").eq("external_message_id", event.message.externalId).maybeSingle();
+      const { data: existingMessage, error: existingMessageError } = await existingMessageQuery();
+      if (existingMessageError) throw existingMessageError;
+      if (existingMessage) {
+        duplicates += 1;
         continue;
       }
 
@@ -118,6 +128,16 @@ export async function ingestWhatsAppEvents(events: { messages: WhatsAppWebhookMe
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversation.data.id, messageId: saved.data.id });
       }
     } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+        const connection = findWhatsAppWebhookConnection(connections ?? [], event.phoneNumberId);
+        if (connection) {
+          const { data: existingMessage } = await database.from("messages").select("id").eq("owner_id", connection.owner_id).eq("source", "whatsapp").eq("external_message_id", event.message.externalId).maybeSingle();
+          if (existingMessage) {
+            duplicates += 1;
+            continue;
+          }
+        }
+      }
       failed += 1;
       console.error("WhatsApp webhook message ingestion failed", {
         phoneNumberId: event.phoneNumberId,
@@ -128,12 +148,13 @@ export async function ingestWhatsAppEvents(events: { messages: WhatsAppWebhookMe
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage)); });
   const retry = failed > 0 || failedStatuses > 0 || unmatchedMessages > 0;
-  console.info("WhatsApp webhook processed", { imported, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
+  console.info("WhatsApp webhook processed", { provider: events.provider, imported, duplicates, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
   return NextResponse.json({
     received: !retry,
     parsedMessages: events.messages.length,
     parsedStatuses: events.statuses.length,
     imported,
+    duplicates,
     failed,
     unmatchedMessages,
     statusUpdates,

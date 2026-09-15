@@ -1,6 +1,7 @@
 import { ingestWhatsAppEvents } from "@/lib/connectors/whatsapp-ingestion";
 import { NextResponse, type NextRequest } from "next/server";
-import { parseWhatsAppWebhook, validWhatsAppWebhookSignature } from "@/lib/connectors/whatsapp-webhook";
+import { metaDirectWhatsAppProvider } from "@/lib/connectors/whatsapp-webhook";
+import { activeWhatsAppProvider, inactiveProviderResponse } from "@/lib/connectors/whatsapp-provider";
 
 export const maxDuration = 60;
 
@@ -17,11 +18,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const secret = process.env.WHATSAPP_APP_SECRET || process.env.INSTAGRAM_APP_SECRET || "";
-  if (!validWhatsAppWebhookSignature(rawBody, request.headers.get("x-hub-signature-256"), secret)) {
+  if (!metaDirectWhatsAppProvider.verifyWebhook(rawBody, request.headers.get("x-hub-signature-256"), secret)) {
     console.warn("WhatsApp webhook rejected: invalid signature");
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 401 });
   }
-
-  const events = parseWhatsAppWebhook(rawBody);
-  return ingestWhatsAppEvents(events);
+  const activeProvider = activeWhatsAppProvider();
+  if (activeProvider !== metaDirectWhatsAppProvider.id) return NextResponse.json(inactiveProviderResponse(metaDirectWhatsAppProvider.id, activeProvider));
+  return ingestWhatsAppEvents(metaDirectWhatsAppProvider.parseWebhook(rawBody, undefined));
 }
