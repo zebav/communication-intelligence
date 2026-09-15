@@ -49,7 +49,7 @@ export default async function Home() {
     { data: connectionRows },
   ] = await Promise.all([
     supabase.from("profiles").select("preferences").eq("id", user.id).abortSignal(initialLoadSignal).maybeSingle(),
-    supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(300).abortSignal(initialLoadSignal),
+    supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(300).abortSignal(initialLoadSignal),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(AbortSignal.timeout(20_000)),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
     supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(1500).abortSignal(initialLoadSignal),
