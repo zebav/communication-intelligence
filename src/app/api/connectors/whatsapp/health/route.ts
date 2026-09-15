@@ -4,6 +4,8 @@ import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { whatsappConnector } from "@/lib/connectors/whatsapp";
 import { whatsappSubscribedAppsUrl } from "@/lib/connectors/whatsapp-api";
 
+import { whatsappCallbackUrl } from "@/lib/connectors/whatsapp-callback";
+
 type StoredCredentials = { accessToken?: string };
 type Subscription = { override_callback_uri?: string | null; whatsapp_business_api_data?: { id?: string; name?: string } };
 
@@ -24,8 +26,7 @@ export async function GET(request: NextRequest) {
 
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   const version = process.env.META_GRAPH_API_VERSION || "v26.0";
-  const configuredBaseUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin).replace(/\/$/, "");
-  const expectedCallbackUrl = `${configuredBaseUrl}/api/connectors/whatsapp/webhook`;
+  const expectedCallbackUrl = whatsappCallbackUrl(request.nextUrl.origin);
 
   const appId = process.env.WHATSAPP_APP_ID || process.env.INSTAGRAM_APP_ID;
   const appSecret = process.env.WHATSAPP_APP_SECRET || process.env.INSTAGRAM_APP_SECRET;

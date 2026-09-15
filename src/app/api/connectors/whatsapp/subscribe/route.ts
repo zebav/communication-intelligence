@@ -7,6 +7,8 @@ import { whatsappSubscribedAppsUrl } from "@/lib/connectors/whatsapp-api";
 
 const schema = z.object({ connectionId: z.string().uuid() });
 
+import { whatsappCallbackUrl } from "@/lib/connectors/whatsapp-callback";
+
 type StoredCredentials = { accessToken?: string };
 
 export async function POST(request: NextRequest) {
@@ -43,8 +45,17 @@ export async function POST(request: NextRequest) {
     const credentials = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
     if (!credentials.accessToken) return NextResponse.json({ error: "The WhatsApp token is missing. Reconnect WhatsApp." }, { status: 409 });
     const version = process.env.META_GRAPH_API_VERSION || "v26.0";
-    const configuredBaseUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin).replace(/\/$/, "");
-    const callbackUrl = `${configuredBaseUrl}/api/connectors/whatsapp/webhook`;
+    const callbackUrl = whatsappCallbackUrl(request.nextUrl.origin);
+    // Validate the same public challenge Meta needs, before changing live routing.
+    const challenge = crypto.randomUUID();
+    const probeUrl = new URL(callbackUrl);
+    probeUrl.searchParams.set("hub.mode", "subscribe");
+    probeUrl.searchParams.set("hub.verify_token", verifyToken);
+    probeUrl.searchParams.set("hub.challenge", challenge);
+    const probe = await fetch(probeUrl, { redirect: "manual", signal: AbortSignal.timeout(10_000), cache: "no-store" });
+    if (probe.status !== 200 || await probe.text() !== challenge) {
+      return NextResponse.json({ error: "The callback could not pass public verification. Check deployment protection and the receiving deployment's verify token before repairing delivery." }, { status: 409 });
+    }
 
     const response = await fetch(whatsappSubscribedAppsUrl(businessAccountId, version), {
       method: "POST",
