@@ -37,7 +37,7 @@ export default async function Home() {
   const overviewCutoff = recentWindowStartIso(31);
   const initialLoadSignal = AbortSignal.timeout(8_000);
   const [
-    { data: profile, error: profileError },
+    { data: profileRows, error: profileError },
     { data: personRows, error: personError },
     { data: emailRows, error: emailError },
     { data: channelRows, error: channelError },
@@ -48,7 +48,7 @@ export default async function Home() {
     { data: outcomeRows, error: outcomeError },
     { data: connectionRows, error: connectionError },
   ] = await Promise.all([
-    supabase.from("profiles").select("preferences").eq("id", user.id).abortSignal(initialLoadSignal).maybeSingle(),
+    supabase.rpc("get_universal_communication_profile").abortSignal(initialLoadSignal),
     supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(300).abortSignal(initialLoadSignal),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(AbortSignal.timeout(20_000)),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
@@ -59,6 +59,7 @@ export default async function Home() {
     supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100).abortSignal(initialLoadSignal),
     supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(initialLoadSignal),
   ]);
+  const profile = Array.isArray(profileRows) ? profileRows[0] : profileRows;
   const loadResults = [
     ["Profil", profileError], ["Kontakter", personError], ["E-post", emailError],
     ["Övriga meddelanden", channelError], ["Identiteter", identityError],
