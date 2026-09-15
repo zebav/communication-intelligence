@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Workspace } from "@/components/workspace";
+import { WorkspaceSnapshot } from "@/components/workspace-snapshot";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
 import { recentWindowStartIso } from "@/lib/recent-window";
@@ -37,16 +37,16 @@ export default async function Home() {
   const overviewCutoff = recentWindowStartIso(31);
   const initialLoadSignal = AbortSignal.timeout(8_000);
   const [
-    { data: profile },
-    { data: personRows },
+    { data: profile, error: profileError },
+    { data: personRows, error: personError },
     { data: emailRows, error: emailError },
-    { data: channelRows },
-    { data: identityRows },
-    { data: memoryRows },
-    { data: commitmentRows },
-    { data: learningRows },
-    { data: outcomeRows },
-    { data: connectionRows },
+    { data: channelRows, error: channelError },
+    { data: identityRows, error: identityError },
+    { data: memoryRows, error: memoryError },
+    { data: commitmentRows, error: commitmentError },
+    { data: learningRows, error: learningError },
+    { data: outcomeRows, error: outcomeError },
+    { data: connectionRows, error: connectionError },
   ] = await Promise.all([
     supabase.from("profiles").select("preferences").eq("id", user.id).abortSignal(initialLoadSignal).maybeSingle(),
     supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(300).abortSignal(initialLoadSignal),
@@ -59,6 +59,16 @@ export default async function Home() {
     supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100).abortSignal(initialLoadSignal),
     supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(initialLoadSignal),
   ]);
+  const loadResults = [
+    ["Profil", profileError], ["Kontakter", personError], ["E-post", emailError],
+    ["Övriga meddelanden", channelError], ["Identiteter", identityError],
+    ["Minnen", memoryError], ["Follow-ups", commitmentError],
+    ["Intelligence", learningError], ["Outcomes", outcomeError], ["Anslutningar", connectionError],
+  ] as const;
+  const failedSections = loadResults.filter(([, error]) => error).map(([section]) => section);
+  for (const [section, error] of loadResults) {
+    if (error) console.error("workspace_load_failed", { section, code: error.code || "request_failed" });
+  }
   const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: Partial<UniversalCommunicationProfile> } : {};
   if (emailError) console.error("workspace_email_load_failed", { code: emailError.code, message: emailError.message });
   const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
@@ -161,17 +171,9 @@ export default async function Home() {
     };
   }).sort((a, b) => (b.lastContactAt ?? "").localeCompare(a.lastContactAt ?? ""));
 
-  return <Workspace
-    userEmail={user.email ?? "Private owner"}
-    communicationCases={communicationCases}
-    connections={connections}
-    syncedEmails={syncedEmails}
-    emailLoadFailed={Boolean(emailError)}
-    followUps={followUps}
-    people={intelligentPeople}
-    learningSignals={learningSignals}
-    outcomes={outcomes}
-    persona={persona}
-    profilePeople={profilePeople}
-  />;
+  return <WorkspaceSnapshot key={user.id} failedSections={failedSections} data={{
+    userEmail: user.email ?? "Private owner", communicationCases, connections,
+    syncedEmails, followUps, people: intelligentPeople, learningSignals, outcomes,
+    persona, profilePeople,
+  }} />;
 }
