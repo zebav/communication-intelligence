@@ -9,7 +9,7 @@ const eventSchema = z.object({
   id: z.string(), subject: z.string().default(""), isCancelled: z.boolean().default(false),
   isAllDay: z.boolean().default(false), start: moment, end: moment,
   showAs: z.string(), responseStatus: z.object({ response: z.string() }).optional(),
-  seriesMasterId: z.string().optional(), changeKey: z.string().optional(),
+  seriesMasterId: z.string().nullish(), changeKey: z.string().optional(),
   location: z.object({ displayName: z.string().optional() }).optional(),
 });
 export function normalizeOutlookEvent(raw: unknown, calendarId: string) {
@@ -27,7 +27,7 @@ export function normalizeOutlookEvent(raw: unknown, calendarId: string) {
   return { id:e.id, calendarId, title:e.subject, start, end, timezone:"UTC", allDay:e.isAllDay,
     status:e.isCancelled ? "cancelled" as const : e.showAs === "tentative" ? "tentative" as const : "confirmed" as const,
     blocksAvailability:!e.isCancelled && e.showAs!=="free" && e.responseStatus?.response!=="declined",
-    location:e.location?.displayName, recurrenceId:e.seriesMasterId, etag:e.changeKey };
+    location:e.location?.displayName, recurrenceId:e.seriesMasterId ?? undefined, etag:e.changeKey };
 }
 export class OutlookCalendarReader {
   constructor(private readonly accessToken: string, private readonly transport: typeof fetch = fetch) {}

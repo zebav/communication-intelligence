@@ -3,6 +3,17 @@ import { OutlookCalendarReader,normalizeOutlookEvent } from "./outlook-calendar"
 const event={id:"one",subject:"Meeting",start:{dateTime:"2026-09-16T09:00:00.0000000",timeZone:"UTC"},end:{dateTime:"2026-09-16T10:00:00.0000000",timeZone:"UTC"},showAs:"busy"};
 const range={start:"2026-09-16T00:00:00Z",end:"2026-09-17T00:00:00Z"};
 describe("Outlook source calendar",()=>{
+  it("accepts null seriesMasterId for standalone events without losing busy status",()=>{
+    expect(normalizeOutlookEvent({...event,seriesMasterId:null},"work")).toMatchObject({id:"one",recurrenceId:undefined,blocksAvailability:true});
+    expect(normalizeOutlookEvent({...event,seriesMasterId:"series-1"},"work").recurrenceId).toBe("series-1");
+    expect(()=>normalizeOutlookEvent({...event,seriesMasterId:42},"work")).toThrow();
+  });
+  it("imports a mixed page of standalone and recurring instances",async()=>{
+    const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify({value:[{...event,seriesMasterId:null},{...event,id:"two",seriesMasterId:"series-1"}]})));
+    const events=await new OutlookCalendarReader("test",fetcher).getEvents("work",range);
+    expect(events.map(e=>e.recurrenceId)).toEqual([undefined,"series-1"]);
+    expect(events.every(e=>e.blocksAvailability)).toBe(true);
+  });
   it("normalizes UTC without using machine timezone",()=>{
     expect(normalizeOutlookEvent(event,"work")).toMatchObject({start:"2026-09-16T09:00:00.000Z",blocksAvailability:true});
   });
