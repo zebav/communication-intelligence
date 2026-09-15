@@ -1,6 +1,6 @@
 const GRAPH_HOST = "https://graph.facebook.com";
 
-export type WhatsAppEmbeddedSignupSession = { businessAccountId: string; phoneNumberId: string };
+export type WhatsAppEmbeddedSignupSession = { businessAccountId: string; phoneNumberId?: string };
 
 export function parseWhatsAppEmbeddedSignupEvent(value: unknown): WhatsAppEmbeddedSignupSession | null {
   let payload = value;
@@ -9,11 +9,14 @@ export function parseWhatsAppEmbeddedSignupEvent(value: unknown): WhatsAppEmbedd
   }
   if (!payload || typeof payload !== "object") return null;
   const event = payload as { type?: unknown; event?: unknown; data?: { waba_id?: unknown; phone_number_id?: unknown } };
-  if (event.type !== "WA_EMBEDDED_SIGNUP" || event.event !== "FINISH") return null;
+  const coexistence = event.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING";
+  if (event.type !== "WA_EMBEDDED_SIGNUP" || (!coexistence && event.event !== "FINISH")) return null;
   const businessAccountId = typeof event.data?.waba_id === "string" ? event.data.waba_id.trim() : "";
   const phoneNumberId = typeof event.data?.phone_number_id === "string" ? event.data.phone_number_id.trim() : "";
-  if (!/^\d+$/.test(businessAccountId) || !/^\d+$/.test(phoneNumberId)) return null;
-  return { businessAccountId, phoneNumberId };
+  if (!/^\d+$/.test(businessAccountId)) return null;
+  if (phoneNumberId && !/^\d+$/.test(phoneNumberId)) return null;
+  if (!phoneNumberId && !coexistence) return null;
+  return { businessAccountId, ...(phoneNumberId ? { phoneNumberId } : {}) };
 }
 
 export function whatsappTokenExchangeUrl(input: { appId: string; appSecret: string; code: string; version: string }) {

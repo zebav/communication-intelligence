@@ -6,7 +6,7 @@ import { whatsappConnector } from "@/lib/connectors/whatsapp";
 import { whatsappPhoneUrl, whatsappSubscribedAppsUrl } from "@/lib/connectors/whatsapp-api";
 import { whatsappTokenExchangeUrl } from "@/lib/connectors/whatsapp-embedded-signup";
 
-const inputSchema = z.object({ code: z.string().min(8).max(4096), businessAccountId: z.string().regex(/^\d+$/), phoneNumberId: z.string().regex(/^\d+$/) });
+const inputSchema = z.object({ code: z.string().min(8).max(4096), businessAccountId: z.string().regex(/^\d+$/), phoneNumberId: z.string().regex(/^\d+$/).optional() });
 const jsonError = (message: string, status = 400) => NextResponse.json({ error: message }, { status });
 
 export async function POST(request: NextRequest) {
@@ -29,7 +29,20 @@ export async function POST(request: NextRequest) {
     const tokenResult = await tokenResponse.json() as { access_token?: string };
     if (!tokenResponse.ok || !tokenResult.access_token) return jsonError("Meta could not authorize this WhatsApp Business account.", 409);
 
-    const profileResponse = await fetch(whatsappPhoneUrl(parsed.data.phoneNumberId, version), { headers: { authorization: `Bearer ${tokenResult.access_token}` }, signal: AbortSignal.timeout(15_000) });
+    // Coexistence completion can contain only the WABA ID. Resolve the number
+    // from Meta using the exchanged token, never from stale local metadata.
+    const numbersUrl = new URL(whatsappSubscribedAppsUrl(parsed.data.businessAccountId, version));
+    numbersUrl.pathname = numbersUrl.pathname.replace(/subscribed_apps$/, "phone_numbers");
+    numbersUrl.searchParams.set("fields", "id,is_on_biz_app,platform_type");
+    const numbersResponse = await fetch(numbersUrl, { headers: { authorization: `Bearer ${tokenResult.access_token}` }, signal: AbortSignal.timeout(15_000) });
+    const numbers = await numbersResponse.json() as { data?: Array<{ id: string; is_on_biz_app?: boolean; platform_type?: string }>; paging?: { next?: string } };
+    const candidates = numbers.data?.filter((number) => parsed.data.phoneNumberId ? number.id === parsed.data.phoneNumberId : number.is_on_biz_app === true && number.platform_type === "CLOUD_API") ?? [];
+    if (!numbersResponse.ok || candidates.length !== 1 || (!parsed.data.phoneNumberId && numbers.paging?.next)) return jsonError("Meta did not identify one connected WhatsApp Business app number. Complete the Business Platform connection in WhatsApp Business and try again.", 409);
+    const selectedNumber = candidates[0];
+    if (!/^\d+$/.test(selectedNumber.id) || selectedNumber.is_on_biz_app !== true || selectedNumber.platform_type !== "CLOUD_API") return jsonError("This number is not connected to both WhatsApp Business and Cloud API. Complete the Business Platform connection on your phone first.", 409);
+    const phoneNumberId = selectedNumber.id;
+
+    const profileResponse = await fetch(whatsappPhoneUrl(phoneNumberId, version), { headers: { authorization: `Bearer ${tokenResult.access_token}` }, signal: AbortSignal.timeout(15_000) });
     const profile = await profileResponse.json() as { display_phone_number?: string; verified_name?: string; quality_rating?: string };
     if (!profileResponse.ok) return jsonError("The selected WhatsApp number could not be verified.", 409);
 
@@ -44,7 +57,7 @@ export async function POST(request: NextRequest) {
     if (!subscriptionResponse.ok || subscriptionResult?.success !== true) {
       console.error("WhatsApp WABA webhook subscription failed", {
         businessAccountId: parsed.data.businessAccountId,
-        phoneNumberId: parsed.data.phoneNumberId,
+        phoneNumberId: phoneNumberId,
         status: subscriptionResponse.status,
         code: subscriptionResult?.error?.code,
         message: subscriptionResult?.error?.message,
@@ -52,7 +65,7 @@ export async function POST(request: NextRequest) {
       return jsonError("WhatsApp was authorized, but live message delivery could not be activated. Reconnect after checking the Meta webhook configuration.", 409);
     }
 
-    const accountIdentifier = profile.display_phone_number || parsed.data.phoneNumberId;
+    const accountIdentifier = profile.display_phone_number || phoneNumberId;
     const values = {
       owner_id: user.id,
       provider: whatsappConnector.id,
@@ -65,7 +78,7 @@ export async function POST(request: NextRequest) {
       scopes: [...whatsappConnector.scopes],
       encrypted_credentials: encryptCredential({ accessToken: tokenResult.access_token }, encryptionKey),
       token_metadata: {
-        phone_number_id: parsed.data.phoneNumberId,
+        phone_number_id: phoneNumberId,
         business_account_id: parsed.data.businessAccountId,
         display_phone_number: accountIdentifier,
         quality_rating: profile.quality_rating ?? null,
@@ -75,7 +88,7 @@ export async function POST(request: NextRequest) {
       },
       updated_at: new Date().toISOString(),
     };
-    const { data: existing } = await database.from("connections").select("id").eq("owner_id", user.id).eq("provider", whatsappConnector.id).contains("token_metadata", { phone_number_id: parsed.data.phoneNumberId }).maybeSingle();
+    const { data: existing } = await database.from("connections").select("id").eq("owner_id", user.id).eq("provider", whatsappConnector.id).contains("token_metadata", { phone_number_id: phoneNumberId }).maybeSingle();
     const saved = existing?.id ? await database.from("connections").update(values).eq("id", existing.id).eq("owner_id", user.id) : await database.from("connections").insert(values);
     if (saved.error) return jsonError("The WhatsApp connection could not be saved.", 500);
 
@@ -86,7 +99,7 @@ export async function POST(request: NextRequest) {
       action: "connection.created",
       object_type: "connection",
       source: "whatsapp",
-      new_value: { provider: whatsappConnector.id, phone_number_id: parsed.data.phoneNumberId, business_account_id: parsed.data.businessAccountId, onboarding: "business_app_coexistence", webhook_subscription: "subscribed" },
+      new_value: { provider: whatsappConnector.id, phone_number_id: phoneNumberId, business_account_id: parsed.data.businessAccountId, onboarding: "business_app_coexistence", webhook_subscription: "subscribed" },
     });
     return NextResponse.json({ connected: true, accountName: values.account_name, accountIdentifier, webhookSubscribed: true });
   } catch (caught) {
