@@ -39,7 +39,7 @@ export default async function Home() {
   const [
     { data: profile },
     { data: personRows },
-    { data: emailRows },
+    { data: emailRows, error: emailError },
     { data: channelRows },
     { data: identityRows },
     { data: memoryRows },
@@ -50,7 +50,7 @@ export default async function Home() {
   ] = await Promise.all([
     supabase.from("profiles").select("preferences").eq("id", user.id).abortSignal(initialLoadSignal).maybeSingle(),
     supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(300).abortSignal(initialLoadSignal),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(AbortSignal.timeout(20_000)),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
     supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(1500).abortSignal(initialLoadSignal),
     supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(500).abortSignal(initialLoadSignal),
@@ -60,6 +60,7 @@ export default async function Home() {
     supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(initialLoadSignal),
   ]);
   const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: Partial<UniversalCommunicationProfile> } : {};
+  if (emailError) console.error("workspace_email_load_failed", { code: emailError.code, message: emailError.message });
   const persona = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const profilePeople: CommunicationPersonOption[] = (personRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown person", relationship: person.relationship_type ?? "", organization: person.organization ?? "", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", priority: Number(person.manual_priority ?? person.overall_priority ?? 0), lastContactAt: person.last_contact_at ?? undefined }));
   const rows = [...(emailRows ?? []), ...(channelRows ?? [])];
@@ -165,6 +166,7 @@ export default async function Home() {
     communicationCases={communicationCases}
     connections={connections}
     syncedEmails={syncedEmails}
+    emailLoadFailed={Boolean(emailError)}
     followUps={followUps}
     people={intelligentPeople}
     learningSignals={learningSignals}
