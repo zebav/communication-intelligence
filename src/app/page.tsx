@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeUniversalProfile } from "@/lib/communication-profile";
+import { recentWindowStartIso } from "@/lib/recent-window";
 import type { ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ export default async function Home() {
   if (!assurance || assurance.currentLevel !== "aal2") redirect("/auth/mfa");
 
   const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)";
+  const overviewCutoff = recentWindowStartIso(31);
   const [
     { data: profile },
     { data: personRows },
@@ -47,8 +49,8 @@ export default async function Home() {
   ] = await Promise.all([
     supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle(),
     supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).order("last_contact_at", { ascending: false, nullsFirst: false }).limit(1000),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(500),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(1000),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(500),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(500),
     supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(5000),
     supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(2000),
     supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(200),
