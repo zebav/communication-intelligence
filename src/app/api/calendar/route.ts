@@ -76,15 +76,17 @@ export async function POST(request:Request) {
    const checked=await calendarSuggestions(db,owner,{date,duration:(Date.parse(a.end)-Date.parse(a.start))/60000,preparation:a.physical?0:a.preparation,recovery:a.physical?0:a.recovery,physical:false,requestedStart:a.start});
    if(!checked.slots.some(s=>s.bookable&&Date.parse(s.start)===Date.parse(a.start)&&Date.parse(s.end)===Date.parse(a.end))||a.preparation<checked.preparation||a.recovery<checked.recovery) throw new Error("Tiden följer inte dina aktuella planeringsregler. Ta fram nya tidsförslag.");
    let preparation=a.preparation,recovery=a.recovery;
+   let travelReview:{inboundMinutes:number;outboundMinutes:number}|undefined;
    if(a.details?.travel) {
     if(!mapsEnabled())throw new Error("Restidstjänsten är inte aktiverad. Ingen fysisk tid har reserverats.");
     const assessment=await calendarTravelAssessment(db,owner,a.details.travel,new GooglePlacesRoutes(process.env.GOOGLE_MAPS_SERVER_API_KEY!,fetch,reserveMapsOperation));
     if(assessment.status!=="FEASIBLE")throw new Error("Resorna ryms inte eller kalendern behöver synkroniseras och stämmas av.");
+    travelReview={inboundMinutes:assessment.inbound.minutes,outboundMinutes:assessment.outbound.minutes};
     ({preparation,recovery}=travelReservation(a.details,a.start,a.end)!);
    }
    const {data:hold,error}=await db.from("calendar_holds").insert({owner_id:owner,title:a.title,starts_at:a.start,ends_at:a.end,preparation_minutes:preparation,recovery_minutes:recovery,conversation_id:a.conversationId,meeting_details:a.details??null}).select("*").single();
    if(error) throw new Error("Reservationen kunde inte sparas: kontrollera synkronisering, avstämning och tidskonflikter.");
-   return NextResponse.json({success:true,hold});
+   return NextResponse.json({success:true,hold,travelReview});
   }
   if(a.action==="release") {
    const {data:released,error}=await db.from("calendar_holds").update({status:"released"}).eq("owner_id",owner).eq("id",a.holdId).eq("status","active").select("id").maybeSingle();

@@ -28,6 +28,7 @@ export function CalendarMeetingComposer({timezone,onDone}:{timezone:string;onDon
  const [title,setTitle]=useState(""),[description,setDescription]=useState(""),[attendees,setAttendees]=useState(""),[location,setLocation]=useState("");
  const [start,setStart]=useState(""),[end,setEnd]=useState(""),[physical,setPhysical]=useState(false),[travel,setTravel]=useState(emptyTravel);
  const [plan,setPlan]=useState<Review|null>(null),[approved,setApproved]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
+ const [travelReview,setTravelReview]=useState<{inboundMinutes:number;outboundMinutes:number}|null>(null);
  const [rules,setRules]=useState<{preparationMinutes:number;recoveryMinutes:number}|null>(null),[maps,setMaps]=useState(false);
  useEffect(()=>{const c=new AbortController();void fetch("/api/calendar/planning",{signal:c.signal,cache:"no-store"}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error);setRules(d.rules);setMaps(d.mapsEnabled);}).catch(e=>{if(e.name!=="AbortError")setError(e.message);});return()=>c.abort();},[]);
  const run=async(action:"prepare"|"confirm"|"release")=>{
@@ -41,7 +42,7 @@ export function CalendarMeetingComposer({timezone,onDone}:{timezone:string;onDon
     body={action:"hold",title,start:from,end:to,preparation:rules.preparationMinutes,recovery:rules.recoveryMinutes,physical,conversationId:null,details};
    } else {if(!plan)throw new Error("Granska förslaget först.");body={action:action==="confirm"?"confirm":"release",holdId:plan.id,approved:true,approvedInvitations:approved};}
    const r=await fetch("/api/calendar",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw new Error(d.error);
-   if(action==="prepare"){setPlan(d.hold);setApproved(false);}
+   if(action==="prepare"){setPlan(d.hold);setApproved(false);setTravelReview(d.travelReview??null);}
    else {setNotice(d.warning||(action==="release"?"Reservationen är släppt.":plan!.meeting_details.attendees.length?"Mötet är skapat och Google har tagit emot utskicket. Leverans till mottagarnas inkorgar kan inte bekräftas här.":"Mötet är skapat utan inbjudningar."));setPlan(null);if(action==="confirm"){setTitle("");setAttendees("");}}
    await onDone();
   }catch(e){setError(e instanceof Error?e.message:"Kontrollera mötesuppgifterna.");}finally{setBusy(false);}
@@ -60,6 +61,7 @@ export function CalendarMeetingComposer({timezone,onDone}:{timezone:string;onDon
   </fieldset>:<section className="calendar-approval" aria-label="Granska möte och utskick"><h3>{plan.title}</h3><p>{new Date(plan.starts_at).toLocaleString('sv-SE',{timeZone:timezone})} – {new Date(plan.ends_at).toLocaleString('sv-SE',{timeZone:timezone})} · {timezone}</p>
    <p>{plan.meeting_details.locationLabel||"Ingen fysisk plats"}</p><p style={{whiteSpace:"pre-wrap"}}>{plan.meeting_details.description}</p>
    {plan.meeting_details.travel&&<p>Reserverat för resa och buffert: {plan.preparation_minutes} minuter före och {plan.recovery_minutes} minuter efter. Båda restiderna kontrolleras igen vid godkännande. Om de inte ryms bokas inget.</p>}
+   {travelReview&&<p>Google Maps uppskattar resan dit till {travelReview.inboundMinutes} minuter och resan vidare/tillbaka till {travelReview.outboundMinutes} minuter.</p>}
    <h4>Inbjudningar från din masterkalender</h4>{plan.meeting_details.attendees.length?<><ul>{plan.meeting_details.attendees.map(email=><li key={email}>{email}</li>)}</ul><label><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/> Jag godkänner att Google skickar kalenderinbjudningar till dessa adresser.</label></>:<p>Inga mottagare. Inga inbjudningar skickas.</p>}
    <p>Reservationen löper ut {new Date(plan.expires_at).toLocaleTimeString('sv-SE',{timeZone:timezone})}. Ett oklart resultat kontrolleras med samma boknings-ID, inte ett nytt utskick.</p>
    <div className="calendar-actions"><button className="btn primary" disabled={busy||(plan.meeting_details.attendees.length>0&&!approved)} onClick={()=>run("confirm")}>Godkänn bokning{plan.meeting_details.attendees.length?" och skicka inbjudningar":""}</button><button className="btn" disabled={busy} onClick={()=>run("release")}>Avstå</button></div>
