@@ -4,6 +4,15 @@ Status: **integrated development candidate; not ready for production or full use
 Branch: `phase/master-calendar-scheduling-v2`, based on calendar foundation PR #51.
 Do not merge into main before the foundation and the remaining release gates below are satisfied.
 
+## Live installation checkpoint — 2026-09-16
+
+- Draft PR #52, commit `921d9cc`, deployed successfully to `https://communication-intelligence-exmkfxdyf-ci20.vercel.app`.
+- All seven V2 migrations below are now installed in the shared Supabase project. Earlier local-only migration notes describe prior checkpoints, not the current installation state.
+- Verified live owner + MFA policies, RLS on all calendar tables, no anonymous table reads, and server-only budget function access. The budget table deliberately has no client RLS policies or client grants.
+- Security advisor also reports pre-existing profile SECURITY DEFINER RPCs and disabled leaked-password protection; these were not changed by this release.
+- Preview reaches the app login page. Authenticated end-to-end verification is waiting for the owner to log in with MFA; no provider write was performed.
+- Production application has not been promoted. Maps, browser maps and the background scheduler have not been activated. Remaining functional release gates below still apply.
+
 ## Implemented in the first integrated block
 
 - Owner/MFA-protected saved planning rules: weekdays, local start/end, notice, daily occupied-time budget and minimum preparation/recovery.

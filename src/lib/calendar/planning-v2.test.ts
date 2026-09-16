@@ -21,6 +21,13 @@ describe("planning rules",()=>{
  });
 });
 describe("commitment reconciliation",()=>{
+ it("separates exact week-number metadata without hiding real all-day commitments",()=>{
+  const week={...event,title:"Vecka 38 av 2026",allDay:true};
+  expect(reviewCommitments([week],[],"Veckonummer")[0].status).toBe("informational");
+  expect(reviewCommitments([week],[],"Arbetskalender")[0].status).toBe("missing");
+  expect(reviewCommitments([{...week,title:"Styrelsemöte vecka 38"}],[],"Veckonummer")[0].status).toBe("missing");
+  expect(week.blocksAvailability).toBe(true);
+ });
  it("does not merge by title alone",()=>expect(reviewCommitments([event],[{...event,id:"m",start:"2026-10-01T08:30:00Z"}])[0].status).toBe("conflict"));
  it("suggests exact matches, missing and free events separately",()=>{
   expect(reviewCommitments([event],[{...event,id:"m"}])[0].status).toBe("matched");
