@@ -1,6 +1,6 @@
 import {describe,it,expect,vi} from "vitest";
 import {eventContextSchema} from "./event-context";
-import {GooglePlacesRoutes} from "./places-routing";
+import {GooglePlacesRoutes,MapsProviderError} from "./places-routing";
 import {GoogleWeather,summarizeWeather} from "./weather";
 
 describe("calendar context",()=>{
@@ -14,6 +14,18 @@ describe("calendar context",()=>{
  });
 });
 describe("Maps cost guards",()=>{
+ it.each(["SERVICE_DISABLED","API_KEY_SERVICE_BLOCKED","BILLING_DISABLED"])("reports safe configuration reason %s without Google secrets",async(reason)=>{
+  const transport=vi.fn().mockResolvedValue(Response.json({error:{status:"PERMISSION_DENIED",message:"secret-key and private address",details:[{reason,metadata:{key:"secret-key"}}]}},{status:403}));
+  const error=await new GooglePlacesRoutes("secret-key",transport).estimate({originPlaceId:"a",destinationPlaceId:"b",mode:"DRIVE",departureTime:new Date(Date.now()+3600000).toISOString()}).catch(e=>e);
+  expect(error).toBeInstanceOf(MapsProviderError);expect(error.code).toBe(reason);expect(error.httpStatus).toBe(403);
+  expect(error.message).not.toContain("secret-key");expect(JSON.stringify(error)).not.toContain("private address");
+ });
+ it("does not reflect unknown provider reasons or non-JSON errors",async()=>{
+  for(const response of [Response.json({error:{status:"secret-key"}},{status:500}),new Response("private address",{status:503})]){
+   const error=await new GooglePlacesRoutes("test",vi.fn().mockResolvedValue(response)).estimate({originPlaceId:"a",destinationPlaceId:"b",mode:"DRIVE",departureTime:new Date(Date.now()+3600000).toISOString()}).catch(e=>e);
+   expect(error).toMatchObject({code:"UNKNOWN"});expect(error.message).not.toMatch(/secret-key|private address/);
+  }
+ });
  it("does not call Google when reservation fails",async()=>{
   const transport=vi.fn(),reserve=vi.fn().mockRejectedValue(new Error("cap"));
   await expect(new GooglePlacesRoutes("test",transport,reserve).search("Stockholm")).rejects.toThrow("cap");

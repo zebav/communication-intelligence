@@ -15,6 +15,32 @@ export type PlaceCandidate = { id: string; name: string; address: string; mapsUr
 export interface PlaceService { search(query: string): Promise<PlaceCandidate[]> }
 export interface RouteService { estimate(request: RouteRequest): Promise<RouteEstimate> }
 
+const mapsErrorMessages = {
+  SERVICE_DISABLED: "Google Routes API är inte aktiverat för projektet. Restiden är därför okänd.",
+  API_KEY_SERVICE_BLOCKED: "Google-nyckeln saknar tillåtelse för Routes API. Restiden är därför okänd.",
+  BILLING_DISABLED: "Google kräver aktiverad fakturering för restidstjänsten. Restiden är därför okänd.",
+  PERMISSION_DENIED: "Google nekade åtkomst till restidstjänsten. Kontrollera nyckelns API- och åtkomstbegränsningar.",
+  RESOURCE_EXHAUSTED: "Googles gräns för restidsanrop har nåtts. Restiden är därför okänd.",
+  INVALID_ARGUMENT: "Google kunde inte beräkna resan med dessa platser, tider eller färdsätt.",
+  UNAVAILABLE: "Googles restidstjänst är tillfälligt otillgänglig. Restiden är därför okänd.",
+  UNKNOWN: "Restiden kunde inte beräknas. Den räknas inte som noll minuter.",
+} as const;
+export class MapsProviderError extends Error {
+  constructor(readonly code: keyof typeof mapsErrorMessages, readonly httpStatus: number) {
+    super(mapsErrorMessages[code]);
+    this.name = "MapsProviderError";
+  }
+}
+async function routeProviderError(response: Response): Promise<MapsProviderError> {
+  // Never return or log Google's message/metadata: they can include credentials or locations.
+  const parsed = z.object({error:z.object({status:z.string().optional(),details:z.array(z.object({reason:z.string().optional()})).optional()})})
+    .safeParse(await response.json().catch(()=>null));
+  const candidates = parsed.success ? [...(parsed.data.error.details??[]).map(d=>d.reason),parsed.data.error.status] : [];
+  const code = candidates.find((value): value is keyof typeof mapsErrorMessages =>
+    typeof value === "string" && Object.hasOwn(mapsErrorMessages,value)) ?? "UNKNOWN";
+  return new MapsProviderError(code,response.status);
+}
+
 /** Constructed only on the server; no API key, raw response or provider error goes to clients. */
 export class GooglePlacesRoutes implements PlaceService, RouteService {
   constructor(private readonly key: string, private readonly transport: typeof fetch = fetch,
@@ -46,7 +72,7 @@ export class GooglePlacesRoutes implements PlaceService, RouteService {
         travelMode:request.mode, ...(request.mode === "DRIVE" ? {routingPreference:"TRAFFIC_AWARE",departureTime:request.departureTime} :
           request.mode === "TRANSIT" ? {departureTime:request.departureTime} : {}), computeAlternativeRoutes:false }),
     });
-    if (!response.ok) throw new Error("Restiden kunde inte beräknas. Den räknas inte som noll minuter.");
+    if (!response.ok) throw await routeProviderError(response);
     const result = z.object({ routes:z.array(z.object({duration:z.string().regex(/^\d+(\.\d+)?s$/),distanceMeters:z.number().nonnegative()})).min(1) }).parse(await response.json());
     const route = result.routes[0];
     return { ...request,status:"ESTIMATED",minutes:Math.ceil(parseFloat(route.duration)/60),distanceMeters:route.distanceMeters,checkedAt:new Date().toISOString() };
