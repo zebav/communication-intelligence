@@ -43,6 +43,25 @@ await db.query('update messages set importance_score=9,processed_at=now() where 
 assert.equal(Number((await db.query('select importance_score from messages')).rows[0].importance_score),2);
 await db.query('update conversations set priority_score=9');
 assert.equal(Number((await db.query('select priority_score from conversations')).rows[0].priority_score),2);
+// Exercise future assessments, not just preservation of the corrected message.
+const conversation=(await db.query('select id from conversations')).rows[0].id;
+async function incoming(key, category='Business', source='email', person=b) {
+  const thread=(await db.query(`insert into conversations(owner_id,person_id,source,title) values($1,$2,$3,'Synthetic learning test') returning id`,[owner,person,source])).rows[0].id;
+  return (await db.query(`insert into messages(owner_id,conversation_id,external_message_id,direction,source,body_text,sent_at,classification,importance_score,processed_at) values($1,$2,$3,'in',$4,'Synthetic test',now(),$5,8,now()) returning id,importance_score`,[owner,thread,key,source,category])).rows[0];
+}
+const second=await incoming('learning-second');
+assert.equal(Number(second.importance_score),8,'One example must not generalize');
+await db.query('select correct_priority_v3($1,2,$2)',[second.id,'Synthetic informational example']);
+await db.query('select correct_priority_v3($1,2,$2)',[second.id,'Updated reason, not a third example']);
+assert.equal(Number((await db.query('select count(*) n from priority_feedback')).rows[0].n),2);
+const learned=await incoming('learning-future');
+assert.equal(Number(learned.importance_score),6.5,'Two examples: 75% model + 25% corrected average');
+await db.query('update messages set body_text=$1 where id=$2',['Unrelated edit',learned.id]);
+assert.equal(Number((await db.query('select importance_score from messages where id=$1',[learned.id])).rows[0].importance_score),6.5,'No repeated weighting on unrelated updates');
+assert.equal(Number((await incoming('other-category','Legal')).importance_score),8);
+assert.equal(Number((await incoming('other-person','Business','email',a)).importance_score),8);
+assert.equal(Number((await incoming('other-source','Business','whatsapp')).importance_score),8);
+console.log('PASS: future learning, two-example threshold, distinct examples, category/person/source isolation, no cumulative weighting');
 await db.exec(`select set_config('request.jwt.claim.aal','aal1',false)`);
 await assert.rejects(db.query(`select merge_contacts_v3('${b}','${a}',false)`));
 await db.exec(`select set_config('request.jwt.claim.sub','${other}',false);select set_config('request.jwt.claim.aal','aal2',false)`);

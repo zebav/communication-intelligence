@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: "How Communication Intelligence handles personal data and connected communication accounts.",
 };
 
-const updated = "11 September 2026";
+const updated = "16 September 2026";
 
 export default function PrivacyPolicyPage() {
   return (
@@ -69,6 +69,11 @@ export default function PrivacyPolicyPage() {
             </p>
           </section>
 
+          <section>
+            <h2 className="text-xl font-semibold text-white">Calendar, maps and weather</h2>
+            <p className="mt-3">When you request a place search, route, map or weather forecast, the relevant search text, selected locations and travel time are sent to Google Maps Platform. Contact names and conversation bodies are not sent by these map and weather features. Maps are loaded only after you choose to display them. We store your own place descriptions and Google place IDs; provider place and weather responses are not persistently cached by this feature.</p>
+            <p className="mt-3">Google processes requests under its <a href="https://policies.google.com/privacy">Privacy Policy</a>. Use of map features is also subject to the <a href="https://maps.google.com/help/terms_maps/">Google Maps Additional Terms of Service</a>. Forecasts and travel times are estimates, not guarantees; they do not automatically change confirmed bookings.</p>
+          </section>
           <section>
             <h2 className="text-xl font-semibold text-white">Security and access</h2>
             <p className="mt-3">
