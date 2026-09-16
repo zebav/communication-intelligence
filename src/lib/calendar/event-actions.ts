@@ -30,6 +30,11 @@ async function checkMove(db:SupabaseClient,owner:string,start:string,end:string,
  return checked;
 }
 const freshRange=()=>({start:new Date(Date.now()-7*86400000).toISOString(),end:new Date(Date.now()+60*86400000).toISOString()});
+async function assertMoveContext(db:SupabaseClient,owner:string,sourceId:string,eventId:string) {
+ const {data,error}=await db.from("calendar_event_context").select("location_kind").eq("owner_id",owner).eq("source_id",sourceId).eq("event_id",eventId).maybeSingle();
+ if(error)throw new Error("Bokningens platskoppling kunde inte kontrolleras.");
+ if(data?.location_kind==="physical")throw new Error("Bokningen är kopplad till en fysisk plats. Resan måste planeras före flytt.");
+}
 export async function prepareEventAction(db:SupabaseClient,owner:string,input:EventActionRequest) {
  if(input.kind==="rename"&&!input.newTitle)throw new Error("Ange den nya rubriken.");
  const c=await context(db,owner,input.sourceId,input.eventId);
@@ -39,6 +44,7 @@ export async function prepareEventAction(db:SupabaseClient,owner:string,input:Ev
  const before=normalizeGoogleEvent(event,c.source.external_id,c.source.timezone);
  let holdId:string|null=null;
  if(input.kind==="move") {
+  await assertMoveContext(db,owner,input.sourceId,input.eventId);
   if(!input.targetStart||!input.targetEnd||!input.noTravelRequired)throw new Error("Välj ny tid och bekräfta att ingen resa krävs.");
   if(before.allDay||before.location?.trim())throw new Error("Heldagar och bokningar med plats behöver ett separat rese- och tidsunderlag innan de kan flyttas.");
   await syncCalendar(db,owner,c.source.id,freshRange());
@@ -73,6 +79,7 @@ export async function executeEventAction(db:SupabaseClient,owner:string,planId:s
   }
   const event=validateEditableEvent(raw);
   if(plan.kind==="move") {
+   await assertMoveContext(db,owner,plan.source_id,plan.event_id);
    await syncCalendar(db,owner,c.source.id,freshRange());
    await checkMove(db,owner,plan.target_start,plan.target_end,plan.hold_id);
   }

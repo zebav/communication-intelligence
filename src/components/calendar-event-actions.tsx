@@ -2,6 +2,7 @@
 import {useEffect,useState} from "react";
 import type {CalendarEvent} from "@/lib/calendar/types";
 import type {SchedulingCandidate} from "@/lib/calendar/scheduling";
+import {CalendarEventContext} from "./calendar-event-context";
 type Plan={id:string;kind:"rename"|"cancel"|"move";status:string;new_title:string|null;target_start:string|null;target_end:string|null;expires_at:string;before_event:{title:string;start:string;end:string;timezone:string}};
 export function CalendarEventActions({sourceId,event,onDone,onClose}:{sourceId:string;event:CalendarEvent;onDone:()=>Promise<void>;onClose:()=>void}) {
  const [kind,setKind]=useState<Plan["kind"]>("rename"),[title,setTitle]=useState(event.title),[plan,setPlan]=useState<Plan|null>(null);
@@ -29,6 +30,7 @@ export function CalendarEventActions({sourceId,event,onDone,onClose}:{sourceId:s
  return <section className="calendar-panel calendar-approval" aria-label="Ändra masterbokning">
   <div className="calendar-actions"><h2>Hantera masterbokning</h2><button className="btn" disabled={busy} onClick={onClose}>Stäng</button></div><h3>{event.title}</h3>
   <p>{fmt(event.start)} – {fmt(event.end)} · {event.timezone}</p>
+  <CalendarEventContext key={`${sourceId}:${event.id}`} sourceId={sourceId} eventId={event.id}/>
   <p>Ändra rubrik, flytta eller avboka en enstaka bokning utan deltagare. Original i andra kalendrar ändras inte.</p>
   {error&&<p role="alert" className="calendar-notice error">{error}</p>}{notice&&<p role="status">{notice}</p>}
   {!completed&&!plan&&saved.length>0&&<div><h3>Sparade åtgärder att granska</h3>{saved.map(p=><button className="btn" key={p.id} disabled={busy} onClick={()=>{setPlan(p);setKind(p.kind);}}>{p.status==="executing"?"Kontrollera tidigare försök":p.kind==="move"?"Granska sparad flytt":"Granska sparad ändring"}</button>)}</div>}

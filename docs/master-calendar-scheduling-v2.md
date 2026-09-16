@@ -1,6 +1,6 @@
 # Master Calendar & Scheduling Intelligence V2
 
-Status: **in progress, local branch only; not ready for acceptance/deployment**.
+Status: **integrated development candidate; not ready for production or full user acceptance**.
 Branch: `phase/master-calendar-scheduling-v2`, based on calendar foundation PR #51.
 Do not merge into main before the foundation and the remaining release gates below are satisfied.
 
@@ -45,6 +45,17 @@ The list below describes remaining acceptance gates; parts noted above have loca
 7. Full local API + UI tests with provider failure/timeout scenarios, then one coherent preview. Do not ask user to test paid Maps features before configuration is complete.
 
 ## Activation prerequisites (do not activate automatically)
+
+### Maps decision and verification — 2026-09-16
+
+- User approved shipping this candidate with the interactive map disabled. Keep `CALENDAR_BROWSER_MAPS_ENABLED` unset/false independently of `CALENDAR_MAPS_ENABLED`.
+- Google Cloud displayed Maps JavaScript daily loads as unlimited/non-adjustable. The browser key is website/API restricted, but our server counter alone is not a hard billing cap for a public browser key. Do not present the approximately SEK 100/month target as guaranteed.
+- Server and separate browser key names were verified in Vercel Preview and Production; no redeploy or paid request was made during this verification.
+- New contact/place context links existing master bookings to owned contacts and optional conversation IDs, with revision conflict protection. Contact cards show linked calendar entries. No invitations are sent.
+- `20260915232306_calendar_contact_places.sql` and `20260915235716_calendar_maps_budget.sql` are required along with preceding V2 migrations. All remain unapplied to the live project.
+- Shared service-only budget reservations reject failed/missing counters, include failed provider calls, and serialize preview/production usage. Estimated server-side ceilings are USD 5/month and USD 1/day with 20 requests/minute. These are application controls, not Google account-wide billing limits.
+- Weather and interactive map are implemented for selected planning places; weather advice never changes bookings. Routes/Weather API activation, live provider checks, scheduler installation and remaining acceptance gates are still outstanding.
+- Verification: 90 calendar tests passed; PGlite security, ownership, revisions and budget tests passed; scoped ESLint and Next webpack build passed. No real calendar writes were performed.
 
 - Apply `20260915223834_calendar_scheduling_v2.sql` only with the coherent V2 release.
 - Google Maps billing/API activation requires user's explicit cost approval.

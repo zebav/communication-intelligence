@@ -11,31 +11,34 @@ export type RouteEstimate = {
   status: "ESTIMATED"; minutes: number; distanceMeters: number; checkedAt: string;
   departureTime: string; originPlaceId: string; destinationPlaceId: string; mode: RouteRequest["mode"];
 };
-export type PlaceCandidate = { id: string; name: string; address: string; mapsUrl: string };
+export type PlaceCandidate = { id: string; name: string; address: string; mapsUrl: string; location?:{latitude:number;longitude:number} };
 export interface PlaceService { search(query: string): Promise<PlaceCandidate[]> }
 export interface RouteService { estimate(request: RouteRequest): Promise<RouteEstimate> }
 
 /** Constructed only on the server; no API key, raw response or provider error goes to clients. */
 export class GooglePlacesRoutes implements PlaceService, RouteService {
-  constructor(private readonly key: string, private readonly transport: typeof fetch = fetch) {
+  constructor(private readonly key: string, private readonly transport: typeof fetch = fetch,
+    private readonly reserve: (kind:"places"|"route")=>Promise<void> = async()=>{}) {
     if (!key.trim()) throw new Error("Plats- och restidstjänsten är inte konfigurerad.");
   }
   async search(query: string): Promise<PlaceCandidate[]> {
     const textQuery = z.string().trim().min(3).max(300).parse(query);
+    await this.reserve("places");
     const response = await this.transport("https://places.googleapis.com/v1/places:searchText", {
       method: "POST", cache: "no-store", signal: AbortSignal.timeout(10000),
       headers: { "Content-Type": "application/json", "X-Goog-Api-Key": this.key,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.googleMapsUri" },
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.location" },
       body: JSON.stringify({ textQuery, languageCode: "sv", pageSize: 5 }),
     });
     if (!response.ok) throw new Error("Platssökningen kunde inte genomföras. Ingen plats har valts.");
     const page = z.object({ places: z.array(z.object({ id:z.string(),displayName:z.object({text:z.string()}),
-      formattedAddress:z.string(),googleMapsUri:z.string().url() })).default([]) }).parse(await response.json());
-    return page.places.map(p => ({ id:p.id,name:p.displayName.text,address:p.formattedAddress,mapsUrl:p.googleMapsUri }));
+      formattedAddress:z.string(),googleMapsUri:z.string().url(),location:z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180)}).optional() })).default([]) }).parse(await response.json());
+    return page.places.map(p => ({ id:p.id,name:p.displayName.text,address:p.formattedAddress,mapsUrl:p.googleMapsUri,location:p.location }));
   }
   async estimate(raw: RouteRequest): Promise<RouteEstimate> {
     const request = routeRequestSchema.parse(raw);
     if (Date.parse(request.departureTime) <= Date.now()) throw new Error("Välj en framtida avresetid.");
+    await this.reserve("route");
     const response = await this.transport("https://routes.googleapis.com/directions/v2:computeRoutes", {
       method: "POST", cache: "no-store", signal: AbortSignal.timeout(10000),
       headers: { "Content-Type":"application/json", "X-Goog-Api-Key":this.key,"X-Goog-FieldMask":"routes.duration,routes.distanceMeters" },
