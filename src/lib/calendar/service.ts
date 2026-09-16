@@ -126,4 +126,7 @@ export async function confirmHold(db:SupabaseClient,owner:string,holdId:string) 
   if(!response.ok) throw new Error("Bokningsresultatet är osäkert. Tryck kontrollera igen; ingen ny bokning skapas.");
   const {error:save}=await db.from("calendar_holds").update({status:"confirmed"}).eq("id",h.id).eq("owner_id",owner);
   if(save) throw new Error("Bokningen finns hos Google men status kunde inte sparas. Kontrollera igen.");
+  // A successful creation must not be reported as a failed booking if refresh fails.
+  try {await syncCalendar(db,owner,master.id,{start:master.window_start,end:master.window_end});}
+  catch {return {warning:"Bokningen är skapad. Kalendervyn kunde inte uppdateras ännu; synkronisera för att visa den."};}
 }

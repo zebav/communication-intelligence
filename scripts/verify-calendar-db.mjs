@@ -18,6 +18,8 @@ await db.exec(readFileSync('supabase/migrations/20260915225904_calendar_intent_p
 await db.exec(readFileSync('supabase/migrations/20260915230729_calendar_move_plans.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260915232306_calendar_contact_places.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260915235716_calendar_maps_budget.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260916003135_calendar_lifecycle_completion.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260916003503_calendar_scheduler_dispatch.sql','utf8'));
 const owner='00000000-0000-0000-0000-000000000001',other='00000000-0000-0000-0000-000000000002';
 await db.exec(`insert into auth.users values('${owner}'),('${other}');set role authenticated;select set_config('request.jwt.claim.sub','${owner}',false);select set_config('request.jwt.claim.aal','aal2',false);`);
 await db.query('insert into calendar_workspace(owner_id) values($1)',[owner]);
@@ -78,7 +80,8 @@ assert.equal((await db.query('select * from claim_calendar_sync()')).rows.length
 await db.query("update calendar_sync_jobs set next_run_at=now()-interval '1 minute' where account_id=$1",[account]);
 const retry=(await db.query('select * from claim_calendar_sync()')).rows[0];
 await db.query('update calendar_sources set synced_at=now() where id=$1',[external]);
-assert.equal((await finish(retry.lease_token,true)).rows[0].ok,true);
+assert.equal((await finish(retry.lease_token,true)).rows[0].ok,false);
+assert.equal((await db.query('select last_success_at from calendar_sync_jobs where account_id=$1',[account])).rows[0].last_success_at,null);
 assert.deepEqual((await db.query('select snapshot from calendar_sources where id=$1',[external])).rows[0].snapshot,before);
 await db.exec(`set role authenticated;select set_config('request.jwt.claim.sub','${owner}',false);select set_config('request.jwt.claim.aal','aal2',false);`);
 await assert.rejects(db.query('select * from claim_calendar_sync()'));
@@ -106,6 +109,8 @@ console.log('PASS: action approval transitions, immutable facts, master-only wri
 await db.exec(`select set_config('request.jwt.claim.sub','${owner}',false)`);
 await db.query("update calendar_sources set synced_at=now(),sync_error=null,reviewed_snapshot=snapshot where owner_id=$1",[owner]);
 const moveHold=(await db.query(`insert into calendar_holds(owner_id,purpose,title,starts_at,ends_at) values($1,'move','Move test',now()+interval '2 days',now()+interval '2 days 1 hour') returning *`,[owner])).rows[0];
+const originalHold=(await db.query(`insert into calendar_holds(owner_id,title,starts_at,ends_at) values($1,'Original booking',now()+interval '5 days',now()+interval '5 days 1 hour') returning id`,[owner])).rows[0].id;
+await db.query("update calendar_holds set status='confirmed',external_event_id='move-event' where id=$1",[originalHold]);
 const move=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event,hold_id,target_start,target_end) values($1,$2,'move-event','move','v1','{}',$3,$4,$5) returning id`,[owner,source,moveHold.id,moveHold.starts_at,moveHold.ends_at])).rows[0].id;
 await assert.rejects(db.query("update calendar_event_actions set target_start=target_start+interval '5 minutes' where id=$1",[move]),/Move facts/);
 await assert.rejects(db.query("update calendar_holds set purpose='booking' where id=$1",[moveHold.id]),/purpose cannot change/);
@@ -114,6 +119,11 @@ assert.equal((await db.query('select status from calendar_holds where id=$1',[mo
 await assert.rejects(db.query(`insert into calendar_holds(owner_id,title,starts_at,ends_at) values($1,'conflict',$2,$3)`,[owner,moveHold.starts_at,moveHold.ends_at]),/Reservation conflict/);
 await db.query("update calendar_event_actions set status='completed',completed_at=now() where id=$1",[move]);
 assert.equal((await db.query('select external_event_id from calendar_holds where id=$1',[moveHold.id])).rows[0].external_event_id,'move-event');
+assert.equal((await db.query('select status from calendar_holds where id=$1',[originalHold])).rows[0].status,'released');
+const cancellation=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event) values($1,$2,'move-event','cancel','v2','{}') returning id`,[owner,source])).rows[0].id;
+await db.query("update calendar_event_actions set status='executing',approved_at=now() where id=$1",[cancellation]);
+await db.query("update calendar_event_actions set status='completed',completed_at=now() where id=$1",[cancellation]);
+assert.equal((await db.query('select status from calendar_holds where id=$1',[moveHold.id])).rows[0].status,'released');
 const declinedHold=(await db.query(`insert into calendar_holds(owner_id,purpose,title,starts_at,ends_at) values($1,'move','Declined move',now()+interval '3 days',now()+interval '3 days 1 hour') returning *`,[owner])).rows[0];
 const declined=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event,hold_id,target_start,target_end) values($1,$2,'declined-event','move','v1','{}',$3,$4,$5) returning id`,[owner,source,declinedHold.id,declinedHold.starts_at,declinedHold.ends_at])).rows[0].id;
 await db.query("update calendar_event_actions set status='stale' where id=$1",[declined]);
@@ -142,4 +152,14 @@ await db.query("update calendar_maps_usage set requests=0 where period like 'min
 await db.query("update calendar_maps_usage set reserved_units=49999 where period like 'month:%'");
 assert.equal((await db.query("select reserve_calendar_maps('weather') as ok")).rows[0].ok,false);
 console.log('PASS: context owner isolation, contact/conversation guards, revision CAS and Maps service-only budget/minute limits');
+await db.exec('reset role');
+const dispatchToken='a'.repeat(64);
+await db.query("insert into calendar_private.dispatch_tokens values(sha256(convert_to($1,'UTF8')),now()+interval '2 minutes')",[dispatchToken]);
+await db.exec('set role authenticated');
+await assert.rejects(db.query('select consume_calendar_dispatch($1)',[dispatchToken]));
+await db.exec('set role service_role');
+assert.equal((await db.query('select consume_calendar_dispatch($1) as ok',['b'.repeat(64)])).rows[0].ok,false);
+assert.equal((await db.query('select consume_calendar_dispatch($1) as ok',[dispatchToken])).rows[0].ok,true);
+assert.equal((await db.query('select consume_calendar_dispatch($1) as ok',[dispatchToken])).rows[0].ok,false);
+console.log('PASS: scheduler credentials are service-only, single-use and reject unknown tokens');
 await db.close();

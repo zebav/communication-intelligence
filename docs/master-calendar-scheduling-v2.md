@@ -6,6 +6,17 @@ Do not merge into main before the foundation and the remaining release gates bel
 
 ## Live installation checkpoint — 2026-09-16
 
+### Booking lifecycle and scheduler follow-up
+
+- Owner approved production publication after passing checks, without creating real bookings or attesting reconciliation.
+- Added atomic release of obsolete confirmed holds after approved moves/cancellations, preserving history. Verified in PGlite.
+- Fenced sync publication now returns `false` when a newer manual sync wins and does not claim a successful background update.
+- Installed `calendar_lifecycle_completion` and `calendar_scheduler_dispatch` in the shared database. Single-use scheduler tokens are short-lived, service-only, and stored hashed in a private schema.
+- `scripts/calendar-scheduler-install.sql` prepares a paused Supabase Cron → HTTPS worker schedule. It must be activated only after the production route is available and a live dispatch succeeds. No scheduler has been activated at this checkpoint.
+- Calendar UI reports per-account actual background success/error, rather than treating an enabled flag as proof of health.
+- New private bookings refresh the master snapshot after creation; refresh failure is a warning, not an invitation to create a duplicate.
+- Physical bookings and invitations remain excluded; Maps remain disabled. The wider V2 acceptance list below is not claimed complete by these fixes.
+
 - Draft PR #52, commit `921d9cc`, deployed successfully to `https://communication-intelligence-exmkfxdyf-ci20.vercel.app`.
 - All seven V2 migrations below are now installed in the shared Supabase project. Earlier local-only migration notes describe prior checkpoints, not the current installation state.
 - Verified live owner + MFA policies, RLS on all calendar tables, no anonymous table reads, and server-only budget function access. The budget table deliberately has no client RLS policies or client grants.

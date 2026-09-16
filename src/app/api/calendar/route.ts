@@ -29,7 +29,8 @@ export async function GET() {
    db.from("calendar_holds").select("*").eq("owner_id",owner).gte("ends_at",new Date(Date.now()-86400000).toISOString()).order("starts_at").limit(300),
   ]);
   if(results.some(r=>r.error)) return NextResponse.json({error:"Kalenderns databas är inte tillgänglig ännu. Befintliga mejl och kontakter påverkas inte."},{status:503});
-  return NextResponse.json({accounts:results[0].data,sources:results[1].data,workspace:results[2].data,holds:results[3].data},{headers:{"Cache-Control":"no-store"}});
+  const jobs=await db.from("calendar_sync_jobs").select("account_id,last_attempt_at,last_success_at,last_error,next_run_at").eq("owner_id",owner);
+  return NextResponse.json({accounts:results[0].data,sources:results[1].data,workspace:results[2].data,holds:results[3].data,syncJobs:jobs.error?null:jobs.data},{headers:{"Cache-Control":"no-store"}});
  }catch{return NextResponse.json({error:"Logga in med tvåfaktor för att öppna kalendern."},{status:401});}
 }
 export async function POST(request:Request) {
@@ -76,7 +77,10 @@ export async function POST(request:Request) {
    const {error}=await db.from("calendar_holds").update({status:"released"}).eq("owner_id",owner).eq("id",a.holdId).eq("status","active");
    if(error) throw new Error("Reservationen kunde inte släppas.");
   }
-  if(a.action==="confirm") await confirmHold(db,owner,a.holdId);
+  if(a.action==="confirm") {
+   const result=await confirmHold(db,owner,a.holdId);
+   return NextResponse.json({success:true,...result});
+  }
   return NextResponse.json({success:true});
  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Kalenderåtgärden misslyckades."},{status:409});}
 }

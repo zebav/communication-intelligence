@@ -17,9 +17,9 @@ afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
 describe("calendar execution safety",()=>{
  it("checks fresh events, claims the hold, and creates only the approved private event",async()=>{
   vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY","test");
-  const fetcher=vi.fn().mockResolvedValueOnce(new Response("",{status:404})).mockResolvedValueOnce(Response.json({items:[]})).mockResolvedValueOnce(Response.json({id:"created"}));
+  const fetcher=vi.fn().mockResolvedValueOnce(new Response("",{status:404})).mockResolvedValueOnce(Response.json({items:[]})).mockResolvedValueOnce(Response.json({id:"created"})).mockResolvedValueOnce(Response.json({items:[]}));
   vi.stubGlobal("fetch",fetcher);const {db,writes}=fakeDb();await confirmHold(db,owner,hold.id);
-  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher).toHaveBeenCalledTimes(4);
   const [url,options]=fetcher.mock.calls[2];expect(url).toContain("sendUpdates=none");
   const body=JSON.parse(options.body);expect(body.start.dateTime).toBe(hold.starts_at);expect(body.attendees).toBeUndefined();expect(body.extendedProperties.private.holdId).toBe(hold.id);
   expect(writes.filter(w=>w.table==="calendar_holds").map(w=>w.status)).toEqual(["executing","confirmed"]);
