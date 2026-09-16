@@ -3,11 +3,11 @@ import {confirmHold,createMaster} from "./service";
 import type {SupabaseClient} from "@supabase/supabase-js";
 vi.mock("../connectors/credential-crypto",()=>({decryptCredential:()=>({accessToken:"test-token",refreshToken:"test-refresh",expiresAt:"2099-01-01T00:00:00Z"}),encryptCredential:()=>"encrypted"}));
 const owner="owner",hold={id:"00000000-0000-0000-0000-000000000001",owner_id:owner,status:"active",starts_at:"2026-10-01T10:00:00Z",ends_at:"2026-10-01T11:00:00Z",title:"Test",preparation_minutes:10,recovery_minutes:10};
-function fakeDb(status="active",provisioning="idle") {
+function fakeDb(status="active",provisioning="idle",details:Record<string,unknown>|null=null) {
  const writes:Record<string,unknown>[]=[];
  const db={from:(table:string)=>{
   let write:Record<string,unknown>|undefined;
-  const result=()=>({data:table==="calendar_holds"?{...hold,status}:table==="calendar_sources"?{id:"master",is_master:true,account_id:"account",external_id:"google-master",timezone:"UTC",window_start:"2026-09-30T00:00:00Z",window_end:"2026-10-03T00:00:00Z"}:table==="calendar_accounts"?{id:"account",provider:"google",encrypted_credentials:"cipher"}:provisioning==="idle"?{owner_id:owner}:null,error:null});
+  const result=()=>({data:table==="calendar_holds"?{...hold,status,meeting_details:details}:table==="calendar_sources"?{id:"master",is_master:true,account_id:"account",external_id:"google-master",timezone:"UTC",window_start:"2026-09-30T00:00:00Z",window_end:"2026-10-03T00:00:00Z"}:table==="calendar_accounts"?{id:"account",provider:"google",encrypted_credentials:"cipher"}:provisioning==="idle"?{owner_id:owner}:null,error:null});
   const q={select:()=>q,eq:()=>q,is:()=>q,gt:()=>q,gte:()=>q,lte:()=>q,update:(value:Record<string,unknown>)=>{write=value;writes.push({table,...value});return q;},insert:(value:Record<string,unknown>)=>{write=value;writes.push({table,...value});return q;},single:async()=>result(),maybeSingle:async()=>result(),then:(resolve:(x:unknown)=>unknown)=>Promise.resolve({data:write??[],error:null}).then(resolve)};
   return q;
  }};
@@ -15,6 +15,14 @@ function fakeDb(status="active",provisioning="idle") {
 }
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
 describe("calendar execution safety",()=>{
+ it("does not contact Google without explicit guest approval",async()=>{
+  const fetcher=vi.fn();vi.stubGlobal("fetch",fetcher);await expect(confirmHold(fakeDb("active","idle",{attendees:["a@example.com"]}).db,owner,hold.id)).rejects.toThrow("godkänn");expect(fetcher).not.toHaveBeenCalled();
+ });
+ it("sends only approved guest details when creating a meeting",async()=>{
+  vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY","test");const fetcher=vi.fn().mockResolvedValueOnce(new Response("",{status:404})).mockResolvedValueOnce(Response.json({items:[]})).mockResolvedValueOnce(Response.json({id:"created"})).mockResolvedValueOnce(Response.json({items:[]}));vi.stubGlobal("fetch",fetcher);
+  await confirmHold(fakeDb("active","idle",{attendees:["a@example.com"],description:"Agenda"}).db,owner,hold.id,{approvedInvitations:true});
+  expect(fetcher.mock.calls[2][0]).toContain("sendUpdates=all");expect(JSON.parse(fetcher.mock.calls[2][1].body).attendees).toEqual([{email:"a@example.com"}]);
+ });
  it("checks fresh events, claims the hold, and creates only the approved private event",async()=>{
   vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY","test");
   const fetcher=vi.fn().mockResolvedValueOnce(new Response("",{status:404})).mockResolvedValueOnce(Response.json({items:[]})).mockResolvedValueOnce(Response.json({id:"created"})).mockResolvedValueOnce(Response.json({items:[]}));

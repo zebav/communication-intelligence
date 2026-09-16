@@ -8,6 +8,10 @@ const input = {
   preferences: { durationMinutes: 60, preparationMinutes: 15, recoveryMinutes: 15, stepMinutes: 15, timezone: "Europe/Stockholm" },
 };
 describe("master scheduling", () => {
+  it("validates an exact typed time without rounding to the suggestion grid",()=>{
+    expect(suggestSlots({...input,requestedStart:"2026-10-01T09:17:00Z"}).map(s=>s.start)).toEqual(["2026-10-01T09:17:00.000Z"]);
+    expect(suggestSlots({...input,requestedStart:"2026-10-01T07:59:00Z"})).toEqual([]);
+  });
   it("preserves offsets and fits distinct buffers inside the window", () => {
     const result = suggestSlots(input);
     expect(result[0].start).toBe("2026-10-01T08:15:00.000Z");

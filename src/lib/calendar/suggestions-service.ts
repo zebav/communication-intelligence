@@ -3,7 +3,7 @@ import { defaultPlanningPreferences, planningPreferencesSchema, planningWindow }
 import { suggestSlots } from "./scheduling";
 import type { CalendarEvent, CalendarHold } from "./types";
 
-export async function calendarSuggestions(db:SupabaseClient,owner:string,input:{date:string;duration:number;preparation:number;recovery:number;physical:boolean},excludeHoldId?:string) {
+export async function calendarSuggestions(db:SupabaseClient,owner:string,input:{date:string;duration:number;preparation:number;recovery:number;physical:boolean;requestedStart?:string},excludeHoldId?:string) {
   const [settings,sources,holds,rules] = await Promise.all([
     db.from("calendar_workspace").select("timezone").eq("owner_id",owner).single(),
     db.from("calendar_sources").select("*").eq("owner_id",owner).eq("enabled",true),
@@ -23,6 +23,6 @@ export async function calendarSuggestions(db:SupabaseClient,owner:string,input:{
       end:new Date(Date.parse(h.ends_at)+h.recovery_minutes*60000).toISOString(),expiresAt:h.status==="active"?h.expires_at:"9999-01-01T00:00:00Z",status:"active",conversationId:h.conversation_id??""})) as CalendarHold[],
     preferences:{durationMinutes:input.duration,preparationMinutes:Math.max(input.preparation,p.preparationMinutes),recoveryMinutes:Math.max(input.recovery,p.recoveryMinutes),stepMinutes:30,timezone},
     physical:input.physical,reconciled:sources.data.filter(s=>!s.is_master).every(s=>JSON.stringify(s.snapshot)===JSON.stringify(s.reviewed_snapshot)),syncFresh,now,
-    minimumNoticeMinutes:p.minimumNoticeMinutes,maximumMeetingMinutesPerDay:p.maximumMeetingMinutesPerDay});
+    minimumNoticeMinutes:p.minimumNoticeMinutes,maximumMeetingMinutesPerDay:p.maximumMeetingMinutesPerDay,requestedStart:input.requestedStart});
   return {slots,timezone,preparation:Math.max(input.preparation,p.preparationMinutes),recovery:Math.max(input.recovery,p.recoveryMinutes)};
 }

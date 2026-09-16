@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from "react";
 import type {CalendarEvent} from "@/lib/calendar/types";
 import type {DisplayCalendar} from "@/lib/calendar/display";
 const shift=(date:string,days:number)=>new Date(Date.parse(date)+days*86400000).toISOString().slice(0,10);
-export function CalendarBoard({events,calendars,date,onDate,timezone}:{events:CalendarEvent[];calendars:DisplayCalendar[];date:string;onDate:(date:string)=>void;timezone:string}) {
+export function CalendarBoard({events,calendars,date,onDate,timezone,onEdit}:{events:CalendarEvent[];calendars:DisplayCalendar[];date:string;onDate:(date:string)=>void;timezone:string;onEdit?:(event:CalendarEvent)=>void}) {
  const [hidden,setHidden]=useState<string[]>([]);
  const source=(event:CalendarEvent)=>calendars.find(c=>c.id===event.calendarId);
  const color=(event:CalendarEvent)=>({borderColor:source(event)?.color,borderLeftWidth:4});
@@ -44,6 +44,6 @@ export function CalendarBoard({events,calendars,date,onDate,timezone}:{events:Ca
    })}</div>)}
   </div>}
   </div><p className="muted">Tomma rutor visar inga inlästa bokningar – ledig tid bekräftas först efter synkronisering och konfliktkontroll.</p>
-  {selected&&<div className="calendar-notice" role="region" aria-label="Bokningsdetaljer"><button className="btn" onClick={()=>setSelected(null)}>Stäng detaljer</button><h3>{selected.title}</h3><p>{source(selected)?.label}</p><strong>{selected.calendarId==="holds"?"Preliminär reservation":source(selected)?.master?"Masterbokning":"Extern bokning – inte överförd till masterkalendern"}</strong><p>{localDay(selected.start)} · {selected.allDay?'Heldag':`${time(selected.start)}–${time(selected.end)}`}</p>{selected.location&&<p>{selected.location}</p>}<small>{selected.status==='tentative'?'Preliminär reservation':'Bokning'}</small></div>}
+  {selected&&<div className="calendar-notice" role="region" aria-label="Bokningsdetaljer"><button className="btn" onClick={()=>setSelected(null)}>Stäng detaljer</button><h3>{selected.title}</h3><p>{source(selected)?.label}</p><strong>{selected.calendarId==="holds"?"Reserverad tid":source(selected)?.master?"Masterbokning":"Extern bokning – inte överförd till masterkalendern"}</strong><p>{localDay(selected.start)} · {selected.allDay?'Heldag':`${time(selected.start)}–${time(selected.end)}`}</p>{selected.location&&<p>{selected.location}</p>}{selected.description&&<p style={{whiteSpace:"pre-wrap"}}>{selected.description}</p>}{source(selected)?.master&&selected.calendarId!=="holds"&&onEdit?<button className="btn primary" onClick={()=>{onEdit(selected);setSelected(null);}}>Redigera mötet</button>:selected.calendarId!=="holds"&&<p>Originalet är skrivskyddat här. För över åtagandet till masterkalendern för att hantera din egen bokning; originalets deltagare påverkas inte.</p>}</div>}
  </section>;
 }

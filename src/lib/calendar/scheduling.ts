@@ -20,6 +20,7 @@ export function suggestSlots(input: {
   preferences: SchedulingPreferences; physical: boolean;
   reconciled: boolean; syncFresh: boolean; now: string;
   minimumNoticeMinutes?: number; maximumMeetingMinutesPerDay?: number;
+  requestedStart?:string;
 }): SchedulingCandidate[] {
   const p = input.preferences;
   new Intl.DateTimeFormat("en", { timeZone: p.timezone }).format();
@@ -42,8 +43,10 @@ export function suggestSlots(input: {
     const range = interval(window);
     if (occupiedMinutes(busy.map(b => ({start:new Date(b.start).toISOString(),end:new Date(b.end).toISOString()})), window) + p.durationMinutes > maximum) continue;
     const anchor=range.start+p.preparationMinutes*minute;
-    const first=anchor+Math.max(0,Math.ceil((now+(notice+p.preparationMinutes)*minute-anchor)/(p.stepMinutes*minute)))*p.stepMinutes*minute;
+    const first=input.requestedStart?instant(input.requestedStart):anchor+Math.max(0,Math.ceil((now+(notice+p.preparationMinutes)*minute-anchor)/(p.stepMinutes*minute)))*p.stepMinutes*minute;
+    if(first<anchor||first<now+(notice+p.preparationMinutes)*minute)continue;
     for (let start = first; start + (p.durationMinutes + p.recoveryMinutes) * minute <= range.end; start += p.stepMinutes * minute) {
+      if(input.requestedStart&&start!==first)break;
       if (++iterations > 10000) throw new Error("Scheduling range too large");
       const end = start + p.durationMinutes * minute;
       if (seen.has(start) || busy.some(b => start - p.preparationMinutes * minute < b.end && end + p.recoveryMinutes * minute > b.start)) continue;
