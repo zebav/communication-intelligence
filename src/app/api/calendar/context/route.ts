@@ -22,7 +22,13 @@ export async function GET(request:Request) {
   if(search!==null){
    const query=z.string().trim().min(2).max(100).parse(search).replace(/[\\%_]/g,"\\$&");
    const {data,error}=await db.from("people").select("id,display_name,organization").eq("owner_id",owner).ilike("display_name",`%${query}%`).order("display_name").limit(25);
-   if(error)throw error;return NextResponse.json({people:data},{headers:noStore});
+   if(error)throw error;
+   if(params.get("includeEmails")==="true"&&data.length){
+    const identities=await db.from("identities").select("person_id,external_identifier").eq("owner_id",owner).eq("source","email").in("person_id",data.map(p=>p.id));
+    if(identities.error)throw identities.error;
+    return NextResponse.json({people:data.map(p=>({...p,emails:[...new Set(identities.data.filter(i=>i.person_id===p.id&&z.string().email().safeParse(i.external_identifier).success).map(i=>i.external_identifier.toLowerCase()))]}))},{headers:noStore});
+   }
+   return NextResponse.json({people:data},{headers:noStore});
   }
   const source=z.string().uuid().parse(params.get("sourceId")),event=z.string().min(1).max(2000).parse(params.get("eventId"));
   const {data,error}=await db.from("calendar_event_context").select("*").eq("owner_id",owner).eq("source_id",source).eq("event_id",event).maybeSingle();

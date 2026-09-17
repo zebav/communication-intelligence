@@ -6,9 +6,12 @@ export const recipientsSchema=z.array(z.string().trim().email().max(254).transfo
 export const meetingDetailsSchema=z.object({
  description:z.string().trim().max(8000).default(""),
  attendees:recipientsSchema.default([]),
+ personIds:z.array(z.string().uuid()).max(30).transform(v=>[...new Set(v)]).default([]),
+ googlePlaceId:z.string().trim().min(1).max(300).nullable().default(null),
  locationLabel:z.string().trim().max(500).default(""),
  travel:travelPlanRequest.nullable().default(null),
-}).strict().refine(d=>!d.travel||d.locationLabel.length>0,"Ange platsen som mottagarna ska se.");
+}).strict().refine(d=>!d.travel||d.locationLabel.length>0,"Ange platsen som mottagarna ska se.")
+ .refine(d=>!d.travel||!d.googlePlaceId||d.googlePlaceId===d.travel.meetingPlaceId,"Resan måste gälla den valda mötesplatsen.");
 export type MeetingDetails=z.infer<typeof meetingDetailsSchema>;
 export function travelReservation(details:MeetingDetails,start:string,end:string) {
  if(!details.travel)return null;

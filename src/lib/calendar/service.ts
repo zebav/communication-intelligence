@@ -111,6 +111,17 @@ export async function confirmHold(db:SupabaseClient,owner:string,holdId:string,o
   if(!master) throw new Error("Masterkalender saknas.");
   const {token}=await calendarToken(db,owner,master.account_id);
   const eventId="ci"+h.id.replaceAll("-","");
+  const saveContext=async()=>{
+    if(!details||(!details.personIds.length&&!details.googlePlaceId&&!details.locationLabel))return;
+    const current=await db.from("calendar_event_context").select("id").eq("owner_id",owner).eq("source_id",master.id).eq("event_id",eventId).maybeSingle();
+    if(current.error)throw new Error("Mötet finns hos Google men kopplingarna kunde inte kontrolleras. Kontrollera samma reservation igen.");
+    if(current.data)return;
+    // The context guard requires the event to be present in the owned source snapshot.
+    await syncCalendar(db,owner,master.id,{start:master.window_start,end:master.window_end});
+    // Insert once: retries must never overwrite edits made in the event card.
+    const {error}=await db.from("calendar_event_context").upsert({owner_id:owner,source_id:master.id,event_id:eventId,person_ids:details.personIds,conversation_id:h.conversation_id,location_kind:details.googlePlaceId||details.locationLabel?"physical":"unknown",google_place_id:details.googlePlaceId,user_place_label:details.locationLabel,meeting_url:"",revision:1},{onConflict:"owner_id,source_id,event_id",ignoreDuplicates:true});
+    if(error)throw new Error("Mötet finns hos Google, men kontakt- och platskopplingarna kunde inte sparas. Kontrollera samma reservation igen; inga nya inbjudningar skickas.");
+  };
   const endpoint=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(master.external_id)}/events`;
   // Unknown outcomes can only be retried with the same deterministic event ID.
   const lookup=await fetch(endpoint+"/"+eventId,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(15000)});
@@ -118,6 +129,7 @@ export async function confirmHold(db:SupabaseClient,owner:string,holdId:string,o
     const existing=await lookup.json();
     if(existing.extendedProperties?.private?.holdId!==h.id || existing.status==="cancelled" || Date.parse(existing.start?.dateTime)!==Date.parse(h.starts_at) || Date.parse(existing.end?.dateTime)!==Date.parse(h.ends_at)) throw new Error("Bokningen har ändrats och behöver kontrolleras manuellt.");
     if(details&&(!sameRecipients(existing.attendees,details.attendees)||(existing.location??"")!==details.locationLabel))throw new Error("Mottagare eller plats har ändrats hos Google. Kontrollera bokningen manuellt.");
+    await saveContext();
     const {error:save}=await db.from("calendar_holds").update({status:"confirmed",external_event_id:eventId}).eq("id",h.id).eq("owner_id",owner);
     if(save) throw new Error("Bokningen finns hos Google men status kunde inte sparas.");
     return;
@@ -136,6 +148,7 @@ export async function confirmHold(db:SupabaseClient,owner:string,holdId:string,o
   if(claim||!claimed) throw new Error("Tiden kunde inte godkännas. Synkronisera och kontrollera konflikter.");
   const response=await fetch(endpoint+`?sendUpdates=${details?.attendees.length?"all":"none"}`,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({id:eventId,summary:h.title,start:{dateTime:h.starts_at,timeZone:master.timezone},end:{dateTime:h.ends_at,timeZone:master.timezone},extendedProperties:{private:{holdId:h.id}},...(details?meetingPayload(details):{description:`Bokat efter ditt godkännande. Buffert: ${h.preparation_minutes} min före, ${h.recovery_minutes} min efter. Inga inbjudningar skickade.`})}),signal:AbortSignal.timeout(15000)});
   if(!response.ok) throw new Error("Bokningsresultatet är osäkert. Tryck kontrollera igen; ingen ny bokning skapas.");
+  await saveContext();
   const {error:save}=await db.from("calendar_holds").update({status:"confirmed"}).eq("id",h.id).eq("owner_id",owner);
   if(save) throw new Error("Bokningen finns hos Google men status kunde inte sparas. Kontrollera igen.");
   // A successful creation must not be reported as a failed booking if refresh fails.

@@ -4,6 +4,7 @@ import {zonedInstant} from "@/lib/calendar/time";
 import type {PlaceCandidate} from "@/lib/calendar/places-routing";
 import type {MeetingDetails} from "@/lib/calendar/meeting-details";
 import {meetingDetailsSchema} from "@/lib/calendar/meeting-details";
+import {MeetingPeoplePicker,MeetingPlacePicker,type MeetingPerson} from "./calendar-meeting-pickers";
 
 export type TravelDraft={origin:PlaceCandidate|null;meeting:PlaceCandidate|null;next:PlaceCandidate|null;departure:string;arrival:string;mode:"DRIVE"|"WALK"|"BICYCLE"|"TRANSIT"};
 export const emptyTravel:TravelDraft={origin:null,meeting:null,next:null,departure:"",arrival:"",mode:"DRIVE"};
@@ -26,6 +27,7 @@ export function CalendarTravelFields({value,onChange,timezone,disabled}:{value:T
 type Review={id:string;title:string;starts_at:string;ends_at:string;expires_at:string;preparation_minutes:number;recovery_minutes:number;meeting_details:MeetingDetails};
 export function CalendarMeetingComposer({timezone,onDone,initialStart="",initialEnd="",expanded=false}:{timezone:string;onDone:()=>Promise<void>;initialStart?:string;initialEnd?:string;expanded?:boolean}) {
  const [title,setTitle]=useState(""),[description,setDescription]=useState(""),[attendees,setAttendees]=useState(""),[location,setLocation]=useState("");
+ const [people,setPeople]=useState<MeetingPerson[]>([]),[place,setPlace]=useState<PlaceCandidate|null>(null);
  const [start,setStart]=useState(initialStart),[end,setEnd]=useState(initialEnd),[physical,setPhysical]=useState(false),[travel,setTravel]=useState(emptyTravel);
  const [plan,setPlan]=useState<Review|null>(null),[approved,setApproved]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
  const [travelReview,setTravelReview]=useState<{inboundMinutes:number;outboundMinutes:number}|null>(null);
@@ -38,12 +40,13 @@ export function CalendarMeetingComposer({timezone,onDone,initialStart="",initial
    if(action==="prepare") {
     if(!rules)throw new Error("Planeringsreglerna måste hämtas först.");
     const from=zonedInstant(start,timezone),to=zonedInstant(end,timezone);
-    const details=meetingDetailsSchema.parse({description,attendees:attendees.split(/[;,\n]+/).map(s=>s.trim()).filter(Boolean),locationLabel:physical?location:"",travel:physical?travelInput(travel,from,to,timezone):null});
+    if(place&&!location.trim())throw new Error("Ange platsnamnet eller adressen som ska stå i inbjudan.");
+    const details=meetingDetailsSchema.parse({description,personIds:people.map(p=>p.id),googlePlaceId:physical?travel.meeting?.id??null:place?.id??null,attendees:[...people.map(p=>p.invitationEmail).filter(Boolean),...attendees.split(/[;,\n]+/).map(s=>s.trim()).filter(Boolean)],locationLabel:location,travel:physical?travelInput(travel,from,to,timezone):null});
     body={action:"hold",title,start:from,end:to,preparation:rules.preparationMinutes,recovery:rules.recoveryMinutes,physical,conversationId:null,details};
    } else {if(!plan)throw new Error("Granska förslaget först.");body={action:action==="confirm"?"confirm":"release",holdId:plan.id,approved:true,approvedInvitations:approved};}
    const r=await fetch("/api/calendar",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw new Error(d.error);
    if(action==="prepare"){setPlan(d.hold);setApproved(false);setTravelReview(d.travelReview??null);}
-   else {setNotice(d.warning||(action==="release"?"Reservationen är släppt.":plan!.meeting_details.attendees.length?"Mötet är skapat och Google har tagit emot utskicket. Leverans till mottagarnas inkorgar kan inte bekräftas här.":"Mötet är skapat utan inbjudningar."));setPlan(null);if(action==="confirm"){setTitle("");setAttendees("");}}
+   else {setNotice(d.warning||(action==="release"?"Reservationen är släppt.":plan!.meeting_details.attendees.length?"Mötet är skapat och Google har tagit emot utskicket. Leverans till mottagarnas inkorgar kan inte bekräftas här.":"Mötet är skapat utan inbjudningar."));setPlan(null);if(action==="confirm"){setTitle("");setAttendees("");setPeople([]);setPlace(null);setLocation("");setDescription("");setTravel(emptyTravel);setPhysical(false);}}
    await onDone();
   }catch(e){setError(e instanceof Error?e.message:"Kontrollera mötesuppgifterna.");}finally{setBusy(false);}
  };
@@ -54,12 +57,17 @@ export function CalendarMeetingComposer({timezone,onDone,initialStart="",initial
    <label>Rubrik<input value={title} maxLength={300} onChange={e=>setTitle(e.target.value)}/></label>
    <div className="calendar-form-grid"><label>Start ({timezone})<input type="datetime-local" value={start} onChange={e=>setStart(e.target.value)}/></label><label>Slut<input type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)}/></label></div>
    <label>Beskrivning till deltagarna<textarea value={description} maxLength={8000} onChange={e=>setDescription(e.target.value)}/></label>
-   <label>Deltagarnas e-postadresser (en per rad)<textarea value={attendees} onChange={e=>setAttendees(e.target.value)} placeholder="Lämna tomt för en privat bokning"/></label>
-   <label><input type="checkbox" checked={physical} onChange={e=>setPhysical(e.target.checked)}/> Fysiskt möte med resa</label>
-   {physical&&<>{!maps&&<p role="status">Restidstjänsten är inte aktiverad ännu. Fysiska bokningar kan inte godkännas utan verifierad restid.</p>}<label>Plats/adress som ska stå i inbjudan<input value={location} maxLength={500} onChange={e=>setLocation(e.target.value)}/></label><CalendarTravelFields timezone={timezone} value={travel} onChange={setTravel} disabled={!maps||busy}/></>}
+   <MeetingPeoplePicker value={people} onChange={setPeople}/>
+   <label>Ytterligare e-postadresser (en per rad)<textarea value={attendees} onChange={e=>setAttendees(e.target.value)} placeholder="Valfritt – även för kontakter som saknar e-post"/></label>
+   <MeetingPlacePicker value={place} enabled={maps} onChange={p=>{setPlace(p);setTravel({...travel,meeting:p});}}/>
+   <label>Platsnamn/adress till inbjudan<input value={location} maxLength={500} onChange={e=>setLocation(e.target.value)} placeholder="Skriv hur mötesplatsen ska anges"/></label>
+   <label><input type="checkbox" checked={physical} onChange={e=>setPhysical(e.target.checked)}/> Kontrollera och reservera restid</label>
+   {!physical&&(place||location)&&<p>Platsen sparas, men restiden kontrolleras inte och reserveras inte utan reseplanering.</p>}
+   {physical&&<>{!maps&&<p role="status">Restidstjänsten är inte aktiverad ännu. Resor kan inte godkännas utan verifierad restid.</p>}<CalendarTravelFields timezone={timezone} value={travel} onChange={t=>{setTravel(t);setPlace(t.meeting);}} disabled={!maps||busy}/></>}
    <button className="btn primary" disabled={busy||!title.trim()||!start||!end||(physical&&!maps)} onClick={()=>run("prepare")}>{busy?"Kontrollerar…":"Kontrollera och reservera preliminärt"}</button>
   </fieldset>:<section className="calendar-approval" aria-label="Granska möte och utskick"><h3>{plan.title}</h3><p>{new Date(plan.starts_at).toLocaleString('sv-SE',{timeZone:timezone})} – {new Date(plan.ends_at).toLocaleString('sv-SE',{timeZone:timezone})} · {timezone}</p>
    <p>{plan.meeting_details.locationLabel||"Ingen fysisk plats"}</p><p style={{whiteSpace:"pre-wrap"}}>{plan.meeting_details.description}</p>
+   {people.length>0&&<p>Kopplade kontakter: {people.map(p=>p.display_name).join(", ")}</p>}
    {plan.meeting_details.travel&&<p>Reserverat för resa och buffert: {plan.preparation_minutes} minuter före och {plan.recovery_minutes} minuter efter. Båda restiderna kontrolleras igen vid godkännande. Om de inte ryms bokas inget.</p>}
    {travelReview&&<p>Google Maps uppskattar resan dit till {travelReview.inboundMinutes} minuter och resan vidare/tillbaka till {travelReview.outboundMinutes} minuter.</p>}
    <h4>Inbjudningar från din masterkalender</h4>{plan.meeting_details.attendees.length?<><ul>{plan.meeting_details.attendees.map(email=><li key={email}>{email}</li>)}</ul><label><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/> Jag godkänner att Google skickar kalenderinbjudningar till dessa adresser.</label></>:<p>Inga mottagare. Inga inbjudningar skickas.</p>}

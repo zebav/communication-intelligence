@@ -69,7 +69,11 @@ export async function POST(request:Request) {
    return NextResponse.json(await calendarSuggestions(db,owner,a));
   }
   if(a.action==="hold") {
-   if(a.physical!==Boolean(a.details?.travel)||(!a.physical&&a.details?.locationLabel))throw new Error("En fysisk plats kräver en fullständig reseplan.");
+   if(a.physical!==Boolean(a.details?.travel))throw new Error("Reseplaneringen måste vara fullständig.");
+   if(a.details?.personIds.length){
+    const {data:people,error}=await db.from("people").select("id").eq("owner_id",owner).in("id",a.details.personIds);
+    if(error||people.length!==a.details.personIds.length)throw new Error("En vald kontakt är inte tillgänglig. Sök och välj kontakten igen.");
+   }
    const {data:settings,error:read}=await db.from("calendar_workspace").select("timezone").eq("owner_id",owner).single();
    if(read||!settings) throw new Error("Kalenderns tidszon kunde inte läsas.");
    const date=new Intl.DateTimeFormat("sv-SE",{timeZone:settings.timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(a.start));
