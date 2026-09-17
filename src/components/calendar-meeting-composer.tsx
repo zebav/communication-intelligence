@@ -26,8 +26,8 @@ export function CalendarTravelFields({value,onChange,timezone,disabled}:{value:T
  </fieldset>;
 }
 type Review={id:string;title:string;starts_at:string;ends_at:string;expires_at:string;preparation_minutes:number;recovery_minutes:number;meeting_details:MeetingDetails};
-export function CalendarMeetingComposer({timezone,onDone,initialStart="",initialEnd="",expanded=false}:{timezone:string;onDone:()=>Promise<void>;initialStart?:string;initialEnd?:string;expanded?:boolean}) {
- const [title,setTitle]=useState(""),[description,setDescription]=useState(""),[attendees,setAttendees]=useState(""),[location,setLocation]=useState("");
+export function CalendarMeetingComposer({timezone,onDone,initialStart="",initialEnd="",expanded=false,initialTitle="",conversationId=null}:{timezone:string;onDone:()=>Promise<void>;initialStart?:string;initialEnd?:string;expanded?:boolean;initialTitle?:string;conversationId?:string|null}) {
+ const [title,setTitle]=useState(initialTitle),[description,setDescription]=useState(""),[attendees,setAttendees]=useState(""),[location,setLocation]=useState("");
  const [people,setPeople]=useState<MeetingPerson[]>([]),[place,setPlace]=useState<PlaceCandidate|null>(null);
  const [start,setStart]=useState(initialStart),[end,setEnd]=useState(initialEnd),[physical,setPhysical]=useState(false),[travel,setTravel]=useState(emptyTravel);
  const [plan,setPlan]=useState<Review|null>(null),[approved,setApproved]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
@@ -43,7 +43,7 @@ export function CalendarMeetingComposer({timezone,onDone,initialStart="",initial
     const from=zonedInstant(start,timezone),to=zonedInstant(end,timezone);
     if(place&&!location.trim())throw new Error("Ange platsnamnet eller adressen som ska stå i inbjudan.");
     const details=meetingDetailsSchema.parse({description,personIds:people.map(p=>p.id),googlePlaceId:physical?travel.meeting?.id??null:place?.id??null,attendees:[...people.map(p=>p.invitationEmail).filter(Boolean),...attendees.split(/[;,\n]+/).map(s=>s.trim()).filter(Boolean)],locationLabel:location,travel:physical?travelInput(travel,from,to,timezone):null});
-    body={action:"hold",title,start:from,end:to,preparation:rules.preparationMinutes,recovery:rules.recoveryMinutes,physical,conversationId:null,details};
+    body={action:"hold",title,start:from,end:to,preparation:rules.preparationMinutes,recovery:rules.recoveryMinutes,physical,conversationId,details};
    } else {if(!plan)throw new Error("Granska förslaget först.");body={action:action==="confirm"?"confirm":"release",holdId:plan.id,approved:true,approvedInvitations:approved};}
    if(action!=="release")await refreshBookingCalendars(setNotice);
    const r=await fetch("/api/calendar",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw new Error(d.error);

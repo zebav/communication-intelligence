@@ -5,10 +5,11 @@ import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
 import { draftLearning, saveLearningSuggestion } from "@/lib/learning-feedback";
+import { matchesReplyRecipient } from "@/lib/assistant/recipient";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
-const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000), suggestedDraft: z.string().max(4000).optional(), draftTone: z.string().max(120).optional(), desiredOutcome: z.string().trim().min(1).max(300).optional() });
+const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000), suggestedDraft: z.string().max(4000).optional(), draftTone: z.string().max(120).optional(), desiredOutcome: z.string().trim().min(1).max(300).optional(), expectedRecipient: z.string().email().optional(), expectedConnectionId: z.string().uuid().optional() });
 const jsonError = (message: string, status = 500) => NextResponse.json({ error: message }, { status });
 
 async function getAccessToken(credentials: StoredCredentials, origin: string) {
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
   const { data: message } = await supabase.from("messages").select("external_message_id,conversations(person_id,connection_id)").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").eq("direction", "in").maybeSingle();
   if (!message?.external_message_id) return jsonError("The Outlook message could not be found.", 404);
   const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
+  if (parsed.data.expectedConnectionId && linkedConversation?.connection_id !== parsed.data.expectedConnectionId) return jsonError("The reviewed account has changed. Nothing was sent.", 409);
   let connectionQuery = supabase.from("connections").select("id,encrypted_credentials,token_metadata").eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected");
   if (linkedConversation?.connection_id) connectionQuery = connectionQuery.eq("id", linkedConversation.connection_id);
   const { data: connection } = await connectionQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
@@ -45,6 +47,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const token = await getAccessToken(decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey), request.nextUrl.origin);
+    if (parsed.data.expectedRecipient) {
+      const original = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(message.external_message_id)}?$select=from,replyTo`, { headers: { authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.timeout(15_000) });
+      if (!original.ok || !matchesReplyRecipient(await original.json(), parsed.data.expectedRecipient)) return jsonError("The reply address could not be verified against your approval. Nothing was sent.", 409);
+    }
     if (token.refreshed) await supabase.from("connections").update({ encrypted_credentials: encryptCredential(token.credentials, encryptionKey), token_metadata: { ...(connection.token_metadata as object ?? {}), expires_at: token.credentials.expiresAt }, updated_at: new Date().toISOString() }).eq("id", connection.id).eq("owner_id", user.id);
     const graphResponse = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(message.external_message_id)}/reply`, { method: "POST", headers: { authorization: `Bearer ${token.accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ comment: parsed.data.body }), signal: AbortSignal.timeout(20_000) });
     if (graphResponse.status === 401 || graphResponse.status === 403) return jsonError("Outlook permission is missing. Reconnect Outlook and try again.", 409);
