@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     if (existingError) throw new Error("Dubblettkontrollen kunde inte slutföras.");
     const keys = new Set((existing ?? []).map(t => `${t.message_id}:${t.kind}`));
     const candidates = page.messages.flatMap(e => propose(e).filter(kind => !keys.has(`${e.messageId}:${kind}`)).map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind) })));
-    return json({ tasks: stored, candidates, reviewMessages: page.messages.map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, tasksLimited: stored.length === 500, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
+    return json({ tasks: stored, candidates, reviewMessages: page.messages.map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, tasksLimited: stored.length === 500, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
   } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
 }
 export async function POST(request: NextRequest) {
