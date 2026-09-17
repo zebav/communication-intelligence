@@ -16,7 +16,20 @@ function mount(enabled = true, kind: "reply" | "meeting" | "website" = "reply") 
   render(<AssistantBoard snapshot={snapshot} people={[]} selected="task" onSelect={() => undefined} act={act} busy={false} onMore={() => undefined} onRefresh={async () => undefined} />);
   return act;
 }
+function mountCandidate() {
+  const snapshot: AssistantSnapshot = { tasks: [], candidates: [{ messageId: e.messageId, kind: "reply", plan: makePlan(e, "reply") }], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [], timezone: "Europe/Stockholm", executionEnabled: false };
+  const act = vi.fn(async () => undefined);
+  render(<AssistantBoard snapshot={snapshot} people={[]} selected="" onSelect={() => undefined} act={act} busy={false} onMore={() => undefined} onRefresh={async () => undefined} />);
+  return act;
+}
 describe("assistant review interface", () => {
+  it("lets the owner reject only a message or teach a sender rule", () => {
+    const act = mountCandidate();
+    fireEvent.click(screen.getByRole("button", { name: "Inte relevant" }));
+    expect(act).toHaveBeenCalledWith({ action: "dismiss_candidate", messageId: "m", kind: "reply", scope: "message" });
+    fireEvent.click(screen.getByRole("button", { name: "Prioritera inte avsändaren" }));
+    expect(act).toHaveBeenCalledWith({ action: "dismiss_candidate", messageId: "m", kind: "reply", scope: "sender" });
+  });
   it("website tasks cannot start automatic execution even when sending is enabled", () => {
     const act = mount(true, "website");
     expect(screen.getByText(/Automatisk webbkörning är avstängd/)).toBeTruthy();

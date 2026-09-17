@@ -16,6 +16,7 @@ export const maxDuration = 60;
 const base = { id: z.string().uuid(), revision: z.number().int().positive() };
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), messageId: z.string().uuid(), kind: z.enum(kinds) }),
+  z.object({ action: z.literal("dismiss_candidate"), messageId: z.string().uuid(), kind: z.enum(kinds), scope: z.enum(["message", "sender"]) }),
   z.object({ action: z.literal("save"), ...base, edit: editSchema }),
   z.object({ action: z.literal("generate"), ...base }),
   z.object({ action: z.literal("execute"), ...base, approved: z.literal(true) }),
@@ -38,13 +39,14 @@ export async function GET(request: Request) {
   try {
     const { db, owner } = await session();
     const cursor = z.coerce.number().int().min(0).max(100000).parse(new URL(request.url).searchParams.get("cursor") ?? 0);
-    const [page, tasks, feedback, calendar] = await Promise.all([
+    const [page, tasks, feedback, calendar, relevanceRules] = await Promise.all([
       readCandidates(db, owner, String(cursor)),
       db.from("assistant_tasks").select("*").eq("owner_id", owner).order("updated_at", { ascending: false }).limit(500),
       db.from("assistant_task_feedback").select("category").eq("owner_id", owner).order("created_at", { ascending: false }).limit(1000),
       db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle(),
+      db.from("learning_signals").select("person_id,source,evidence").eq("owner_id", owner).eq("signal_type", "category_corrected").eq("status", "approved").limit(1000),
     ]);
-    if (tasks.error || feedback.error) throw new Error("Handlingsinkorgens databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
+    if (tasks.error || feedback.error || relevanceRules.error) throw new Error("Handlingsinkorgens databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
     const evidenceByMessage = new Map(page.messages.map(evidence => [evidence.messageId, evidence]));
     const stored = (tasks.data as Task[]).map(task => {
       const evidence = evidenceByMessage.get(task.message_id);
@@ -62,7 +64,11 @@ export async function GET(request: Request) {
     const { data: existing, error: existingError } = page.messages.length ? await db.from("assistant_tasks").select("message_id,kind").eq("owner_id", owner).in("message_id", page.messages.map(m => m.messageId)) : { data: [], error: null };
     if (existingError) throw new Error("Dubblettkontrollen kunde inte slutföras.");
     const keys = new Set((existing ?? []).map(t => `${t.message_id}:${t.kind}`));
-    const candidates = page.messages.flatMap(e => propose(e).filter(kind => !keys.has(`${e.messageId}:${kind}`)).map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind) })));
+    const ignoredSenders = new Set((relevanceRules.data ?? []).filter(rule => {
+      const evidence = rule.evidence && typeof rule.evidence === "object" && !Array.isArray(rule.evidence) ? rule.evidence as Record<string, unknown> : {};
+      return evidence.assistant_relevance === "sender_irrelevant" && typeof rule.person_id === "string";
+    }).map(rule => `${rule.source}:${rule.person_id}`));
+    const candidates = page.messages.flatMap(e => ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e).filter(kind => !keys.has(`${e.messageId}:${kind}`)).map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind) })));
     return json({ tasks: stored, candidates, reviewMessages: page.messages.map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 500, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
   } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
 }
@@ -72,6 +78,29 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return json({ error: "Kontrollera uppgifterna." }, 400);
   try {
     const { db, owner } = await session(), a = parsed.data;
+    if (a.action === "dismiss_candidate") {
+      const e = await readEvidence(db, owner, a.messageId);
+      if (e.direction !== "in") throw new Error("Endast inkommande meddelanden kan sorteras bort.");
+      if (a.scope === "sender" && !e.personId) throw new Error("Avsändaren saknar en verifierad kontakt och kan inte läras bort automatiskt.");
+      const { data: saved, error: saveError } = await db.from("assistant_tasks").upsert({ owner_id: owner, message_id: e.messageId, kind: a.kind, status: "dismissed", plan: makePlan(e, a.kind) }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true }).select("*").maybeSingle();
+      if (saveError) throw new Error("Meddelandet kunde inte sorteras bort.");
+      let task = saved;
+      if (!task) {
+        const { data, error } = await db.from("assistant_tasks").select("*").eq("owner_id", owner).eq("message_id", e.messageId).eq("kind", a.kind).single();
+        if (error || !data) throw new Error("Den sparade korrigeringen kunde inte läsas.");
+        task = data;
+      }
+      const note = a.scope === "sender" ? `Avsändaren ${e.personName} är inte relevant för handlingsinkorgen på ${e.source}.` : "Detta meddelande är inte relevant för handlingsinkorgen.";
+      const { error: feedbackError } = await db.from("assistant_task_feedback").insert({ owner_id: owner, task_id: task.id, category: "not_relevant", note });
+      if (feedbackError) throw new Error("Meddelandet sorterades bort men korrigeringen kunde inte sparas.");
+      const { error: priorityError } = await db.from("priority_feedback").upsert({ owner_id: owner, message_id: e.messageId, person_id: e.personId, source: e.source, category: e.classification || "Unknown", score: 1, reason: note }, { onConflict: "owner_id,message_id" });
+      if (priorityError) throw new Error("Meddelandet sorterades bort men prioritetskorrigeringen kunde inte sparas.");
+      if (a.scope === "sender") {
+        const { error: learningError } = await db.from("learning_signals").insert({ owner_id: owner, person_id: e.personId, conversation_id: e.conversationId, source: e.source, signal_type: "category_corrected", observation: note, proposed_rule: `Visa inte automatiskt ${e.personName} i handlingsinkorgen på ${e.source}.`, evidence: { assistant_relevance: "sender_irrelevant", message_id: e.messageId }, confidence: 1, status: "approved" });
+        if (learningError) throw new Error("Meddelandet sorterades bort men avsändarregeln kunde inte sparas.");
+      }
+      return json({ saved: true, scope: a.scope });
+    }
     if (a.action === "start") {
       const e = await readEvidence(db, owner, a.messageId);
       if (e.direction !== "in" && a.kind !== "follow_up") throw new Error("Välj ett inkommande originalmeddelande.");
