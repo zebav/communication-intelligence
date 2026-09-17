@@ -24,9 +24,9 @@ export function CalendarTravelFields({value,onChange,timezone,disabled}:{value:T
  </fieldset>;
 }
 type Review={id:string;title:string;starts_at:string;ends_at:string;expires_at:string;preparation_minutes:number;recovery_minutes:number;meeting_details:MeetingDetails};
-export function CalendarMeetingComposer({timezone,onDone}:{timezone:string;onDone:()=>Promise<void>}) {
+export function CalendarMeetingComposer({timezone,onDone,initialStart="",initialEnd="",expanded=false}:{timezone:string;onDone:()=>Promise<void>;initialStart?:string;initialEnd?:string;expanded?:boolean}) {
  const [title,setTitle]=useState(""),[description,setDescription]=useState(""),[attendees,setAttendees]=useState(""),[location,setLocation]=useState("");
- const [start,setStart]=useState(""),[end,setEnd]=useState(""),[physical,setPhysical]=useState(false),[travel,setTravel]=useState(emptyTravel);
+ const [start,setStart]=useState(initialStart),[end,setEnd]=useState(initialEnd),[physical,setPhysical]=useState(false),[travel,setTravel]=useState(emptyTravel);
  const [plan,setPlan]=useState<Review|null>(null),[approved,setApproved]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[notice,setNotice]=useState("");
  const [travelReview,setTravelReview]=useState<{inboundMinutes:number;outboundMinutes:number}|null>(null);
  const [rules,setRules]=useState<{preparationMinutes:number;recoveryMinutes:number}|null>(null),[maps,setMaps]=useState(false);
@@ -47,7 +47,7 @@ export function CalendarMeetingComposer({timezone,onDone}:{timezone:string;onDon
    await onDone();
   }catch(e){setError(e instanceof Error?e.message:"Kontrollera mötesuppgifterna.");}finally{setBusy(false);}
  };
- return <details className="calendar-panel"><summary>Nytt möte · plats, resa och inbjudningar</summary>
+ return <details className="calendar-panel" open={expanded||undefined}><summary>Nytt möte · plats, resa och inbjudningar</summary>
   <p>Först kontrolleras tiden och reserveras preliminärt. Bokning och utskick kräver ett separat godkännande.</p>
   {error&&<p role="alert" className="calendar-notice error">{error}</p>}{notice&&<p role="status">{notice}</p>}
   {!plan?<fieldset disabled={busy||!rules} className="calendar-form"><legend>Mötesuppgifter</legend>
