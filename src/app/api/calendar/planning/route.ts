@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { calendarSession } from "@/lib/calendar/auth";
 import { defaultPlanningPreferences, planningPreferencesSchema } from "@/lib/calendar/planning-preferences";
-import { GooglePlacesRoutes, routeRequestSchema } from "@/lib/calendar/places-routing";
+import { GooglePlacesRoutes, MapsProviderError, routeRequestSchema } from "@/lib/calendar/places-routing";
 import {travelPlanRequest} from "@/lib/calendar/travel-plan";
 import {calendarTravelAssessment} from "@/lib/calendar/travel-service";
 import {mapsEnabled,MapsBudgetError,reserveMapsOperation} from "@/lib/calendar/maps-budget";
@@ -51,5 +51,10 @@ export async function POST(request:Request) {
     const service = new GooglePlacesRoutes(process.env.GOOGLE_MAPS_SERVER_API_KEY!,fetch,reserveMapsOperation);
     if(a.action==="travel_plan")return NextResponse.json({assessment:await calendarTravelAssessment(db,owner,a.plan,service)},{headers:{"Cache-Control":"no-store"}});
     return NextResponse.json(a.action === "places" ? {places:await service.search(a.query)} : {route:await service.estimate(a.route)}, {headers:{"Cache-Control":"no-store"}});
-  } catch(error) { return NextResponse.json({error:error instanceof MapsBudgetError?error.message:"Planeringsåtgärden kunde inte slutföras. Inga kalenderbokningar har ändrats."},{status:error instanceof MapsBudgetError?429:409}); }
+  } catch(error) {
+    console.error("calendar_planning_failed", {action:parsed.data.action,
+      code:error instanceof MapsProviderError?error.code:error instanceof MapsBudgetError?"MAPS_BUDGET":error instanceof z.ZodError?"INVALID_PROVIDER_RESPONSE":"UNEXPECTED",
+      ...(error instanceof MapsProviderError?{providerStatus:error.httpStatus}:{})});
+    return NextResponse.json({error:error instanceof MapsBudgetError||error instanceof MapsProviderError?error.message:"Planeringsåtgärden kunde inte slutföras. Inga kalenderbokningar har ändrats."},{status:error instanceof MapsBudgetError?429:error instanceof MapsProviderError?502:409});
+  }
 }

@@ -5,6 +5,7 @@ export type CalendarEvent = {
   start: string; end: string; allDay: boolean; location?: string;
   status: "confirmed" | "tentative" | "cancelled"; blocksAvailability: boolean;
   recurrenceId?: string; etag?: string;
+  description?:string; attendees?:{email?:string;responseStatus?:string}[];
 };
 export type CalendarHold = TimeRange & { id: string; expiresAt: string; status: "active" | "released" | "confirmed"; conversationId: string };
 export type CalendarInfo = { id: string; name: string; timezone: string; access: "reader" | "writer" | "owner" };

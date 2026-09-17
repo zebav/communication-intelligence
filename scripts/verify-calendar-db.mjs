@@ -20,6 +20,7 @@ await db.exec(readFileSync('supabase/migrations/20260915232306_calendar_contact_
 await db.exec(readFileSync('supabase/migrations/20260915235716_calendar_maps_budget.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260916003135_calendar_lifecycle_completion.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260916003503_calendar_scheduler_dispatch.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260916005059_calendar_meeting_details.sql','utf8'));
 const owner='00000000-0000-0000-0000-000000000001',other='00000000-0000-0000-0000-000000000002';
 await db.exec(`insert into auth.users values('${owner}'),('${other}');set role authenticated;select set_config('request.jwt.claim.sub','${owner}',false);select set_config('request.jwt.claim.aal','aal2',false);`);
 await db.query('insert into calendar_workspace(owner_id) values($1)',[owner]);
@@ -29,6 +30,7 @@ const account=(await db.query(`insert into calendar_accounts(owner_id,provider,e
 const source=(await db.query(`insert into calendar_sources(owner_id,account_id,external_id,name,is_master,synced_at,window_start,window_end) values($1,$2,'master','Master',true,now(),now(),now()+interval '60 days') returning id`,[owner,account])).rows[0].id;
 const reserve=()=>db.query(`insert into calendar_holds(owner_id,title,starts_at,ends_at) values($1,'Synthetic',now()+interval '1 day',now()+interval '1 day 1 hour') returning id`,[owner]);
 const hold=(await reserve()).rows[0].id;
+await assert.rejects(db.query("update calendar_holds set meeting_details='{}' where id=$1",[hold]),/immutable/);
 await assert.rejects(reserve(),/Reservation conflict/);
 await db.query("update calendar_holds set status='released' where id=$1",[hold]);
 assert.equal((await reserve()).rows.length,1);
@@ -89,6 +91,9 @@ const lease='00000000-0000-0000-0000-000000000088';
 assert.equal((await db.query('select claim_calendar_refresh($1,$2,$3) as ok',[owner,account,lease])).rows[0].ok,true);
 assert.equal((await db.query('select claim_calendar_refresh($1,$2,$3) as ok',[owner,account,lease])).rows[0].ok,false);
 const action=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event,new_title) values($1,$2,'synthetic','rename','v1','{}','New title') returning id`,[owner,source])).rows[0].id;
+const detailsAction=(await db.query(`insert into calendar_event_actions(owner_id,source_id,event_id,kind,expected_etag,before_event,details) values($1,$2,'synthetic-details','details','v1','{}','{"recipients":[]}') returning id`,[owner,source])).rows[0].id;
+await assert.rejects(db.query("update calendar_event_actions set details='{}' where id=$1",[detailsAction]),/immutable/);
+await db.query("update calendar_event_actions set status='stale' where id=$1",[detailsAction]);
 await assert.rejects(db.query("update calendar_event_actions set status='completed' where id=$1",[action]),/Invalid action transition/);
 await assert.rejects(db.query("update calendar_event_actions set status='executing' where id=$1",[action]),/Approval expired/);
 await assert.rejects(db.query("update calendar_event_actions set new_title='Changed' where id=$1",[action]),/facts cannot change/);

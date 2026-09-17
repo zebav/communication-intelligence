@@ -5,6 +5,9 @@ import { OutlookCalendarReader } from "./outlook-calendar";
 import { googleConfig } from "../connectors/google-oauth";
 import { microsoftConfig } from "../connectors/microsoft-oauth";
 import type { TimeRange } from "./types";
+import {meetingDetailsSchema,meetingPayload,sameRecipients,travelReservation} from "./meeting-details";
+import {calendarTravelAssessment} from "./travel-service";
+import type {RouteService} from "./places-routing";
 
 export async function calendarToken(db:SupabaseClient,owner:string,accountId:string,signal?:AbortSignal) {
   const {data:account,error}=await db.from("calendar_accounts").select("*").eq("owner_id",owner).eq("id",accountId).single();
@@ -96,22 +99,37 @@ export async function createMaster(db:SupabaseClient,owner:string,accountId:stri
     throw error;
   }
 }
-export async function confirmHold(db:SupabaseClient,owner:string,holdId:string) {
+export async function confirmHold(db:SupabaseClient,owner:string,holdId:string,options:{approvedInvitations?:boolean;routes?:RouteService}={}) {
   const {data:h,error}=await db.from("calendar_holds").select("*").eq("owner_id",owner).eq("id",holdId).single();
   if(error||!h) throw new Error("Reservationen finns inte.");
   if(h.purpose==="move") throw new Error("Denna tid hör till en flytt. Godkänn flyttförslaget i den befintliga bokningen.");
+  const details=h.meeting_details?meetingDetailsSchema.parse(h.meeting_details):null;
+  if(details?.attendees.length&&!options.approvedInvitations)throw new Error("Granska mottagarna och godkänn utskick av inbjudningar.");
   if(h.status==="confirmed") return;
   if(h.status!=="active"&&h.status!=="executing") throw new Error("Reservationen är inte aktiv.");
   const {data:master}=await db.from("calendar_sources").select("*").eq("owner_id",owner).eq("is_master",true).single();
   if(!master) throw new Error("Masterkalender saknas.");
   const {token}=await calendarToken(db,owner,master.account_id);
   const eventId="ci"+h.id.replaceAll("-","");
+  const saveContext=async()=>{
+    if(!details||(!details.personIds.length&&!details.googlePlaceId&&!details.locationLabel))return;
+    const current=await db.from("calendar_event_context").select("id").eq("owner_id",owner).eq("source_id",master.id).eq("event_id",eventId).maybeSingle();
+    if(current.error)throw new Error("Mötet finns hos Google men kopplingarna kunde inte kontrolleras. Kontrollera samma reservation igen.");
+    if(current.data)return;
+    // The context guard requires the event to be present in the owned source snapshot.
+    await syncCalendar(db,owner,master.id,{start:master.window_start,end:master.window_end});
+    // Insert once: retries must never overwrite edits made in the event card.
+    const {error}=await db.from("calendar_event_context").upsert({owner_id:owner,source_id:master.id,event_id:eventId,person_ids:details.personIds,conversation_id:h.conversation_id,location_kind:details.googlePlaceId||details.locationLabel?"physical":"unknown",google_place_id:details.googlePlaceId,user_place_label:details.locationLabel,meeting_url:"",revision:1},{onConflict:"owner_id,source_id,event_id",ignoreDuplicates:true});
+    if(error)throw new Error("Mötet finns hos Google, men kontakt- och platskopplingarna kunde inte sparas. Kontrollera samma reservation igen; inga nya inbjudningar skickas.");
+  };
   const endpoint=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(master.external_id)}/events`;
   // Unknown outcomes can only be retried with the same deterministic event ID.
   const lookup=await fetch(endpoint+"/"+eventId,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(15000)});
   if(lookup.ok) {
     const existing=await lookup.json();
     if(existing.extendedProperties?.private?.holdId!==h.id || existing.status==="cancelled" || Date.parse(existing.start?.dateTime)!==Date.parse(h.starts_at) || Date.parse(existing.end?.dateTime)!==Date.parse(h.ends_at)) throw new Error("Bokningen har ändrats och behöver kontrolleras manuellt.");
+    if(details&&(!sameRecipients(existing.attendees,details.attendees)||(existing.location??"")!==details.locationLabel))throw new Error("Mottagare eller plats har ändrats hos Google. Kontrollera bokningen manuellt.");
+    await saveContext();
     const {error:save}=await db.from("calendar_holds").update({status:"confirmed",external_event_id:eventId}).eq("id",h.id).eq("owner_id",owner);
     if(save) throw new Error("Bokningen finns hos Google men status kunde inte sparas.");
     return;
@@ -120,10 +138,17 @@ export async function confirmHold(db:SupabaseClient,owner:string,holdId:string) 
   if(h.status==="executing") throw new Error("Ett tidigare bokningsförsök är osäkert. Kontrollera Google-kalendern innan nytt försök.");
   // Fresh snapshot and DB trigger serialize local requests and check conflicts.
   await syncCalendar(db,owner,master.id,{start:master.window_start,end:master.window_end});
+  if(details?.travel) {
+    const reserve=travelReservation(details,h.starts_at,h.ends_at)!;
+    if(reserve.preparation!==h.preparation_minutes||reserve.recovery!==h.recovery_minutes||!options.routes)throw new Error("Reseunderlaget eller Maps-tjänsten är inte tillgänglig. Inget har bokats.");
+    const assessment=await calendarTravelAssessment(db,owner,details.travel,options.routes,h.id);
+    if(assessment.status!=="FEASIBLE")throw new Error("Resan eller kalendern har ändrats. Gör en ny reseplan innan du bokar.");
+  }
   const {data:claimed,error:claim}=await db.from("calendar_holds").update({status:"executing",external_event_id:eventId}).eq("id",h.id).eq("owner_id",owner).eq("status","active").gt("expires_at",new Date().toISOString()).select("id").maybeSingle();
   if(claim||!claimed) throw new Error("Tiden kunde inte godkännas. Synkronisera och kontrollera konflikter.");
-  const response=await fetch(endpoint+"?sendUpdates=none",{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({id:eventId,summary:h.title,start:{dateTime:h.starts_at,timeZone:master.timezone},end:{dateTime:h.ends_at,timeZone:master.timezone},extendedProperties:{private:{holdId:h.id}},description:`Bokat efter ditt godkännande. Buffert: ${h.preparation_minutes} min före, ${h.recovery_minutes} min efter. Inga inbjudningar skickade.`}),signal:AbortSignal.timeout(15000)});
+  const response=await fetch(endpoint+`?sendUpdates=${details?.attendees.length?"all":"none"}`,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({id:eventId,summary:h.title,start:{dateTime:h.starts_at,timeZone:master.timezone},end:{dateTime:h.ends_at,timeZone:master.timezone},extendedProperties:{private:{holdId:h.id}},...(details?meetingPayload(details):{description:`Bokat efter ditt godkännande. Buffert: ${h.preparation_minutes} min före, ${h.recovery_minutes} min efter. Inga inbjudningar skickade.`})}),signal:AbortSignal.timeout(15000)});
   if(!response.ok) throw new Error("Bokningsresultatet är osäkert. Tryck kontrollera igen; ingen ny bokning skapas.");
+  await saveContext();
   const {error:save}=await db.from("calendar_holds").update({status:"confirmed"}).eq("id",h.id).eq("owner_id",owner);
   if(save) throw new Error("Bokningen finns hos Google men status kunde inte sparas. Kontrollera igen.");
   // A successful creation must not be reported as a failed booking if refresh fails.

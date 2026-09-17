@@ -2,8 +2,18 @@
 import {useEffect,useRef,useState} from "react";
 import type {CalendarEvent} from "@/lib/calendar/types";
 import type {DisplayCalendar} from "@/lib/calendar/display";
+import {CalendarMeetingComposer} from "./calendar-meeting-composer";
 const shift=(date:string,days:number)=>new Date(Date.parse(date)+days*86400000).toISOString().slice(0,10);
-export function CalendarBoard({events,calendars,date,onDate,timezone}:{events:CalendarEvent[];calendars:DisplayCalendar[];date:string;onDate:(date:string)=>void;timezone:string}) {
+export function CalendarBoard({events,calendars,date,onDate,timezone,onEdit,onDone}:{events:CalendarEvent[];calendars:DisplayCalendar[];date:string;onDate:(date:string)=>void;timezone:string;onEdit?:(event:CalendarEvent)=>void;onDone?:()=>Promise<void>}) {
+ const [draft,setDraft]=useState<{start:string;end:string}|null>(null);
+ const dialog=useRef<HTMLDialogElement>(null);
+ useEffect(()=>{if(draft&&!dialog.current?.open)dialog.current?.showModal();},[draft]);
+ const add=(day:string,hour=9)=>{
+  const start=`${day}T${String(hour).padStart(2,'0')}:00`;
+  // These are local wall-clock fields. The composer resolves them in the calendar timezone.
+  const end=new Date(Date.parse(start+"Z")+30*60000).toISOString().slice(0,16);
+  setDraft({start,end});
+ };
  const [hidden,setHidden]=useState<string[]>([]);
  const source=(event:CalendarEvent)=>calendars.find(c=>c.id===event.calendarId);
  const color=(event:CalendarEvent)=>({borderColor:source(event)?.color,borderLeftWidth:4});
@@ -25,6 +35,8 @@ export function CalendarBoard({events,calendars,date,onDate,timezone}:{events:Ca
   const d=new Date(date.slice(0,7)+"-01");d.setUTCMonth(d.getUTCMonth()+direction);onDate(d.toISOString().slice(0,10));
  };
  return <section className="calendar-panel calendar-board" aria-label="Kalender med datum och tider">
+  {onDone&&<button className="btn primary" onClick={()=>add(date)}>+ Lägg till möte</button>}
+  {draft&&onDone&&<dialog ref={dialog} className="calendar-create-dialog" aria-label="Lägg till möte" onClose={()=>setDraft(null)}><button className="btn" onClick={()=>dialog.current?.close()}>Stäng</button><p>Datum och tid är förifyllda. Ledig tid verifieras innan bokning. Om du stänger med en preliminär reservation finns den kvar tills den släpps eller löper ut.</p><CalendarMeetingComposer timezone={timezone} onDone={onDone} initialStart={draft.start} initialEnd={draft.end} expanded/></dialog>}
   <div className="calendar-board-toolbar"><div><h2>{new Date(date+"T12:00:00Z").toLocaleDateString("sv-SE",{month:"long",year:"numeric",timeZone:"UTC"})}</h2><small>{timezone} · Alla valda kalendrar</small></div><div className="calendar-actions"><button className="btn" aria-label="Föregående period" onClick={()=>navigate(-1)}>←</button><button className="btn" onClick={()=>onDate(localDay(new Date().toISOString()))}>Idag</button><button className="btn" aria-label="Nästa period" onClick={()=>navigate(1)}>→</button><label>Datum<input type="date" value={date} onChange={e=>{if(e.target.value)onDate(e.target.value);}}/></label></div><div className="calendar-actions">{([['day','Dag'],['week','Vecka'],['month','Månad']] as const).map(([key,label])=><button className={`btn ${view===key?'primary':''}`} aria-pressed={view===key} key={key} onClick={()=>setView(key)}>{label}</button>)}</div></div>
   <fieldset className="calendar-source-filters"><legend>Visa kalendrar</legend>{calendars.map(c=><label key={c.id}><input type="checkbox" checked={!hidden.includes(c.id)} onChange={e=>{setHidden(current=>e.target.checked?current.filter(id=>id!==c.id):[...current,c.id]);setSelected(null);}}/><span aria-hidden="true" style={{background:c.color}}/>{c.label}</label>)}</fieldset>
   <p className="muted">Externa bokningar visas som underlag, inte som godkända masterbokningar. Filtren ändrar endast vyn, inte synkronisering eller konfliktkontroll.</p>
@@ -34,7 +46,7 @@ export function CalendarBoard({events,calendars,date,onDate,timezone}:{events:Ca
    <div className="calendar-day-heading">Tid</div>{days.map(d=><strong className="calendar-day-heading" key={d}>{weekday(d)}</strong>)}
    <small className="calendar-all-day">Heldag</small>{days.map(d=><div className="calendar-all-day" key={d}>{onDay(d).filter(e=>e.allDay).map(e=><button className="calendar-event-chip" style={color(e)} title={source(e)?.label} key={e.id} onClick={()=>setSelected(e)}>{e.title}</button>)}</div>)}
    <div className="calendar-hours">{Array.from({length:24},(_,h)=><div key={h}>{String(h).padStart(2,'0')}:00</div>)}</div>
-   {days.map(d=><div className="calendar-time-day" key={d}>{Array.from({length:24},(_,h)=><div className="calendar-hour-line" key={h}/>)}{onDay(d).filter(e=>!e.allDay).map((e,index,items)=>{
+   {days.map(d=><div className="calendar-time-day" key={d}>{Array.from({length:24},(_,h)=>onDone?<button type="button" className="calendar-hour-line calendar-add-slot" key={h} aria-label={`Lägg till möte ${d} klockan ${String(h).padStart(2,'0')}:00`} onClick={()=>add(d,h)}/>:<div className="calendar-hour-line" key={h}/>)}{onDay(d).filter(e=>!e.allDay).map((e,index,items)=>{
     const minutes=(s:string)=>{const [h,m]=time(s).split(':').map(Number);return h*60+m;};
     const from=localDay(e.start)<d?0:minutes(e.start),to=localDay(e.end)>d?1440:minutes(e.end);
     // Separate overlapping items into lanes so their text never overprints.
@@ -44,6 +56,6 @@ export function CalendarBoard({events,calendars,date,onDate,timezone}:{events:Ca
    })}</div>)}
   </div>}
   </div><p className="muted">Tomma rutor visar inga inlästa bokningar – ledig tid bekräftas först efter synkronisering och konfliktkontroll.</p>
-  {selected&&<div className="calendar-notice" role="region" aria-label="Bokningsdetaljer"><button className="btn" onClick={()=>setSelected(null)}>Stäng detaljer</button><h3>{selected.title}</h3><p>{source(selected)?.label}</p><strong>{selected.calendarId==="holds"?"Preliminär reservation":source(selected)?.master?"Masterbokning":"Extern bokning – inte överförd till masterkalendern"}</strong><p>{localDay(selected.start)} · {selected.allDay?'Heldag':`${time(selected.start)}–${time(selected.end)}`}</p>{selected.location&&<p>{selected.location}</p>}<small>{selected.status==='tentative'?'Preliminär reservation':'Bokning'}</small></div>}
+  {selected&&<div className="calendar-notice" role="region" aria-label="Bokningsdetaljer"><button className="btn" onClick={()=>setSelected(null)}>Stäng detaljer</button><h3>{selected.title}</h3><p>{source(selected)?.label}</p><strong>{selected.calendarId==="holds"?"Reserverad tid":source(selected)?.master?"Masterbokning":"Extern bokning – inte överförd till masterkalendern"}</strong><p>{localDay(selected.start)} · {selected.allDay?'Heldag':`${time(selected.start)}–${time(selected.end)}`}</p>{selected.location&&<p>{selected.location}</p>}{selected.description&&<p style={{whiteSpace:"pre-wrap"}}>{selected.description}</p>}{source(selected)?.master&&selected.calendarId!=="holds"&&onEdit?<button className="btn primary" onClick={()=>{onEdit(selected);setSelected(null);}}>Redigera mötet</button>:selected.calendarId!=="holds"&&<p>Originalet är skrivskyddat här. För över åtagandet till masterkalendern för att hantera din egen bokning; originalets deltagare påverkas inte.</p>}</div>}
  </section>;
 }
