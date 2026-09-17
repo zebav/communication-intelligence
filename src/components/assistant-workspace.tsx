@@ -12,7 +12,7 @@ import "./assistant-workspace.css";
 export type AssistantSnapshot = {
   tasks: Task[]; candidates: { messageId: string; kind: TaskKind; plan: Plan }[];
   reviewMessages: { id: string; title: string; person: string }[];
-  next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; tasksLimited: boolean;
+  next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; emailWindowDays?: number; tasksLimited: boolean;
   feedback: { category: string }[]; timezone: string | null; executionEnabled: boolean;
   browserReadiness?: BrowserReadiness;
 };
@@ -63,7 +63,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {visible.length === 0 && <p className="empty-card">Inga sparade uppdrag i denna vy. Granska förslagen nedan eller lägg till ett missat uppdrag.</p>}
       {visible.map(t => <button key={t.id} className={`assistant-task ${t.id === selected ? "selected" : ""}`} onClick={() => onSelect(t.id)}><span>{kindLabels[t.kind]} · {statusLabels[t.status]}</span><strong>{t.plan.evidence.title || "Konversation"}</strong><span>{t.plan.evidence.personName}</span><small>{t.plan.evidence.source} · {t.plan.evidence.account}</small>{t.plan.followUpAt && <small>Följ upp {new Date(t.plan.followUpAt).toLocaleString("sv-SE")}</small>}</button>)}
     </section><section className="assistant-detail" aria-label="Granska uppdrag">{task ? <TaskDetail key={`${task.id}:${task.revision}`} task={task} people={people} busy={busy} act={act} snapshot={snapshot} onRefresh={onRefresh} /> : <div className="empty-card"><h2>Välj ett uppdrag</h2><p>Här visas original, föreslagna steg, mottagare och ditt redigerbara svar.</p></div>}</section></div>
-    <section className="assistant-proposals"><h2>Förslag från konversationer</h2><p>Senaste hämtningen granskade {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} e-post och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden föreslås inte. Förslagen är inte godkännanden.</p>
+    <section className="assistant-proposals"><h2>Förslag från konversationer</h2><p>Senaste hämtningen granskade {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post från de senaste ${snapshot.emailWindowDays ?? 7} dagarna och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden föreslås inte. Förslagen är inte godkännanden.</p>
       <div className="assistant-proposal-grid">{snapshot.candidates.map(c => <article className="assistant-task" key={`${c.messageId}:${c.kind}`}><small>{kindLabels[c.kind]} · {c.plan.evidence.source}</small><h3>{c.plan.evidence.title}</h3><p>{c.plan.evidence.personName} · {c.plan.evidence.account}</p><p>{c.plan.reason}</p><button className="btn" disabled={busy} onClick={() => act({ action: "start", messageId: c.messageId, kind: c.kind })}>Förbered uppdrag</button></article>)}</div>
       {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska nästa 100 äldre meddelanden</button>}
       <details><summary>AI missade ett uppdrag</summary><label>Välj meddelande från hämtat underlag<select value={manualMessage} onChange={e => setManualMessage(e.target.value)}><option value="">Välj meddelande</option>{snapshot.reviewMessages.map(m => <option key={m.id} value={m.id}>{m.person} · {m.title}</option>)}</select></label><label>Vad behöver göras?<select value={manualKind} onChange={e => setManualKind(e.target.value as TaskKind)}>{kinds.map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label><button className="btn" disabled={busy || !manualMessage} onClick={() => act({ action: "start", messageId: manualMessage, kind: manualKind })}>Skapa för granskning</button></details>
@@ -71,7 +71,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
     <details className="assistant-quality"><summary>Kvalitetsuppföljning</summary><p>Senaste högst 1 000 registrerade omdömen: {quality.wrong_recipient} fel mottagare · {quality.not_relevant} irrelevanta · {quality.missed_task} missade uppdrag · {quality.draft_edited} ändrade utkast · {quality.useful} användbara.</p><p>Detta mäter dina omdömen, inte en automatiskt uppmätt träffsäkerhet. Prioritetskorrigeringar använder befintlig inlärning. Övriga omdömen ändrar inte din persona utan granskning.</p></details>
   </>;
 }
-function TaskDetail({ task, people, busy, act, snapshot }: { task: Task; people: CommunicationPersonOption[]; busy: boolean; act: Api; snapshot: AssistantSnapshot; onRefresh: () => Promise<void> }) {
+function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Task; people: CommunicationPersonOption[]; busy: boolean; act: Api; snapshot: AssistantSnapshot; onRefresh: () => Promise<void> }) {
   const p = task.plan, e = p.evidence;
   const [draft, setDraft] = useState(p.draft), [person, setPerson] = useState(p.recipientPersonId ?? ""), [search, setSearch] = useState("");
   const [followAt, setFollowAt] = useState(p.followUpAt ? new Date(Date.parse(p.followUpAt) - new Date(p.followUpAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
@@ -83,11 +83,12 @@ function TaskDetail({ task, people, busy, act, snapshot }: { task: Task; people:
   const run = (action: string, extra: Record<string, unknown> = {}) => act({ action, id: task.id, revision: task.revision, ...extra });
   return <>
     <p className="eyebrow">{kindLabels[task.kind]} · {statusLabels[task.status]}</p><h2>{e.title}</h2>
-    <PersonLink personId={e.personId ?? undefined} name={e.personName} /><p>{e.source} · {e.account}</p><p>{p.reason}</p>
-    <details><summary>Originalmeddelande och underlag</summary><p className="assistant-original">{e.body}</p><p>Inkommande instruktioner är underlag, aldrig tillstånd att agera. Profilförslag måste granskas i Intelligence.</p></details>
+    <PersonLink personId={e.personId ?? undefined} name={e.personName} /><p>{e.source} · {e.account}</p>
+    <section className="assistant-original-card" aria-label="Kontaktens originalmeddelande"><h3>Kontaktens originalmeddelande</h3><p className="assistant-original">{e.body || "Originaltexten saknas i den synkroniserade posten."}</p></section>
+    <p>{p.reason}</p><p className="assistant-notice">Inkommande instruktioner är underlag, aldrig tillstånd att agera. Profilförslag måste granskas i Intelligence.</p>
     <ol className="assistant-steps">{p.steps.map(s => <li key={s}>{s}</li>)}</ol>
     {task.kind === "meeting" && editable && <><button className="btn" onClick={() => setMeeting(v => !v)}>Planera i masterkalendern</button>{meeting && (snapshot.timezone ? <AssistantMeeting timezone={snapshot.timezone} plan={p} onDone={() => run("reconcile")} /> : <p role="alert">Masterkalenderns tidszon kunde inte läsas. Anslut kalendern innan bokning.</p>)}</>}
-    {task.kind === "website" && <AssistantBrowserStatus task={task} readiness={snapshot.browserReadiness} />}
+    {task.kind === "website" && <AssistantBrowserStatus task={task} readiness={snapshot.browserReadiness} onRefresh={onRefresh} />}
     {!["meeting", "website"].includes(task.kind) && <>
       {task.kind === "forward" && editable && <fieldset disabled={busy}><legend>Välj rådgivare från Contacts</legend><label>Sök namn, roll, organisation eller land<input value={search} onChange={v => { setSearch(v.target.value); setApproved(false); }} /></label><select aria-label="Rådgivare" value={person} onChange={v => { setPerson(v.target.value); setApproved(false); }}><option value="">Välj mottagare</option>{people.filter(c => c.id === person || `${c.name} ${c.organization} ${c.relationship} ${c.professionalSpecialty} ${c.jurisdiction}`.toLowerCase().includes(search.toLowerCase())).slice(0, 100).map(c => <option key={c.id} value={c.id}>{c.name} · {c.professionalSpecialty || c.relationship} · {c.jurisdiction}</option>)}</select><p>Adressen verifieras när du sparar. Originalmeddelandet följer med; granska även dess känsliga innehåll och bilagor.</p></fieldset>}
       <label>Förslag på {task.kind === "forward" ? "introduktion" : "svar"}<textarea rows={9} maxLength={4000} value={draft} readOnly={!editable} onChange={v => { setDraft(v.target.value); setApproved(false); }} /></label>

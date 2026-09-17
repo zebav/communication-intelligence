@@ -72,12 +72,15 @@ export async function readEvidence(db: SupabaseClient, owner: string, id: string
   return evidenceFromRow(data);
 }
 export async function readCandidates(db: SupabaseClient, owner: string, before?: string) {
-  // Email and messaging channels have independent pages. A busy chat channel
-  // must never crowd older actionable email out of the review window.
+  // Email and messaging channels have independent pages. Email is ranked over
+  // a real seven-day window so a newer newsletter cannot hide an older task.
   const offset = Math.max(0, Number(before) || 0);
   const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").order("created_at", { ascending: false }).order("id", { ascending: false });
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
   const [email, other] = await Promise.all([
-    query().eq("source", "email").range(offset, offset + 99),
+    db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email")
+      .gte("sent_at", sevenDaysAgo).order("importance_score", { ascending: false, nullsFirst: false })
+      .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 99),
     query().neq("source", "email").range(offset, offset + 99),
   ]);
   if (email.error || other.error) throw new Error("Underlaget kunde inte hämtas. Försök igen; befintliga uppdrag finns kvar.");
@@ -86,6 +89,7 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
     messages: rows.map(evidenceFromRow),
     next: email.data?.length === 100 || other.data?.length === 100 ? String(offset + 100) : null,
     scannedBySource: { email: email.data?.length ?? 0, messaging: other.data?.length ?? 0 },
+    emailWindowDays: 7,
   };
 }
 export async function readTask(db: SupabaseClient, owner: string, id: string): Promise<Task> {

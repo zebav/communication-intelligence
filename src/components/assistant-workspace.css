@@ -19,6 +19,8 @@
 .assistant-workspace details { margin:20px 0; }
 .assistant-workspace summary { cursor:pointer; line-height:1.6; }
 .assistant-original { white-space:pre-wrap; max-height:320px; overflow:auto; padding:12px; background:#080f19; border-radius:8px; }
+.assistant-original-card { margin:20px 0; padding:18px; border:1px solid #475569; border-radius:12px; background:#0b1420; }
+.assistant-original-card h3 { margin-top:0; }
 .assistant-notice,.assistant-alert { padding:16px; border-radius:10px; border:1px solid #475569; line-height:1.65; background:#172432; }
 .assistant-alert { border-color:#e8a44e; }
 .assistant-steps { padding-left:24px; margin:20px 0; }

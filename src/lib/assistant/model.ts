@@ -31,8 +31,10 @@ export function propose(e: Evidence, now = Date.now()): TaskKind[] {
   if (e.lastOtherAt && Date.parse(e.lastOtherAt) > Date.parse(e.sentAt)) return [];
   if (bulk.has(e.classification)) return [];
   const a = e.analysis;
+  const context = `${a.intent ?? ""} ${a.summary ?? ""} ${e.title} ${e.body}`;
   if (a.forwardingSuggestion?.recommended) return ["forward"];
-  if (a.requiresReply && /\b(möte|middag|lunch|meeting|dinner|träffas|ses|appointment)\b/i.test(`${a.intent ?? ""} ${e.title}`)) return ["meeting"];
+  if (/(book|reserve|reservation|boka|bokning|reservera)/i.test(context) && /(hotel|hotell|restaurant|restaurang|table|bord|room|rum)/i.test(context)) return ["website"];
+  if (a.requiresReply && /\b(möte|middag|lunch|fika|padel|meeting|dinner|coffee|träffas|ses|appointment)\b/i.test(context)) return ["meeting"];
   if (a.actionSuggestion?.detected) return ["website"];
   if (a.commitment?.detected && a.commitment.owner === "sender") {
     return a.commitment.dueAt && Date.parse(a.commitment.dueAt) < now ? ["follow_up"] : [];

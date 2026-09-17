@@ -45,7 +45,11 @@ export async function GET(request: Request) {
       db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle(),
     ]);
     if (tasks.error || feedback.error) throw new Error("Handlingsinkorgens databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
-    const stored = tasks.data as Task[];
+    const evidenceByMessage = new Map(page.messages.map(evidence => [evidence.messageId, evidence]));
+    const stored = (tasks.data as Task[]).map(task => {
+      const evidence = evidenceByMessage.get(task.message_id);
+      return evidence ? { ...task, plan: { ...task.plan, evidence } } : task;
+    });
     const waiting = stored.filter(t => t.status === "waiting" && t.kind !== "forward");
     if (waiting.length) {
       const { data: conversations, error } = await db.from("conversations").select("id,last_other_message_at").eq("owner_id", owner).in("id", [...new Set(waiting.map(t => t.plan.evidence.conversationId))]);
@@ -59,7 +63,7 @@ export async function GET(request: Request) {
     if (existingError) throw new Error("Dubblettkontrollen kunde inte slutföras.");
     const keys = new Set((existing ?? []).map(t => `${t.message_id}:${t.kind}`));
     const candidates = page.messages.flatMap(e => propose(e).filter(kind => !keys.has(`${e.messageId}:${kind}`)).map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind) })));
-    return json({ tasks: stored, candidates, reviewMessages: page.messages.map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, tasksLimited: stored.length === 500, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
+    return json({ tasks: stored, candidates, reviewMessages: page.messages.map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 500, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
   } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
 }
 export async function POST(request: NextRequest) {

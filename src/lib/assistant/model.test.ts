@@ -13,6 +13,11 @@ describe("action discovery", () => {
     expect(propose({ ...example, lastOtherAt: "2026-09-17T11:00:00Z" })).toEqual([]);
   });
   it("routes meeting requests into scheduling, not duplicate reply tasks", () => expect(propose({ ...example, title: "Kan vi boka ett möte?" })).toEqual(["meeting"]));
+  it("finds a meeting request in the original message body", () => expect(propose({ ...example, title: "Fråga", body: "Kan vi ses på lunch nästa vecka?" })).toEqual(["meeting"]));
+  it("routes restaurant and hotel reservations into secure web planning", () => {
+    expect(propose({ ...example, title: "Fråga", body: "Please book a restaurant table for four" })).toEqual(["website"]);
+    expect(propose({ ...example, title: "Fråga", body: "Boka ett hotellrum i Madrid" })).toEqual(["website"]);
+  });
   it("routes legal forwarding once and never invents the advisor", () => {
     const e = { ...example, analysis: { ...example.analysis, forwardingSuggestion: { recommended: true, recipientRole: "lawyer" as const, reason: "Granska avtalet", introduction: "Kan du granska detta avtal?" } } };
     expect(propose(e)).toEqual(["forward"]);
