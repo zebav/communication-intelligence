@@ -5,6 +5,7 @@ import type {PlaceCandidate} from "@/lib/calendar/places-routing";
 import type {MeetingDetails} from "@/lib/calendar/meeting-details";
 import {meetingDetailsSchema} from "@/lib/calendar/meeting-details";
 import {MeetingPeoplePicker,MeetingPlacePicker,type MeetingPerson} from "./calendar-meeting-pickers";
+import {refreshBookingCalendars} from "@/lib/calendar/booking-preflight";
 
 export type TravelDraft={origin:PlaceCandidate|null;meeting:PlaceCandidate|null;next:PlaceCandidate|null;departure:string;arrival:string;mode:"DRIVE"|"WALK"|"BICYCLE"|"TRANSIT"};
 export const emptyTravel:TravelDraft={origin:null,meeting:null,next:null,departure:"",arrival:"",mode:"DRIVE"};
@@ -44,11 +45,12 @@ export function CalendarMeetingComposer({timezone,onDone,initialStart="",initial
     const details=meetingDetailsSchema.parse({description,personIds:people.map(p=>p.id),googlePlaceId:physical?travel.meeting?.id??null:place?.id??null,attendees:[...people.map(p=>p.invitationEmail).filter(Boolean),...attendees.split(/[;,\n]+/).map(s=>s.trim()).filter(Boolean)],locationLabel:location,travel:physical?travelInput(travel,from,to,timezone):null});
     body={action:"hold",title,start:from,end:to,preparation:rules.preparationMinutes,recovery:rules.recoveryMinutes,physical,conversationId:null,details};
    } else {if(!plan)throw new Error("Granska förslaget först.");body={action:action==="confirm"?"confirm":"release",holdId:plan.id,approved:true,approvedInvitations:approved};}
+   if(action!=="release")await refreshBookingCalendars(setNotice);
    const r=await fetch("/api/calendar",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),d=await r.json();if(!r.ok)throw new Error(d.error);
-   if(action==="prepare"){setPlan(d.hold);setApproved(false);setTravelReview(d.travelReview??null);}
+   if(action==="prepare"){setNotice("");setPlan(d.hold);setApproved(false);setTravelReview(d.travelReview??null);}
    else {setNotice(d.warning||(action==="release"?"Reservationen är släppt.":plan!.meeting_details.attendees.length?"Mötet är skapat och Google har tagit emot utskicket. Leverans till mottagarnas inkorgar kan inte bekräftas här.":"Mötet är skapat utan inbjudningar."));setPlan(null);if(action==="confirm"){setTitle("");setAttendees("");setPeople([]);setPlace(null);setLocation("");setDescription("");setTravel(emptyTravel);setPhysical(false);}}
    await onDone();
-  }catch(e){setError(e instanceof Error?e.message:"Kontrollera mötesuppgifterna.");}finally{setBusy(false);}
+  }catch(e){setNotice("");setError(e instanceof Error?e.message:"Kontrollera mötesuppgifterna.");}finally{setBusy(false);}
  };
  return <details className="calendar-panel" open={expanded||undefined}><summary>Nytt möte · plats, resa och inbjudningar</summary>
   <p>Först kontrolleras tiden och reserveras preliminärt. Bokning och utskick kräver ett separat godkännande.</p>

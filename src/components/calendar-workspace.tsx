@@ -11,6 +11,7 @@ import {calendarDisplay} from "@/lib/calendar/display";
 import {CalendarPlanning} from "./calendar-planning";
 import {CalendarCommitmentReview} from "./calendar-commitment-review";
 import {transferFingerprint} from "@/lib/calendar/transfer-format";
+import {transferBatch} from "@/lib/calendar/transfer-batch";
 import {CalendarEventActions} from "./calendar-event-actions";
 import {CalendarIntents} from "./calendar-intents";
 import {CalendarMeetingComposer} from "./calendar-meeting-composer";
@@ -63,6 +64,12 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
   }catch(e){setError(e instanceof Error?e.message:"Kalenderfel");}finally{setBusy(false);}
  };
  const fmt=(value:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,dateStyle:"medium",timeStyle:"short"}).format(new Date(value));
+ const copyMany=async(sourceId:string,events:CalendarEvent[])=>{
+  setBusy(true);setError("");setStatus("");setSlots([]);
+  try{const total=await transferBatch(sourceId,events,(done,total,title)=>setStatus(`${done} av ${total} bekräftade. Kontrollerar: ${title}`));setStatus(`${total} kopior bekräftade i masterkalendern. Inga inbjudningar skickades.`);}
+  catch(e){setError(e instanceof Error?e.message:"Överföringen stoppades.");setStatus("");}
+  finally{try{await load();}catch{setError(previous=>`${previous} Kalendervyn kunde inte uppdateras. Hämta den på nytt innan du fortsätter.`);}setBusy(false);}
+ };
  const day=(value:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(value));
  const master=data?.sources.find(s=>s.is_master);
  const display=calendarDisplay(data?.sources??[],data?.accounts??[]);
@@ -90,7 +97,7 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
    <section className="calendar-panel"><h2>Samlad synkronisering och avstämning</h2><p>Automatisk hämtning ändrar inte dina bokningar eller godkänner åtaganden. Inför en bokning kontrolleras att underlaget är färskt.</p>
    {!data.syncJobs?.length?<p>Ingen automatisk körning har verifierats ännu. Du kan hämta kalendrarna manuellt.</p>:data.syncJobs.map(job=><p key={job.account_id}><strong>{data.accounts.find(a=>a.id===job.account_id)?.address||"Kalenderkonto"}</strong>: {job.last_error||(!job.last_success_at?"Väntar på första lyckade hämtningen.":now-Date.parse(job.last_success_at)>30*60000?"Automatisk hämtning är försenad. Synkronisera manuellt vid behov.":"Automatisk hämtning fungerar.")} {job.last_success_at&&`Senast lyckad: ${new Date(job.last_success_at).toLocaleString("sv-SE")}`}</p>)}
    <button className="btn primary" disabled={busy} onClick={()=>run({action:"sync_all"})}>{busy?"Arbetar…":"Synkronisera alla kalendrar"}</button>
-    {external.map(source=><CalendarCommitmentReview key={source.id} name={source.name} account={data.accounts.find(a=>a.id===source.account_id)?.address??""} events={source.snapshot} master={master?.snapshot??[]} now={now} busy={busy||!master} format={fmt} onCopy={event=>run({action:"transfer",sourceId:source.id,eventId:event.id,fingerprint:transferFingerprint(event),approved:true})}/>)}
+    {external.map(source=><CalendarCommitmentReview key={source.id} name={source.name} account={data.accounts.find(a=>a.id===source.account_id)?.address??""} events={source.snapshot} master={master?.snapshot??[]} now={now} busy={busy||!master} format={fmt} onCopyMany={events=>copyMany(source.id,events)} onCopy={event=>run({action:"transfer",sourceId:source.id,eventId:event.id,fingerprint:transferFingerprint(event),approved:true})}/>)}
    </section>
    <details className="calendar-panel"><summary>Mötesförfrågningar från konversationer</summary><p>Första urvalet bygger på tydliga mötesord. Datum och bokning måste granskas av dig.</p>{conversations.filter(c=>schedulingIntent(c.text).detected).slice(0,30).map(c=>{const intent=schedulingIntent(c.text);return <div className="calendar-account" key={c.id}><div><strong>{c.person}</strong><small>{c.title}</small><small>{intent.reason}</small></div>{intent.operation==="propose"?<button className="btn" onClick={()=>{const defaults=meetingDefaults[intent.type];setConversationId(c.id);setTitle(c.title.slice(0,300));setDuration(defaults.durationMinutes);setPreparation(defaults.preparationMinutes);setRecovery(defaults.recoveryMinutes);if(intent.date)setDate(intent.date);setSlots([]);setStatus(intent.reason);}}>Ta fram tidsförslag</button>:<span>Granska befintlig bokning i kalendern. Inget ändras automatiskt.</span>}</div>;})}</details>
    <section className="calendar-panel"><h2>1. Synkronisera och stäm av</h2><p>Synkronisering hämtar 7 dagar bakåt och 60 dagar framåt. Granska bokningarna nedan innan du godkänner att underlaget är avstämt.</p>
