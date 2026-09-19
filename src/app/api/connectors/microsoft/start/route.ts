@@ -26,13 +26,13 @@ export async function GET(request: NextRequest) {
       stableStart.searchParams.set("return_to", request.nextUrl.origin);
       return NextResponse.redirect(stableStart);
     }
-    const attempt = createOAuthAttempt();
+    const returnTo = permittedReturnOrigin(request.nextUrl.searchParams.get("return_to"));
+    const attempt = createOAuthAttempt(returnTo);
     const cookieStore = await cookies();
     const options = { httpOnly: true, secure: true, sameSite: "lax" as const, maxAge: 600, path: MICROSOFT_OAUTH_COOKIE_PATH };
     cookieStore.set("microsoft_oauth_purpose", "mail", options);
     cookieStore.set("microsoft_oauth_state", attempt.state, options);
     cookieStore.set("microsoft_oauth_verifier", attempt.verifier, options);
-    const returnTo = permittedReturnOrigin(request.nextUrl.searchParams.get("return_to"));
     if (returnTo) cookieStore.set("microsoft_oauth_return_to", returnTo, options);
     else cookieStore.delete("microsoft_oauth_return_to");
     return NextResponse.redirect(authorizationUrl(config, attempt.state, attempt.challenge));

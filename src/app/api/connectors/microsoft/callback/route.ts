@@ -10,16 +10,26 @@ import { createClient } from "@/lib/supabase/server";
 type TokenResponse = { access_token: string; refresh_token?: string; expires_in: number; scope?: string; token_type: string };
 type MicrosoftProfile = { id: string; displayName?: string; mail?: string; userPrincipalName?: string };
 
+function stateReturnOrigin(state: string | null) {
+  if (!state) return null;
+  const encoded = state.split(".")[1];
+  if (!encoded) return null;
+  try {
+    const url = new URL(Buffer.from(encoded, "base64url").toString("utf8"));
+    return url.protocol === "https:" && /^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname) ? url.origin : null;
+  } catch { return null; }
+}
+
 function sameState(left: string, right: string) {
   const a = Buffer.from(left);
   const b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-async function resultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
+async function resultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed", validatedState?: string | null) {
   const cookieStore = await cookies();
-  const target = cookieStore.get("microsoft_oauth_return_to")?.value;
-  cookieStore.delete("microsoft_oauth_return_to");
+  const target = cookieStore.get("microsoft_oauth_return_to")?.value ?? stateReturnOrigin(validatedState ?? null);
+  cookieStore.delete({ name: "microsoft_oauth_return_to", path: "/api/connectors/microsoft" });
   try {
     const url = new URL(target ?? request.nextUrl.origin);
     if (url.protocol !== "https:" || !/^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname)) throw new Error("invalid return target");
@@ -29,7 +39,7 @@ async function resultRedirect(request: NextRequest, result: "connected" | "denie
 }
 
 export async function GET(request: NextRequest) {
-  if((await cookies()).get("microsoft_oauth_purpose")?.value==="calendar") return finishCalendarConsent(request,"microsoft");
+  if ((await cookies()).get("microsoft_oauth_purpose")?.value === "calendar") return finishCalendarConsent(request, "microsoft");
   if (request.nextUrl.searchParams.get("error")) return await resultRedirect(request, "denied");
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
@@ -105,7 +115,7 @@ export async function GET(request: NextRequest) {
       : supabase.from("connections").insert(values);
     const { error: saveError } = await query;
     if (saveError) return await resultRedirect(request, "failed");
-    return await resultRedirect(request, "connected");
+    return await resultRedirect(request, "connected", state);
   } catch {
     return await resultRedirect(request, "failed");
   }
