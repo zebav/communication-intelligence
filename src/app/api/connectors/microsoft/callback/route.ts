@@ -16,13 +16,21 @@ function sameState(left: string, right: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function resultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
-  return NextResponse.redirect(new URL(`/?microsoft=${result}`, request.url));
+async function resultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
+  const cookieStore = await cookies();
+  const target = cookieStore.get("microsoft_oauth_return_to")?.value;
+  cookieStore.delete("microsoft_oauth_return_to");
+  try {
+    const url = new URL(target ?? request.nextUrl.origin);
+    if (url.protocol !== "https:" || !/^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname)) throw new Error("invalid return target");
+    url.pathname = "/"; url.search = `?microsoft=${result}`; url.hash = "";
+    return NextResponse.redirect(url);
+  } catch { return NextResponse.redirect(new URL(`/?microsoft=${result}`, request.url)); }
 }
 
 export async function GET(request: NextRequest) {
   if((await cookies()).get("microsoft_oauth_purpose")?.value==="calendar") return finishCalendarConsent(request,"microsoft");
-  if (request.nextUrl.searchParams.get("error")) return resultRedirect(request, "denied");
+  if (request.nextUrl.searchParams.get("error")) return await resultRedirect(request, "denied");
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
   const cookieStore = await cookies();
@@ -30,7 +38,7 @@ export async function GET(request: NextRequest) {
   const verifier = cookieStore.get("microsoft_oauth_verifier")?.value;
   cookieStore.delete("microsoft_oauth_state");
   cookieStore.delete("microsoft_oauth_verifier");
-  if (!code || !state || !expectedState || !verifier || !sameState(state, expectedState)) return resultRedirect(request, "invalid");
+  if (!code || !state || !expectedState || !verifier || !sameState(state, expectedState)) return await resultRedirect(request, "invalid");
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -54,18 +62,18 @@ export async function GET(request: NextRequest) {
       }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!tokenResponse.ok) return resultRedirect(request, "failed");
+    if (!tokenResponse.ok) return await resultRedirect(request, "failed");
     const tokens = await tokenResponse.json() as TokenResponse;
-    if (!tokens.access_token) return resultRedirect(request, "failed");
+    if (!tokens.access_token) return await resultRedirect(request, "failed");
 
     const profileResponse = await fetch("https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName", {
       headers: { authorization: `Bearer ${tokens.access_token}` },
       signal: AbortSignal.timeout(15_000),
     });
-    if (!profileResponse.ok) return resultRedirect(request, "failed");
+    if (!profileResponse.ok) return await resultRedirect(request, "failed");
     const profile = await profileResponse.json() as MicrosoftProfile;
     const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
-    if (!encryptionKey || !profile.id) return resultRedirect(request, "failed");
+    if (!encryptionKey || !profile.id) return await resultRedirect(request, "failed");
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
     const encryptedCredentials = encryptCredential({
       accessToken: tokens.access_token,
@@ -96,9 +104,9 @@ export async function GET(request: NextRequest) {
       ? supabase.from("connections").update(values).eq("id", existing.id)
       : supabase.from("connections").insert(values);
     const { error: saveError } = await query;
-    if (saveError) return resultRedirect(request, "failed");
-    return resultRedirect(request, "connected");
+    if (saveError) return await resultRedirect(request, "failed");
+    return await resultRedirect(request, "connected");
   } catch {
-    return resultRedirect(request, "failed");
+    return await resultRedirect(request, "failed");
   }
 }
