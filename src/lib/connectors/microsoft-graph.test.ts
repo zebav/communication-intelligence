@@ -13,9 +13,9 @@ describe("microsoftGraphConnector", () => {
     expect(microsoftGraphConnector.capabilities.pushNotifications).toBe(true);
   });
 
-  it("requests delegated mail access and keeps destructive automation disabled", () => {
+  it("requests delegated mail and read-only contact access while keeping destructive automation disabled", () => {
     expect(microsoftGraphConnector.scopes).toEqual([
-      "openid", "profile", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send",
+      "openid", "profile", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Contacts.Read",
     ]);
     expect(microsoftGraphConnector.capabilities.sendWithApproval).toBe(true);
     expect(microsoftGraphConnector.capabilities.permanentDelete).toBe(false);
