@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { makePlan, mayTransition, propose, sendCapability, taskBucket, type Evidence, type Task } from "./model";
+import { candidateRank, makePlan, mayTransition, propose, sendCapability, taskBucket, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
@@ -8,6 +8,10 @@ describe("action discovery", () => {
   it("proposes a reply only from analysis evidence", () => expect(propose(example)).toEqual(["reply"]));
   it.each(["Marketing", "Newsletter", "Spam", "Information Only", "Notification", "Receipt / Invoice"])("does not turn %s priority 10 into an action", classification => expect(propose({ ...example, classification, priority: 10 })).toEqual([]));
   it("does not infer tasks from unread/urgency alone", () => expect(propose({ ...example, analysis: {}, title: "URGENT" })).toEqual([]));
+  it("ranks an unread actionable request higher without making unread mail actionable", () => {
+    expect(candidateRank({ ...example, unread: true }, "reply")).toBeGreaterThan(candidateRank({ ...example, unread: false }, "reply"));
+    expect(propose({ ...example, unread: true, analysis: {}, title: "URGENT" })).toEqual([]);
+  });
   it("ignores answered and superseded messages", () => {
     expect(propose({ ...example, lastUserAt: "2026-09-17T11:00:00Z" })).toEqual([]);
     expect(propose({ ...example, lastOtherAt: "2026-09-17T11:00:00Z" })).toEqual([]);

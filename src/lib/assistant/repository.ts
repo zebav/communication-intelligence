@@ -62,6 +62,7 @@ export function evidenceFromRow(value: unknown): Evidence {
     title: str(c.title), body: str(row.body_text), sentAt: str(row.sent_at), direction: row.direction as "in" | "out",
     lastUserAt: str(c.last_user_message_at) || null, lastOtherAt: str(c.last_other_message_at) || null,
     classification: str(row.classification), priority: Number(row.importance_score ?? 0), analysis: storedAnalysis(object(row.metadata).ai_analysis),
+    unread: object(row.metadata).is_read === false || object(row.metadata).isRead === false,
     recipient: row.source === "email" ? str(identity.external_identifier) : str(c.external_conversation_id).split(":").at(-1) ?? "",
   };
   return { ...e, version: createHash("sha256").update(JSON.stringify(e)).digest("hex") };
@@ -72,16 +73,17 @@ export async function readEvidence(db: SupabaseClient, owner: string, id: string
   return evidenceFromRow(data);
 }
 export async function readCandidates(db: SupabaseClient, owner: string, before?: string) {
-  // Email and messaging channels have independent pages. Email is ranked over
-  // a real seven-day window so a newer newsletter cannot hide an older task.
+  // Email and messaging channels have independent pages. The 30-day window is
+  // intentional: older unanswered requests remain visible, but bounded reads
+  // keep loading the action inbox fast.
   const offset = Math.max(0, Number(before) || 0);
   const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").order("created_at", { ascending: false }).order("id", { ascending: false });
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
   const [email, other] = await Promise.all([
     db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email")
-      .gte("sent_at", sevenDaysAgo).order("importance_score", { ascending: false, nullsFirst: false })
+      .gte("sent_at", thirtyDaysAgo).order("importance_score", { ascending: false, nullsFirst: false })
       .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 99),
-    query().neq("source", "email").range(offset, offset + 99),
+    query().neq("source", "email").gte("sent_at", thirtyDaysAgo).range(offset, offset + 99),
   ]);
   if (email.error || other.error) throw new Error("Underlaget kunde inte hämtas. Försök igen; befintliga uppdrag finns kvar.");
   const rows = [...(email.data ?? []), ...(other.data ?? [])].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
@@ -89,7 +91,7 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
     messages: rows.map(evidenceFromRow),
     next: email.data?.length === 100 || other.data?.length === 100 ? String(offset + 100) : null,
     scannedBySource: { email: email.data?.length ?? 0, messaging: other.data?.length ?? 0 },
-    emailWindowDays: 7,
+    emailWindowDays: 30,
   };
 }
 export async function readTask(db: SupabaseClient, owner: string, id: string): Promise<Task> {

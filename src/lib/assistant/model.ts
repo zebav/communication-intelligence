@@ -13,7 +13,8 @@ export type Evidence = {
   source: Source; connectionId: string | null; provider: string; account: string;
   title: string; body: string; sentAt: string; direction: "in" | "out";
   lastUserAt: string | null; lastOtherAt: string | null; classification: string; priority: number;
-  analysis: Partial<EmailAnalysis>; recipient: string; version: string;
+  /** Read state affects ranking only. It can never create an action by itself. */
+  unread?: boolean; analysis: Partial<EmailAnalysis>; recipient: string; version: string;
 };
 export type Plan = {
   evidence: Evidence; draft: string; originalDraft: string; reason: string;
@@ -40,6 +41,22 @@ export function propose(e: Evidence, now = Date.now()): TaskKind[] {
     return a.commitment.dueAt && Date.parse(a.commitment.dueAt) < now ? ["follow_up"] : [];
   }
   return a.requiresReply ? ["reply"] : [];
+}
+
+/** Deterministic ordering for already-actionable candidates. This intentionally
+ * does not decide whether a message needs action: `propose` does that from
+ * stored analysis evidence. It keeps unread, relationship-backed requests near
+ * the top without promoting campaigns or urgency wording on their own. */
+export function candidateRank(e: Evidence, kind: TaskKind, now = Date.now()) {
+  const a = e.analysis;
+  let score = Math.max(0, Math.min(10, e.priority || 0)) * 10;
+  if (e.unread) score += 12;
+  if (a.forwardingSuggestion?.recommended) score += 25;
+  if (a.actionSuggestion?.detected || kind === "website") score += 18;
+  if (kind === "meeting") score += 15;
+  if (a.commitment?.detected) score += 10;
+  const ageDays = Math.max(0, (now - Date.parse(e.sentAt)) / 86_400_000);
+  return score - Math.min(ageDays, 30) * 0.15;
 }
 export function makePlan(e: Evidence, kind: TaskKind): Plan {
   const draft = kind === "forward" ? e.analysis.forwardingSuggestion?.introduction ?? "" : kind === "follow_up" ? "" : e.analysis.draftResponse ?? "";

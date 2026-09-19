@@ -22,4 +22,14 @@ describe("historical assistant evidence", () => {
     expect(evidence.analysis.commitment?.detected).toBe(true);
     expect(propose(evidence)).toEqual(["reply"]);
   });
+  it("keeps unread state as ranking evidence, never as an automatic task", () => {
+    const evidence = evidenceFromRow({
+      id: "35e15ce1-5ceb-4176-93cc-4ef2ebf1c820", conversation_id: "7f5e805e-a312-4311-b576-39ab99a84ed7",
+      source: "email", direction: "in", body_text: "Information", sent_at: "2026-09-17T17:26:01Z", classification: "Information Only", importance_score: 10,
+      metadata: { is_read: false }, identities: { external_identifier: "news@example.com" },
+      conversations: { id: "7f5e805e-a312-4311-b576-39ab99a84ed7", title: "Nyhetsbrev", person_id: null, connection_id: "268719f0-7b93-457d-8bc4-9c6a9de0252b", external_conversation_id: "thread", last_user_message_at: null, last_other_message_at: "2026-09-17T17:26:01Z", people: null, connections: { provider: "gmail", account_identifier: "me@example.com" } },
+    });
+    expect(evidence.unread).toBe(true);
+    expect(propose(evidence)).toEqual([]);
+  });
 });

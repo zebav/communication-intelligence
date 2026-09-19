@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { editSchema, kinds, makePlan, propose, sendCapability, type Task } from "@/lib/assistant/model";
+import { candidateRank, editSchema, kinds, makePlan, propose, sendCapability, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
@@ -68,7 +68,11 @@ export async function GET(request: Request) {
       const evidence = rule.evidence && typeof rule.evidence === "object" && !Array.isArray(rule.evidence) ? rule.evidence as Record<string, unknown> : {};
       return evidence.assistant_relevance === "sender_irrelevant" && typeof rule.person_id === "string";
     }).map(rule => `${rule.source}:${rule.person_id}`));
-    const candidates = page.messages.flatMap(e => ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e).filter(kind => !keys.has(`${e.messageId}:${kind}`)).map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind) })));
+    const candidates = page.messages.flatMap(e => ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e)
+      .filter(kind => !keys.has(`${e.messageId}:${kind}`))
+      .map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind), rank: candidateRank(e, kind) })))
+      .sort((a, b) => b.rank - a.rank)
+      .map(({ messageId, kind, plan }) => ({ messageId, kind, plan }));
     return json({ tasks: stored, candidates, reviewMessages: page.messages.map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 500, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
   } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
 }
