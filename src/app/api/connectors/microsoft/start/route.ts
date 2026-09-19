@@ -3,6 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { authorizationUrl, createOAuthAttempt, microsoftConfig, MICROSOFT_OAUTH_COOKIE_PATH } from "@/lib/connectors/microsoft-oauth";
 
+function permittedReturnOrigin(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && /^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname) ? url.origin : null;
+  } catch { return null; }
+}
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -13,13 +21,20 @@ export async function GET(request: NextRequest) {
   try {
     const config = microsoftConfig(request.nextUrl.origin);
     const callbackOrigin = new URL(config.redirectUri).origin;
-    if (callbackOrigin !== request.nextUrl.origin) return NextResponse.redirect(new URL(MICROSOFT_OAUTH_COOKIE_PATH + "/start", callbackOrigin));
-    const attempt = createOAuthAttempt();
+    if (callbackOrigin !== request.nextUrl.origin) {
+      const stableStart = new URL(MICROSOFT_OAUTH_COOKIE_PATH + "/start", callbackOrigin);
+      stableStart.searchParams.set("return_to", request.nextUrl.origin);
+      return NextResponse.redirect(stableStart);
+    }
+    const returnTo = permittedReturnOrigin(request.nextUrl.searchParams.get("return_to"));
+    const attempt = createOAuthAttempt(returnTo);
     const cookieStore = await cookies();
     const options = { httpOnly: true, secure: true, sameSite: "lax" as const, maxAge: 600, path: MICROSOFT_OAUTH_COOKIE_PATH };
     cookieStore.set("microsoft_oauth_purpose", "mail", options);
     cookieStore.set("microsoft_oauth_state", attempt.state, options);
     cookieStore.set("microsoft_oauth_verifier", attempt.verifier, options);
+    if (returnTo) cookieStore.set("microsoft_oauth_return_to", returnTo, options);
+    else cookieStore.delete("microsoft_oauth_return_to");
     return NextResponse.redirect(authorizationUrl(config, attempt.state, attempt.challenge));
   } catch {
     return NextResponse.redirect(new URL("/?connection_error=configuration", request.url));

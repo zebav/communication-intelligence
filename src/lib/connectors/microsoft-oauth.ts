@@ -23,8 +23,14 @@ export function microsoftConfig(origin: string) {
   return { clientId, clientSecret, tenant, redirectUri };
 }
 
-export function createOAuthAttempt() {
-  const state = randomBytes(32).toString("base64url");
+/**
+ * The redirect domain registered with Microsoft must be stable. When an OAuth
+ * flow begins in a preview, retain that origin in state as a fallback. The
+ * complete state is verified against the httpOnly cookie before use.
+ */
+export function createOAuthAttempt(returnTo?: string | null) {
+  const nonce = randomBytes(32).toString("base64url");
+  const state = returnTo ? `${nonce}.${Buffer.from(returnTo).toString("base64url")}` : nonce;
   const verifier = randomBytes(64).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   return { state, verifier, challenge };
