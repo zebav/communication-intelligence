@@ -1,108 +1,62 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { KeyRound, Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 
-type Entry = {
-  id: string;
-  category: string;
-  key: string;
-  value: string;
-  sensitivity: "standard" | "personal" | "sensitive" | "restricted";
-  allowedUses: string[];
-  verified: boolean;
-  verifiedAt: string | null;
-  expiresAt?: string | null;
-};
+type Sensitivity = "standard" | "personal" | "sensitive" | "restricted";
+type Entry = { id: string; category: string; key: string; value: string; sensitivity: Sensitivity; allowedUses: string[]; };
+type Draft = { id?: string; category: string; key: string; value: string; sensitivity: Sensitivity; allowedUses: string; };
 
-const empty = { category: "profile", key: "", value: "", sensitivity: "personal" as const, allowedUses: "" };
+const groups = [
+  { id: "identity", label: "Identitet & kontakt", fields: ["Fullständigt namn", "Telefonnummer", "Privat e-post", "Personnummer"] },
+  { id: "home", label: "Adresser & hem", fields: ["Hemadress", "Fritidsboende", "Postadress"] },
+  { id: "work", label: "Yrke & företag", fields: ["Yrke", "Företag", "Organisationsnummer", "Arbetsadress"] },
+  { id: "relationships", label: "Familj & relationer", fields: ["Familjemedlem", "Nyckelrelation", "Nödkontakt"] },
+  { id: "travel", label: "Resor & preferenser", fields: ["Passnummer", "Passets utgångsdatum", "Flygplats", "Resepreferens"] },
+  { id: "documents", label: "Dokument & signaturer", fields: ["Signatur", "Dokumentuppgift", "Försäkringsuppgift"] },
+];
+const emptyDraft = (): Draft => ({ category: "identity", key: "", value: "", sensitivity: "personal", allowedUses: "" });
+const readableCategory = (value: string) => groups.find((group) => group.id === value)?.label ?? value;
 
 export function PersonalKnowledgeVault() {
+  const dialog = useRef<HTMLDialogElement>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [form, setForm] = useState(empty);
+  const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
   const load = async () => {
     const response = await fetch("/api/knowledge", { cache: "no-store" });
     const result = await response.json() as { entries?: Entry[]; error?: string };
     if (!response.ok) throw new Error(result.error ?? "Personal Context kunde inte hämtas.");
     setEntries(result.entries ?? []);
   };
-
   useEffect(() => { queueMicrotask(() => { void load().catch((caught) => setError(caught instanceof Error ? caught.message : "Personal Context kunde inte hämtas.")); }); }, []);
-
-  const grouped = useMemo(() => entries.reduce<Record<string, Entry[]>>((groups, entry) => {
-    (groups[entry.category] ??= []).push(entry);
-    return groups;
-  }, {}), [entries]);
-
+  const grouped = useMemo(() => entries.reduce<Record<string, Entry[]>>((all, entry) => { (all[entry.category] ??= []).push(entry); return all; }, {}), [entries]);
+  const open = (entry?: Entry) => { setMessage(""); setError(""); setDraft(entry ? { ...entry, allowedUses: entry.allowedUses.join(", ") } : emptyDraft()); dialog.current?.showModal(); };
   const save = async () => {
+    if (!draft.key.trim() || !draft.value.trim()) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      const response = await fetch("/api/knowledge", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          category: form.category,
-          key: form.key,
-          value: form.value,
-          sensitivity: form.sensitivity,
-          allowedUses: form.allowedUses.split(",").map((value) => value.trim()).filter(Boolean),
-          verified: true,
-          metadata: {},
-        }),
-      });
+      const response = await fetch("/api/knowledge", { method: draft.id ? "PATCH" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, allowedUses: draft.allowedUses.split(",").map((value) => value.trim()).filter(Boolean), verified: true, metadata: {} }) });
       const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "The entry could not be saved.");
-      setForm(empty); setMessage("Verified knowledge saved."); await load();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "The entry could not be saved."); }
+      if (!response.ok) throw new Error(result.error ?? "Uppgiften kunde inte sparas.");
+      dialog.current?.close(); setMessage("Personlig information har sparats skyddat."); await load();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Uppgiften kunde inte sparas."); }
     finally { setBusy(false); }
   };
-
   const remove = async (id: string) => {
-    if (!window.confirm("Delete this verified knowledge entry?")) return;
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const response = await fetch("/api/knowledge", {
-        method: "DELETE",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "The entry could not be deleted.");
-      setMessage("Knowledge entry deleted."); await load();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "The entry could not be deleted."); }
+    if (!window.confirm("Ta bort den här personliga uppgiften?")) return;
+    setBusy(true); setError("");
+    try { const response = await fetch("/api/knowledge", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) }); const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error ?? "Uppgiften kunde inte tas bort."); setMessage("Uppgiften har tagits bort."); await load(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Uppgiften kunde inte tas bort."); }
     finally { setBusy(false); }
   };
-
-  return <div className="cards">
-    <section className="card">
-      <KeyRound size={18} />
-      <h3>Lägg till verifierad information</h3>
-      <p>Detta kompletterar din befintliga kommunikationsprofil med fakta om dig, exempelvis <code>home_address</code>, <code>mobile_phone</code>, <code>company_registration_number</code> eller <code>preferred_airport</code>.</p>
-      <label>Category<input className="people-search" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} placeholder="profile, home, company, travel…" /></label>
-      <label>Key<input className="people-search" value={form.key} onChange={(event) => setForm({ ...form, key: event.target.value })} placeholder="home_address" /></label>
-      <label>Value<textarea value={form.value} onChange={(event) => setForm({ ...form, value: event.target.value })} placeholder="Verified value" /></label>
-      <label>Sensitivity<select className="filter" value={form.sensitivity} onChange={(event) => setForm({ ...form, sensitivity: event.target.value as typeof form.sensitivity })}><option value="standard">Standard</option><option value="personal">Personal</option><option value="sensitive">Sensitive</option><option value="restricted">Restricted</option></select></label>
-      <label>Allowed uses<input className="people-search" value={form.allowedUses} onChange={(event) => setForm({ ...form, allowedUses: event.target.value })} placeholder="forms, travel, contracts (comma separated)" /></label>
-      <button className="btn primary" disabled={busy || !form.category.trim() || !form.key.trim()} onClick={() => void save()}><Plus size={14} /> {busy ? "Sparar…" : "Spara verifierad fakta"}</button>
-      {message && <p className="positive">{message}</p>}{error && <p className="negative">{error}</p>}
-    </section>
-    <section className="card">
-      <ShieldCheck size={18} />
-      <h3>Din verifierade kontext</h3>
-      <p>AI använder endast specifika uppgifter som behövs för en uppgift. Begränsade värden kräver alltid ett separat godkännande innan de får användas.</p>
-      {entries.length === 0 ? <div className="empty-card">Ingen verifierad personlig kontext sparad ännu.</div> : Object.entries(grouped).map(([category, values]) => <div key={category}>
-        <div className="section-title">{category}</div>
-        <div className="list">{values.map((entry) => <div className="list-row" key={entry.id}>
-          <div><ShieldCheck size={14} /></div>
-          <div><strong>{entry.key}</strong><small>{entry.sensitivity} · {entry.allowedUses.length ? entry.allowedUses.join(", ") : "no use restriction set"}</small></div>
-          <div><span style={{ whiteSpace: "pre-wrap" }}>{entry.value}</span></div>
-          <div><button className="icon-button" aria-label={`Delete ${entry.key}`} disabled={busy} onClick={() => void remove(entry.id)}><Trash2 size={15} /></button></div>
-        </div>)}</div>
-      </div>)}
-    </section>
-  </div>;
+  return <section className="personal-context" aria-label="Personal Context">
+    <div className="personal-context-head"><div><span className="eyebrow">Personal Context</span><h2>Dina privata uppgifter</h2><p>Spara information som kan behövas för planering och godkända uppgifter. Varje uppgift är krypterad och kräver MFA för att läsas.</p></div><button className="btn primary" onClick={() => open()}><Plus size={14} /> Lägg till uppgift</button></div>
+    <div className="personal-context-guide"><ShieldCheck size={17} /><div><strong>En profil, två nivåer</strong><p><b>Your shared foundation</b> ovan styr hur AI kommunicerar. Här sparar du detaljer som adresser, dokument och relationer — utan att skapa en konkurrerande profil eller visa dem för AI om de inte behövs för en godkänd uppgift.</p></div></div>
+    {message && <p className="positive">{message}</p>}{error && <p className="negative">{error}</p>}
+    {entries.length === 0 ? <div className="personal-context-empty"><KeyRound size={18} /><div><strong>Inga privata uppgifter ännu</strong><p>Börja till exempel med hemadress, företag, familjekontakter eller reseuppgifter.</p></div></div> : <div className="personal-context-groups">{Object.entries(grouped).map(([category, values]) => <section key={category} className="personal-context-group"><h3>{readableCategory(category)}</h3>{values.map((entry) => <div className="personal-context-row" key={entry.id}><div><strong>{entry.key}</strong><span>{entry.value}</span><small>{entry.sensitivity === "restricted" ? "Begränsad · separat godkännande" : entry.sensitivity === "sensitive" ? "Känslig" : "Privat"}{entry.allowedUses.length ? ` · ${entry.allowedUses.join(", ")}` : ""}</small></div><div><button className="icon-button" aria-label={`Redigera ${entry.key}`} disabled={busy} onClick={() => open(entry)}><Pencil size={15} /></button><button className="icon-button" aria-label={`Ta bort ${entry.key}`} disabled={busy} onClick={() => void remove(entry.id)}><Trash2 size={15} /></button></div></div>)}</section>)}</div>}
+    <dialog ref={dialog} className="personal-context-dialog" aria-label="Spara personlig uppgift"><div className="personal-context-dialog-head"><div><span className="eyebrow">Skyddad uppgift</span><h2>{draft.id ? "Redigera uppgift" : "Lägg till uppgift"}</h2></div><button className="icon-button" aria-label="Stäng" onClick={() => dialog.current?.close()}><X size={18} /></button></div><div className="case-form"><label>Område<select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>{groups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}</select></label><label>Typ av uppgift<select value={draft.key} onChange={(event) => setDraft({ ...draft, key: event.target.value })}><option value="">Välj eller skriv en egen nedan</option>{groups.find((group) => group.id === draft.category)?.fields.map((field) => <option key={field} value={field.toLowerCase().replaceAll(" ", "_")}>{field}</option>)}</select></label><label>Namn på uppgift<input value={draft.key} onChange={(event) => setDraft({ ...draft, key: event.target.value })} placeholder="Exempel: home_address eller passport_number" /></label><label>Information<textarea value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} placeholder="Skriv den verifierade uppgiften här" /></label><div className="profile-two"><label>Skyddsnivå<select value={draft.sensitivity} onChange={(event) => setDraft({ ...draft, sensitivity: event.target.value as Sensitivity })}><option value="personal">Privat</option><option value="sensitive">Känslig</option><option value="restricted">Begränsad — fråga alltid först</option><option value="standard">Standard</option></select></label><label>Får användas för<input value={draft.allowedUses} onChange={(event) => setDraft({ ...draft, allowedUses: event.target.value })} placeholder="Resor, formulär, avtal" /></label></div><div className="case-form-footer"><small>Uppgiften krypteras innan lagring.</small><button className="btn primary" disabled={busy || !draft.key.trim() || !draft.value.trim()} onClick={() => void save()}>{busy ? "Sparar…" : "Spara skyddat"}</button></div></div></dialog>
+  </section>;
 }

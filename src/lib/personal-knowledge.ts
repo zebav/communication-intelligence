@@ -14,6 +14,7 @@ export const knowledgeEntryInputSchema = z.object({
   expiresAt: z.string().datetime().nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
+export const knowledgeEntryUpdateSchema = knowledgeEntryInputSchema.extend({ id: z.string().uuid() });
 
 export type KnowledgeEntryInput = z.infer<typeof knowledgeEntryInputSchema>;
 export type KnowledgeEntry = KnowledgeEntryInput & {
@@ -80,6 +81,22 @@ export async function deleteKnowledgeEntry(ownerId: string, id: string) {
   if (error) throw error;
 }
 
+export async function updateKnowledgeEntry(ownerId: string, input: z.infer<typeof knowledgeEntryUpdateSchema>) {
+  const parsed = knowledgeEntryUpdateSchema.parse(input);
+  const now = new Date().toISOString();
+  const db = createAdminClient();
+  const { data, error } = await db.from("personal_knowledge_entries").update({
+    category: parsed.category, key: parsed.key,
+    encrypted_value: encryptCredential({ value: parsed.value }, key()),
+    sensitivity: parsed.sensitivity, allowed_uses: parsed.allowedUses,
+    verified_at: parsed.verified ? now : null, expires_at: parsed.expiresAt ?? null,
+    metadata: parsed.metadata, updated_at: now,
+  }).eq("id", parsed.id).eq("owner_id", ownerId).select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("knowledge_entry_not_found");
+  return data;
+}
+
 export async function selectKnowledgeForUse(ownerId: string, input: { keys: Array<{ category: string; key: string }>; use: string; allowRestricted?: boolean }) {
   const requested = new Set(input.keys.map((item) => `${item.category}\u0000${item.key}`));
   const entries = await listKnowledgeEntries(ownerId);
@@ -88,4 +105,3 @@ export async function selectKnowledgeForUse(ownerId: string, input: { keys: Arra
     && (!entry.allowedUses.length || entry.allowedUses.includes(input.use))
     && (!entry.expiresAt || new Date(entry.expiresAt).getTime() > Date.now()));
 }
-
