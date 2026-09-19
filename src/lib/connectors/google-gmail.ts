@@ -10,7 +10,7 @@ export const googleGmailConnector: ConnectorDefinition = {
   availability: "available",
   description: "Private Gmail and Google Workspace mailboxes with separate account identities.",
   setupNote: "Connected securely through Google OAuth.",
-  scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.modify"],
+  scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/contacts.readonly"],
   capabilities: {
     validateConnection: true,
     fullSync: true,
