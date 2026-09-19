@@ -1,5 +1,6 @@
 import { reconcileBrowserSession, type ReconciliationStore } from "./browser-reconciliation";
 import { checkBrowserRequest } from "./browser-network";
+import { PageSetGuard, navigationReachedTarget, type BrowserPage } from "./browser-guards";
 
 type Provider = {
   create(input: { requestId: string; approvedHost: string; targetUrl: string }): Promise<{ sessionId: string }>;
@@ -11,7 +12,7 @@ type Provider = {
  * No production driver is installed yet. Do not equate a preflight DNS lookup with egress protection.
  */
 export interface ReadOnlyBrowserDriver {
-  read(input: { sessionId: string; url: string; signal: AbortSignal; authorize: (url: string, method: string) => Promise<unknown> }): Promise<string>;
+  read(input: { sessionId: string; url: string; signal: AbortSignal; authorize: (url: string, method: string) => Promise<unknown>; pages: PageSetGuard }): Promise<{ text: string; openPages: BrowserPage[]; topFrameUrl: string }>;
 }
 
 export async function runReadOnlyBrowserTask(input: {
@@ -26,6 +27,7 @@ export async function runReadOnlyBrowserTask(input: {
   const { requestId, targetUrl } = input;
   const controller = new AbortController();
   const check = deps.check ?? checkBrowserRequest;
+  const pages = new PageSetGuard(approvedUrls, check);
   const authorize = async (url: string, method: string) => {
     if (controller.signal.aborted) throw new Error("Task ended");
     const result = await check({ url, method, approvedUrls });
@@ -41,15 +43,17 @@ export async function runReadOnlyBrowserTask(input: {
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(new Error("Task deadline")); }, 240_000);
     });
-    let value: string;
+    let value: Awaited<ReturnType<ReadOnlyBrowserDriver["read"]>>;
     try {
-      value = await Promise.race([deps.driver.read({ sessionId, url: targetUrl, signal: controller.signal, authorize }), deadline]);
+      value = await Promise.race([deps.driver.read({ sessionId, url: targetUrl, signal: controller.signal, authorize, pages }), deadline]);
     } finally {
       clearTimeout(timer);
       controller.abort();
     }
-    if (typeof value !== "string" || value.length > 100_000) throw new Error("Invalid result");
-    text = value;
+    if (typeof value?.text !== "string" || value.text.length > 100_000) throw new Error("Invalid result");
+    navigationReachedTarget(targetUrl, value.topFrameUrl);
+    await pages.verify(value.openPages);
+    text = value.text;
   } catch { failed = true; }
   // Always try cleanup, but never infer termination from successful stop submission.
   try { await deps.provider.stop(sessionId); } catch { /* inspect may still prove termination */ }

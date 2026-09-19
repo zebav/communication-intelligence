@@ -31,7 +31,7 @@ function fixture() {
   });
   const provider = browserbaseProvider({ apiKey: "synthetic-key", projectId: "synthetic-project", enabled: true, store, fetcher });
   const check = (value: Parameters<typeof checkBrowserRequest>[0]) => checkBrowserRequest(value, async () => [{ address: "8.8.8.8" }]);
-  const driver = { read: vi.fn(async ({ authorize, url }: { authorize: (url: string, method: string) => Promise<unknown>; url: string }) => { await authorize(url, "GET"); return "Synthetic public page"; }) };
+  const driver = { read: vi.fn(async ({ authorize, url, pages }: { authorize: (url: string, method: string) => Promise<unknown>; url: string; pages: { opened: (page: { id: string; url: string }) => Promise<void> } }) => { await authorize(url, "GET"); await pages.opened({ id: "main", url }); return { text: "Synthetic public page", openPages: [{ id: "main", url }], topFrameUrl: url }; }) };
   return { deps: { enabled: true, store, provider, driver, check }, fetcher, budget: () => budget, row: () => row };
 }
 it("runs reservation → create → authorized read → stop → inspect → close without refunds", async () => {
@@ -45,11 +45,11 @@ it("blocks duplicate replay without another provider call", async () => {
   await expect(runReadOnlyBrowserTask(input, f.deps)).rejects.toThrow(); expect(f.fetcher).toHaveBeenCalledTimes(3);
 });
 it("cleans up after a prohibited redirect", async () => {
-  const f = fixture(); f.deps.driver.read.mockImplementation(async ({ authorize }) => { await authorize("https://other.example/page", "GET"); return "never"; });
+  const f = fixture(); f.deps.driver.read.mockImplementation(async ({ authorize, url }) => { await authorize("https://other.example/page", "GET"); return { text: "never", openPages: [], topFrameUrl: url }; });
   expect(await runReadOnlyBrowserTask(input, f.deps)).toMatchObject({ status: "failed", cleanup: "confirmed", text: null });
 });
 it("blocks form submission and still cleans up", async () => {
-  const f = fixture(); f.deps.driver.read.mockImplementation(async ({ authorize, url }) => { await authorize(url, "POST"); return "never"; });
+  const f = fixture(); f.deps.driver.read.mockImplementation(async ({ authorize, url }) => { await authorize(url, "POST"); return { text: "never", openPages: [], topFrameUrl: url }; });
   expect(await runReadOnlyBrowserTask(input, f.deps)).toMatchObject({ status: "failed", cleanup: "confirmed" });
 });
 it("retains the lock after unconfirmed shutdown", async () => {
@@ -64,7 +64,7 @@ it("rejects unapproved initial URLs before reserving", async () => {
   const f = fixture(); await expect(runReadOnlyBrowserTask({ ...input, approvedUrls: [] }, f.deps)).rejects.toThrow(); expect(f.deps.store.reserve).not.toHaveBeenCalled();
 });
 it("does not expose a driver error or oversized page", async () => {
-  const f = fixture(); f.deps.driver.read.mockResolvedValue("x".repeat(100001)); expect(await runReadOnlyBrowserTask(input, f.deps)).toMatchObject({ status: "failed", text: null, cleanup: "confirmed" });
+  const f = fixture(); f.deps.driver.read.mockResolvedValue({ text: "x".repeat(100001), openPages: [], topFrameUrl: input.targetUrl }); expect(await runReadOnlyBrowserTask(input, f.deps)).toMatchObject({ status: "failed", text: null, cleanup: "confirmed" });
 });
 it("stops and reconciles even if the driver ignores cancellation", async () => {
   vi.useFakeTimers();
@@ -78,7 +78,7 @@ it("stops and reconciles even if the driver ignores cancellation", async () => {
 it("revokes request authorization after the driver returns", async () => {
   const f = fixture();
   let authorize!: (url: string, method: string) => Promise<unknown>;
-  f.deps.driver.read.mockImplementation(async (value) => { authorize = value.authorize; return "done"; });
+  f.deps.driver.read.mockImplementation(async (value) => { authorize = value.authorize; await value.pages.opened({ id: "main", url: value.url }); return { text: "done", openPages: [{ id: "main", url: value.url }], topFrameUrl: value.url }; });
   await runReadOnlyBrowserTask(input, f.deps);
   await expect(authorize(input.targetUrl, "GET")).rejects.toThrow("Task ended");
 });
@@ -102,12 +102,13 @@ it("rejects an in-flight authorization that finishes after task completion", asy
   let count = 0;
   const check = f.deps.check;
   f.deps.check = async (value) => {
-    if (++count > 1) await new Promise<void>(resolve => { release = resolve; });
+    if (++count === 2) await new Promise<void>(resolve => { release = resolve; });
     return check(value);
   };
-  f.deps.driver.read.mockImplementation(async ({ authorize, url }) => {
+  f.deps.driver.read.mockImplementation(async ({ authorize, url, pages }) => {
     pending = authorize(url, "GET");
-    return "done";
+    await pages.opened({ id: "main", url });
+    return { text: "done", openPages: [{ id: "main", url }], topFrameUrl: url };
   });
   await runReadOnlyBrowserTask(input, f.deps);
   const rejected = expect(pending).rejects.toThrow("Task ended");
