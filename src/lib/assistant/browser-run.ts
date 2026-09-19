@@ -1,6 +1,7 @@
 import { reconcileBrowserSession, type ReconciliationStore } from "./browser-reconciliation";
 import { checkBrowserRequest } from "./browser-network";
 import { PageSetGuard, navigationReachedTarget, type BrowserPage } from "./browser-guards";
+import { BrowserEgressGate } from "./browser-egress";
 
 type Provider = {
   create(input: { requestId: string; approvedHost: string; targetUrl: string }): Promise<{ sessionId: string }>;
@@ -12,7 +13,7 @@ type Provider = {
  * No production driver is installed yet. Do not equate a preflight DNS lookup with egress protection.
  */
 export interface ReadOnlyBrowserDriver {
-  read(input: { sessionId: string; url: string; signal: AbortSignal; authorize: (url: string, method: string) => Promise<unknown>; pages: PageSetGuard }): Promise<{ text: string; openPages: BrowserPage[]; topFrameUrl: string }>;
+  read(input: { sessionId: string; url: string; signal: AbortSignal; authorize: (url: string, method: string) => Promise<unknown>; pages: PageSetGuard; network: BrowserEgressGate }): Promise<{ text: string; openPages: BrowserPage[]; topFrameUrl: string }>;
 }
 
 export async function runReadOnlyBrowserTask(input: {
@@ -28,13 +29,14 @@ export async function runReadOnlyBrowserTask(input: {
   const controller = new AbortController();
   const check = deps.check ?? checkBrowserRequest;
   const pages = new PageSetGuard(approvedUrls, check);
+  const network = new BrowserEgressGate(approvedUrls, check);
   const authorize = async (url: string, method: string) => {
     if (controller.signal.aborted) throw new Error("Task ended");
-    const result = await check({ url, method, approvedUrls });
+    const result = await network.authorize({ url, method, kind: "document" });
     if (controller.signal.aborted) throw new Error("Task ended");
     return result;
   };
-  await authorize(targetUrl, "GET");
+  await check({ url: targetUrl, method: "GET", approvedUrls });
   const { sessionId } = await deps.provider.create({ requestId, targetUrl, approvedHost: new URL(targetUrl).hostname });
   let text: string | null = null;
   let failed = false;
@@ -45,7 +47,7 @@ export async function runReadOnlyBrowserTask(input: {
     });
     let value: Awaited<ReturnType<ReadOnlyBrowserDriver["read"]>>;
     try {
-      value = await Promise.race([deps.driver.read({ sessionId, url: targetUrl, signal: controller.signal, authorize, pages }), deadline]);
+      value = await Promise.race([deps.driver.read({ sessionId, url: targetUrl, signal: controller.signal, authorize, pages, network }), deadline]);
     } finally {
       clearTimeout(timer);
       controller.abort();
@@ -53,8 +55,10 @@ export async function runReadOnlyBrowserTask(input: {
     if (typeof value?.text !== "string" || value.text.length > 100_000) throw new Error("Invalid result");
     navigationReachedTarget(targetUrl, value.topFrameUrl);
     await pages.verify(value.openPages);
+    network.verify();
     text = value.text;
   } catch { failed = true; }
+  network.close();
   // Always try cleanup, but never infer termination from successful stop submission.
   try { await deps.provider.stop(sessionId); } catch { /* inspect may still prove termination */ }
   let closed = false;

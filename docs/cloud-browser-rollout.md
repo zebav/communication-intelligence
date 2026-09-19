@@ -1,5 +1,7 @@
 # Molnwebbläsare — förberedelse, inte aktiverad drift
 
+Uppdatering 2026-09-19: `BrowserEgressGate` kräver att en framtida drivrutin uttryckligen installerar begäransinterception före navigation, kontrollerar varje rapporterad begäran mot exakt godkänd HTTPS-URL och metod samt spärrar WebSocket, nedladdning och service worker. En enda nekad begäran gör hela läsresultatet ogiltigt; även utebliven interception eller dokumentbegäran nekar resultatet. Den samlade körkedjan stänger spärren efter avslut. Detta är ett testat **drivrutinskontrakt**, inte bevis för att trafiken i Browserbases fjärrwebbläsare går genom kontrollen. En verklig drivrutin och betrott egress-skydd med DNS-kontroll vid faktisk anslutning saknas fortfarande. Automatisk körning förblir avstängd; ingen ny Browserbase-session har startats av ändringen.
+
 Vald leverantör: Browserbase. Godkänd abonnemangsbudget: 20 USD/månad, separat från skatt. Användaren har godkänt ytterligare högst 10 USD/månad för AI som styr webbuppgifter. Detta är separerat från befintlig meddelandeanalys och Maps. Ingen tjänst har köpts eller aktiverats av detta lokala arbete. Budgetbeslutet är dokumenterat men ännu inte en verkställd kostnadsspärr.
 
 Kontostatus 2026-09-17: Developer är köpt av användaren. BROWSERBASE_API_KEY är sparad som Secret endast för Production i Vercel. Ingen ny deployment eller verklig session har startats. Ingen hård kostnadsspärr hittades i kontots usage/billing-vyer; överdebitering är möjlig.

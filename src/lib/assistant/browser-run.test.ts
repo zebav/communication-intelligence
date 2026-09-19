@@ -31,7 +31,7 @@ function fixture() {
   });
   const provider = browserbaseProvider({ apiKey: "synthetic-key", projectId: "synthetic-project", enabled: true, store, fetcher });
   const check = (value: Parameters<typeof checkBrowserRequest>[0]) => checkBrowserRequest(value, async () => [{ address: "8.8.8.8" }]);
-  const driver = { read: vi.fn(async ({ authorize, url, pages }: { authorize: (url: string, method: string) => Promise<unknown>; url: string; pages: { opened: (page: { id: string; url: string }) => Promise<void> } }) => { await authorize(url, "GET"); await pages.opened({ id: "main", url }); return { text: "Synthetic public page", openPages: [{ id: "main", url }], topFrameUrl: url }; }) };
+  const driver = { read: vi.fn(async ({ authorize, url, pages, network }: { authorize: (url: string, method: string) => Promise<unknown>; url: string; pages: { opened: (page: { id: string; url: string }) => Promise<void> }; network: { interceptionInstalled: () => void; authorize: (request: { url: string; method: string; kind: "document" | "subresource" | "iframe" | "websocket" | "download" | "service-worker" }) => Promise<unknown> } }) => { network.interceptionInstalled(); await authorize(url, "GET"); await pages.opened({ id: "main", url }); return { text: "Synthetic public page", openPages: [{ id: "main", url }], topFrameUrl: url }; }) };
   return { deps: { enabled: true, store, provider, driver, check }, fetcher, budget: () => budget, row: () => row };
 }
 it("runs reservation → create → authorized read → stop → inspect → close without refunds", async () => {
@@ -60,6 +60,25 @@ it("retains the lock after unconfirmed shutdown", async () => {
 it("fails closed without a driver", async () => {
   const f = fixture(); await expect(runReadOnlyBrowserTask(input, { ...f.deps, driver: null })).rejects.toThrow(); expect(f.fetcher).not.toHaveBeenCalled();
 });
+it("rejects a driver that never installs request interception", async () => {
+  const f = fixture();
+  f.deps.driver.read.mockImplementation(async ({ url, pages }) => {
+    await pages.opened({ id: "main", url });
+    return { text: "untrusted", openPages: [{ id: "main", url }], topFrameUrl: url };
+  });
+  expect(await runReadOnlyBrowserTask(input, f.deps)).toMatchObject({ status: "failed", text: null, cleanup: "confirmed" });
+});
+it("rejects a driver after a blocked subresource even if it returns page text", async () => {
+  const f = fixture();
+  f.deps.driver.read.mockImplementation(async ({ url, pages, network }) => {
+    network.interceptionInstalled();
+    await network.authorize({ url, method: "GET", kind: "document" });
+    await expect(network.authorize({ url: "https://other.example/tracker", method: "GET", kind: "subresource" })).rejects.toThrow();
+    await pages.opened({ id: "main", url });
+    return { text: "untrusted", openPages: [{ id: "main", url }], topFrameUrl: url };
+  });
+  expect(await runReadOnlyBrowserTask(input, f.deps)).toMatchObject({ status: "failed", text: null, cleanup: "confirmed" });
+});
 it("rejects unapproved initial URLs before reserving", async () => {
   const f = fixture(); await expect(runReadOnlyBrowserTask({ ...input, approvedUrls: [] }, f.deps)).rejects.toThrow(); expect(f.deps.store.reserve).not.toHaveBeenCalled();
 });
@@ -78,7 +97,7 @@ it("stops and reconciles even if the driver ignores cancellation", async () => {
 it("revokes request authorization after the driver returns", async () => {
   const f = fixture();
   let authorize!: (url: string, method: string) => Promise<unknown>;
-  f.deps.driver.read.mockImplementation(async (value) => { authorize = value.authorize; await value.pages.opened({ id: "main", url: value.url }); return { text: "done", openPages: [{ id: "main", url: value.url }], topFrameUrl: value.url }; });
+  f.deps.driver.read.mockImplementation(async (value) => { value.network.interceptionInstalled(); authorize = value.authorize; await authorize(value.url, "GET"); await value.pages.opened({ id: "main", url: value.url }); return { text: "done", openPages: [{ id: "main", url: value.url }], topFrameUrl: value.url }; });
   await runReadOnlyBrowserTask(input, f.deps);
   await expect(authorize(input.targetUrl, "GET")).rejects.toThrow("Task ended");
 });
@@ -105,13 +124,14 @@ it("rejects an in-flight authorization that finishes after task completion", asy
     if (++count === 2) await new Promise<void>(resolve => { release = resolve; });
     return check(value);
   };
-  f.deps.driver.read.mockImplementation(async ({ authorize, url, pages }) => {
+  f.deps.driver.read.mockImplementation(async ({ authorize, url, pages, network }) => {
+    network.interceptionInstalled();
     pending = authorize(url, "GET");
     await pages.opened({ id: "main", url });
     return { text: "done", openPages: [{ id: "main", url }], topFrameUrl: url };
   });
   await runReadOnlyBrowserTask(input, f.deps);
-  const rejected = expect(pending).rejects.toThrow("Task ended");
+  const rejected = expect(pending).rejects.toThrow("Ett nätverksanrop föll utanför");
   release();
   await rejected;
 });
