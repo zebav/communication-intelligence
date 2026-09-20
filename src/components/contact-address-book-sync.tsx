@@ -22,14 +22,42 @@ export function ContactAddressBookSync({ connections }: { connections: ChannelCo
   const open = () => { setMessage(""); setError(""); setReconnectProvider(""); dialog.current?.showModal(); };
   const sync = async (connection: ChannelConnection) => {
     setBusy(connection.id); setMessage(""); setError(""); setReconnectProvider("");
+    let totalFetched = 0; let totalCreated = 0; let totalLinked = 0; let totalConflicts = 0;
     try {
-      const response = await fetch("/api/contacts/sync-address-book", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId: connection.id }) });
-      const result = await response.json() as { fetched?: number; created?: number; linked?: number; conflicts?: number; error?: string; reconnectRequired?: boolean };
-      if (!response.ok) { setReconnectProvider(result.reconnectRequired ? connection.provider : ""); throw new Error(result.error ?? "Kontakterna kunde inte synkroniseras."); }
-      setMessage(`${accountDisplayLabel(connection)}: ${result.fetched ?? 0} kontakter kontrollerade · ${result.created ?? 0} nya · ${result.linked ?? 0} säkra kopplingar${result.conflicts ? ` · ${result.conflicts} behöver granskas` : ""}.`);
-      router.refresh();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Kontakterna kunde inte synkroniseras."); }
-    finally { setBusy(""); }
+      for (let page = 0; page < 40; page += 1) {
+        const response = await fetch("/api/contacts/sync-address-book", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ connectionId: connection.id }),
+        });
+        const raw = await response.text();
+        let result: { fetched?: number; created?: number; linked?: number; conflicts?: number; complete?: boolean; error?: string; reconnectRequired?: boolean } = {};
+        try {
+          result = raw ? JSON.parse(raw) as typeof result : {};
+        } catch {
+          throw new Error(response.ok
+            ? "Servern returnerade ett oväntat svar under kontaktsynkningen."
+            : `Kontaktsynkningen avbröts av servern (${response.status}). Försök igen; synkningen fortsätter från senaste sparade sida.`);
+        }
+        if (!response.ok) {
+          setReconnectProvider(result.reconnectRequired ? connection.provider : "");
+          throw new Error(result.error ?? "Kontakterna kunde inte synkroniseras.");
+        }
+        totalFetched += result.fetched ?? 0;
+        totalCreated += result.created ?? 0;
+        totalLinked += result.linked ?? 0;
+        totalConflicts += result.conflicts ?? 0;
+        setMessage(`${accountDisplayLabel(connection)}: ${totalFetched} kontakter kontrollerade hittills…`);
+        if (result.complete) {
+          setMessage(`${accountDisplayLabel(connection)}: ${totalFetched} kontakter kontrollerade · ${totalCreated} nya · ${totalLinked} säkra kopplingar${totalConflicts ? ` · ${totalConflicts} behöver granskas` : ""}.`);
+          router.refresh();
+          return;
+        }
+      }
+      throw new Error("Kontaktsynkningen pausades efter många sidor. Starta synkningen igen för att fortsätta från senaste sparade sida.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Kontakterna kunde inte synkroniseras.");
+    } finally { setBusy(""); }
   };
   if (!accounts.length) return null;
   return <>

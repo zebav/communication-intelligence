@@ -97,85 +97,75 @@ async function googleToken(credentials: StoredCredentials, origin: string) {
   return { token: result.access_token, credentials: next, refreshed: true };
 }
 
-async function loadMicrosoftContacts(token: string) {
+async function loadMicrosoftContacts(token: string, cursor?: string) {
+  const url = cursor || "https://graph.microsoft.com/v1.0/me/contacts?$select=id,displayName,givenName,surname,emailAddresses,mobilePhone,businessPhones,homePhones,companyName,jobTitle&$top=25";
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12_000) });
+  if (response.status === 403) throw new Error("contacts_permission_required");
+  if (!response.ok) throw new Error(`microsoft_contacts_${response.status}`);
+  const data = await response.json() as {
+    value?: Array<{
+      id?: string; displayName?: string; givenName?: string; surname?: string;
+      emailAddresses?: Array<{ address?: string; name?: string }>;
+      mobilePhone?: string; businessPhones?: string[]; homePhones?: string[];
+      companyName?: string; jobTitle?: string;
+    }>;
+    "@odata.nextLink"?: string;
+  };
   const items: AddressBookContact[] = [];
-  let url: string | undefined = "https://graph.microsoft.com/v1.0/me/contacts?$select=id,displayName,givenName,surname,emailAddresses,mobilePhone,businessPhones,homePhones,companyName,jobTitle&$top=100";
-  let pages = 0;
-  while (url && pages < 10) {
-    const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
-    if (response.status === 403) throw new Error("contacts_permission_required");
-    if (!response.ok) throw new Error(`microsoft_contacts_${response.status}`);
-    const data = await response.json() as {
-      value?: Array<{
-        id?: string; displayName?: string; givenName?: string; surname?: string;
-        emailAddresses?: Array<{ address?: string; name?: string }>;
-        mobilePhone?: string; businessPhones?: string[]; homePhones?: string[];
-        companyName?: string; jobTitle?: string;
-      }>;
-      "@odata.nextLink"?: string;
-    };
-    for (const item of data.value ?? []) {
-      if (!item.id) continue;
-      const emails = (item.emailAddresses ?? []).map((entry) => ({ value: cleanEmail(entry.address), label: entry.name })).filter((entry) => entry.value);
-      const phones = [
-        item.mobilePhone ? { value: cleanPhone(item.mobilePhone), label: "mobile" } : null,
-        ...(item.businessPhones ?? []).map((value) => ({ value: cleanPhone(value), label: "business" })),
-        ...(item.homePhones ?? []).map((value) => ({ value: cleanPhone(value), label: "home" })),
-      ].filter((entry): entry is { value: string; label: string } => Boolean(entry?.value));
-      items.push({
-        id: item.id,
-        displayName: item.displayName?.trim() || [item.givenName, item.surname].filter(Boolean).join(" "),
-        emails,
-        phones,
-        organization: item.companyName?.trim() || undefined,
-        jobTitle: item.jobTitle?.trim() || undefined,
-      });
-    }
-    url = data["@odata.nextLink"];
-    pages += 1;
+  for (const item of data.value ?? []) {
+    if (!item.id) continue;
+    const emails = (item.emailAddresses ?? []).map((entry) => ({ value: cleanEmail(entry.address), label: entry.name })).filter((entry) => entry.value);
+    const phones = [
+      item.mobilePhone ? { value: cleanPhone(item.mobilePhone), label: "mobile" } : null,
+      ...(item.businessPhones ?? []).map((value) => ({ value: cleanPhone(value), label: "business" })),
+      ...(item.homePhones ?? []).map((value) => ({ value: cleanPhone(value), label: "home" })),
+    ].filter((entry): entry is { value: string; label: string } => Boolean(entry?.value));
+    items.push({
+      id: item.id,
+      displayName: item.displayName?.trim() || [item.givenName, item.surname].filter(Boolean).join(" "),
+      emails,
+      phones,
+      organization: item.companyName?.trim() || undefined,
+      jobTitle: item.jobTitle?.trim() || undefined,
+    });
   }
-  return items;
+  return { contacts: items, cursor: data["@odata.nextLink"] ?? null };
 }
 
-async function loadGoogleContacts(token: string) {
+async function loadGoogleContacts(token: string, cursor?: string) {
+  const url = new URL("https://people.googleapis.com/v1/people/me/connections");
+  url.searchParams.set("pageSize", "50");
+  url.searchParams.set("personFields", "names,emailAddresses,phoneNumbers,organizations,metadata");
+  if (cursor) url.searchParams.set("pageToken", cursor);
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(12_000) });
+  if (response.status === 403) throw new Error("contacts_permission_required");
+  if (!response.ok) throw new Error(`google_contacts_${response.status}`);
+  const data = await response.json() as {
+    connections?: Array<{
+      resourceName?: string;
+      etag?: string;
+      names?: Array<{ displayName?: string }>;
+      emailAddresses?: Array<{ value?: string; type?: string }>;
+      phoneNumbers?: Array<{ value?: string; type?: string }>;
+      organizations?: Array<{ name?: string; title?: string }>;
+    }>;
+    nextPageToken?: string;
+  };
   const items: AddressBookContact[] = [];
-  let pageToken = "";
-  for (let page = 0; page < 10; page += 1) {
-    const url = new URL("https://people.googleapis.com/v1/people/me/connections");
-    url.searchParams.set("pageSize", "1000");
-    url.searchParams.set("personFields", "names,emailAddresses,phoneNumbers,organizations,metadata");
-    if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
-    if (response.status === 403) throw new Error("contacts_permission_required");
-    if (!response.ok) throw new Error(`google_contacts_${response.status}`);
-    const data = await response.json() as {
-      connections?: Array<{
-        resourceName?: string;
-        etag?: string;
-        names?: Array<{ displayName?: string }>;
-        emailAddresses?: Array<{ value?: string; type?: string }>;
-        phoneNumbers?: Array<{ value?: string; type?: string }>;
-        organizations?: Array<{ name?: string; title?: string }>;
-      }>;
-      nextPageToken?: string;
-    };
-    for (const item of data.connections ?? []) {
-      if (!item.resourceName) continue;
-      const org = item.organizations?.find((value) => value.name || value.title);
-      items.push({
-        id: item.resourceName,
-        displayName: item.names?.find((value) => value.displayName)?.displayName?.trim() ?? "",
-        emails: (item.emailAddresses ?? []).map((entry) => ({ value: cleanEmail(entry.value), label: entry.type })).filter((entry) => entry.value),
-        phones: (item.phoneNumbers ?? []).map((entry) => ({ value: cleanPhone(entry.value), label: entry.type })).filter((entry) => entry.value),
-        organization: org?.name?.trim() || undefined,
-        jobTitle: org?.title?.trim() || undefined,
-        metadata: { etag: item.etag ?? null },
-      });
-    }
-    pageToken = data.nextPageToken ?? "";
-    if (!pageToken) break;
+  for (const item of data.connections ?? []) {
+    if (!item.resourceName) continue;
+    const org = item.organizations?.find((value) => value.name || value.title);
+    items.push({
+      id: item.resourceName,
+      displayName: item.names?.find((value) => value.displayName)?.displayName?.trim() ?? "",
+      emails: (item.emailAddresses ?? []).map((entry) => ({ value: cleanEmail(entry.value), label: entry.type })).filter((entry) => entry.value),
+      phones: (item.phoneNumbers ?? []).map((entry) => ({ value: cleanPhone(entry.value), label: entry.type })).filter((entry) => entry.value),
+      organization: org?.name?.trim() || undefined,
+      jobTitle: org?.title?.trim() || undefined,
+      metadata: { etag: item.etag ?? null },
+    });
   }
-  return items;
+  return { contacts: items, cursor: data.nextPageToken ?? null };
 }
 
 async function resolvePerson(db: ReturnType<typeof createAdminClient>, ownerId: string, contact: AddressBookContact, source: { provider: string; connectionId: string }, preferredPersonId?: string) {
@@ -281,68 +271,86 @@ export async function POST(request: NextRequest) {
       }).eq("id", connection.id).eq("owner_id", user.id);
     }
 
-    const contacts = connection.provider === "gmail"
-      ? await loadGoogleContacts(authorized.token)
-      : await loadMicrosoftContacts(authorized.token);
+    const metadata = (connection.token_metadata as Record<string, unknown> | null) ?? {};
+    const cursorKey = connection.provider === "gmail" ? "contacts_google_page_token" : "contacts_microsoft_next_link";
+    const cursor = typeof metadata[cursorKey] === "string" && metadata[cursorKey] ? String(metadata[cursorKey]) : undefined;
+    const page = connection.provider === "gmail"
+      ? await loadGoogleContacts(authorized.token, cursor)
+      : await loadMicrosoftContacts(authorized.token, cursor);
+    const contacts = page.contacts;
 
     let created = 0;
     let linked = 0;
     let conflicts = 0;
-    for (const contact of contacts) {
-      if (!contact.emails.length && !contact.phones.length) continue;
-      const { data: existingExternal } = await db.from("external_contacts").select("id,person_id")
-        .eq("owner_id", user.id).eq("connection_id", connection.id).eq("provider_contact_id", contact.id).maybeSingle();
-      const resolved = await resolvePerson(
-        db,
-        user.id,
-        contact,
-        { provider: connection.provider, connectionId: connection.id },
-        existingExternal?.person_id,
-      );
-      const personId = resolved.personId;
-      const identityConflict = resolved.identityConflict;
-      if (!existingExternal) {
-        if (identityConflict) conflicts += 1; else linked += 1;
-      }
-      const values = {
-        owner_id: user.id,
-        connection_id: connection.id,
-        provider: connection.provider,
-        provider_contact_id: contact.id,
-        person_id: personId,
-        display_name: displayName(contact),
-        etag: typeof contact.metadata?.etag === "string" ? contact.metadata.etag : null,
-        raw_metadata: {
-          emails: contact.emails,
-          phones: contact.phones,
-          organization: contact.organization ?? null,
-          job_title: contact.jobTitle ?? null,
-          identity_conflict: identityConflict,
-        },
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      if (existingExternal?.id) {
-        await db.from("external_contacts").update(values).eq("id", existingExternal.id).eq("owner_id", user.id);
-      } else {
+    for (let offset = 0; offset < contacts.length; offset += 5) {
+      const outcomes = await Promise.all(contacts.slice(offset, offset + 5).map(async (contact) => {
+        if (!contact.emails.length && !contact.phones.length) return { created: 0, linked: 0, conflicts: 0 };
+        const { data: existingExternal } = await db.from("external_contacts").select("id,person_id")
+          .eq("owner_id", user.id).eq("connection_id", connection.id).eq("provider_contact_id", contact.id).maybeSingle();
+        const resolved = await resolvePerson(
+          db,
+          user.id,
+          contact,
+          { provider: connection.provider, connectionId: connection.id },
+          existingExternal?.person_id,
+        );
+        const personId = resolved.personId;
+        const identityConflict = resolved.identityConflict;
+        const values = {
+          owner_id: user.id,
+          connection_id: connection.id,
+          provider: connection.provider,
+          provider_contact_id: contact.id,
+          person_id: personId,
+          display_name: displayName(contact),
+          etag: typeof contact.metadata?.etag === "string" ? contact.metadata.etag : null,
+          raw_metadata: {
+            emails: contact.emails,
+            phones: contact.phones,
+            organization: contact.organization ?? null,
+            job_title: contact.jobTitle ?? null,
+            identity_conflict: identityConflict,
+          },
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        if (existingExternal?.id) {
+          const { error } = await db.from("external_contacts").update(values).eq("id", existingExternal.id).eq("owner_id", user.id);
+          if (error) throw error;
+          return { created: 0, linked: 0, conflicts: identityConflict ? 1 : 0 };
+        }
         const { error } = await db.from("external_contacts").insert(values);
-        if (!error) created += 1;
-      }
+        if (error) throw error;
+        return { created: 1, linked: identityConflict ? 0 : 1, conflicts: identityConflict ? 1 : 0 };
+      }));
+      created += outcomes.reduce((sum, item) => sum + item.created, 0);
+      linked += outcomes.reduce((sum, item) => sum + item.linked, 0);
+      conflicts += outcomes.reduce((sum, item) => sum + item.conflicts, 0);
     }
 
-    const metadata = (connection.token_metadata as Record<string, unknown> | null) ?? {};
+    const complete = !page.cursor;
+    const previousProcessed = Number(metadata.contacts_processed_count ?? 0);
+    const processedTotal = complete ? 0 : previousProcessed + contacts.length;
     await db.from("connections").update({
-      token_metadata: { ...metadata, contacts_last_synced_at: new Date().toISOString(), contacts_count: contacts.length },
+      token_metadata: {
+        ...metadata,
+        expires_at: authorized.credentials.expiresAt,
+        [cursorKey]: page.cursor,
+        contacts_sync_started_at: metadata.contacts_sync_started_at ?? new Date().toISOString(),
+        contacts_processed_count: processedTotal,
+        contacts_last_synced_at: complete ? new Date().toISOString() : metadata.contacts_last_synced_at ?? null,
+        contacts_count: complete ? previousProcessed + contacts.length : metadata.contacts_count ?? null,
+      },
       updated_at: new Date().toISOString(),
     }).eq("id", connection.id).eq("owner_id", user.id);
 
     await db.from("audit_logs").insert({
-      owner_id: user.id, actor_id: user.id, actor_type: "user", action: "contacts.address_book_synced",
+      owner_id: user.id, actor_id: user.id, actor_type: "user", action: "contacts.address_book_sync_page",
       object_type: "connection", object_id: connection.id, source: "email",
-      new_value: { provider: connection.provider, fetched: contacts.length, created, linked, conflicts },
+      new_value: { provider: connection.provider, fetched: contacts.length, created, linked, conflicts, complete },
     });
 
-    return NextResponse.json({ success: true, fetched: contacts.length, created, linked, conflicts });
+    return NextResponse.json({ success: true, fetched: contacts.length, created, linked, conflicts, complete });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("address_book_sync_failed", { provider: connection.provider, reason });
