@@ -24,7 +24,7 @@ export function ContactAddressBookSync({ connections }: { connections: ChannelCo
     setBusy(connection.id); setMessage(""); setError(""); setReconnectProvider("");
     let totalFetched = 0; let totalCreated = 0; let totalLinked = 0; let totalConflicts = 0; let cursor: string | undefined;
     try {
-      for (let page = 0; page < 40; page += 1) {
+      for (let page = 0; page < 200; page += 1) {
         const response = await fetch("/api/contacts/sync-address-book", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -55,7 +55,7 @@ export function ContactAddressBookSync({ connections }: { connections: ChannelCo
           return;
         }
       }
-      throw new Error("Kontaktsynkningen pausades efter många sidor. Starta synkningen igen för att fortsätta från senaste sparade sida.");
+      throw new Error("Kontaktsynkningen pausades efter 5 000 kontakter för att hålla sessionen stabil. Starta synkningen igen för att fortsätta från senaste sparade sida.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Kontakterna kunde inte synkroniseras.");
     } finally { setBusy(""); }
