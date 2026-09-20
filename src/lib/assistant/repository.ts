@@ -48,8 +48,8 @@ function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").Emai
         const field = object(value);
         const kind = str(field.kind);
         const sensitivity = str(field.sensitivity);
-        if (!str(field.key) || !str(field.label) || !["text","email","phone","date","username","password","account_number","other"].includes(kind) || !["personal","sensitive","restricted"].includes(sensitivity)) return [];
-        return [{ key: str(field.key), label: str(field.label), kind: kind as "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "other", description: str(field.description), sensitivity: sensitivity as "personal" | "sensitive" | "restricted" }];
+        if (!str(field.key) || !str(field.label) || !["text","email","phone","date","username","password","account_number","one_time_code","other"].includes(kind) || !["personal","sensitive","restricted"].includes(sensitivity)) return [];
+        return [{ key: str(field.key), label: str(field.label), kind: kind as "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other", description: str(field.description), sensitivity: sensitivity as "personal" | "sensitive" | "restricted" }];
       }).slice(0, 12) : [],
       confidence: num(action.confidence) ?? 0,
     } : undefined,
