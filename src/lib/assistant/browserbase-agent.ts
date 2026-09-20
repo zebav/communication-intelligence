@@ -13,6 +13,24 @@ const runSchema = z.object({
 });
 export type BrowserbaseAgentRun = z.infer<typeof runSchema>;
 
+export const browserAgentResultSchema = z.object({
+  completed: z.boolean(),
+  submitted: z.boolean(),
+  summary: z.string().max(2000),
+  finalUrl: z.string().max(4096),
+  confirmationText: z.string().max(2000),
+  requiresHuman: z.boolean(),
+  blockedReason: z.string().max(1000),
+  missingInformation: z.array(z.object({
+    key: z.string().min(1).max(80),
+    label: z.string().min(1).max(120),
+    kind: z.enum(["text","email","phone","date","username","password","account_number","one_time_code","other"]),
+    description: z.string().max(240),
+    sensitivity: z.enum(["personal","sensitive","restricted"]),
+  })).max(12),
+});
+export type BrowserAgentResult = z.infer<typeof browserAgentResultSchema>;
+
 const resultSchema = {
   type: "object",
   additionalProperties: false,
