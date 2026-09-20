@@ -22,6 +22,37 @@ export type Plan = {
   followUpAt: string | null; steps: string[];
 };
 export type Task = { id: string; message_id: string; kind: TaskKind; status: TaskStatus; revision: number; plan: Plan; result: Record<string, unknown>; created_at: string; updated_at: string; observedReplyAt?: string };
+export type DecisionCard = {
+  summary: string;
+  whyImportant: string;
+  proposedAction: string;
+  approvalOutcome: string;
+  targetUrl: string;
+};
+
+export function decisionCard(plan: Plan, kind: TaskKind): DecisionCard {
+  const e = plan.evidence;
+  const action = e.analysis.actionSuggestion;
+  const summary = e.analysis.summary?.trim()
+    || e.analysis.intent?.trim()
+    || (e.body.length > 280 ? `${e.body.slice(0, 277).trim()}…` : e.body.trim())
+    || e.title
+    || "Uppgiften behöver granskas.";
+  const whyImportant = plan.reason?.trim()
+    || e.analysis.priorityReason?.trim()
+    || `Prioritet ${Math.max(0, Math.min(10, e.priority || 0)).toFixed(1)}/10.`;
+  const proposedAction = kind === "reply" ? "Skicka det sparade svaret i samma konversation."
+    : kind === "forward" ? `Vidarebefordra originalet med introduktionen till ${plan.recipientName || "vald rådgivare"}.`
+    : kind === "follow_up" ? "Skicka den sparade uppföljningen en gång."
+    : kind === "meeting" ? "Ta fram 2–3 bokningsbara tider, kontrollera plats och resa och boka först efter kalenderns slutgodkännande."
+    : action?.task?.trim() || "Öppna den föreslagna webbuppgiften för säker granskning.";
+  const approvalOutcome = kind === "reply" ? `Ett meddelande skickas en gång från ${e.account} till ${plan.recipientName || e.personName}. Därefter väntar uppdraget på svar.`
+    : kind === "forward" ? `Originalmejlet och den sparade introduktionen skickas en gång från ${e.account} till ${plan.recipientName || "den verifierade rådgivaren"}.`
+    : kind === "follow_up" ? `En uppföljning skickas en gång till ${plan.recipientName || e.personName}. Automatisk omsändning är spärrad.`
+    : kind === "meeting" ? "Godkännandet här förbereder mötesplaneringen. Själva kalenderbokningen och inbjudningarna kräver kalenderflödets separata slutgodkännande."
+    : "Ingen webbåtgärd utförs ännu. Browserbase live execution är fortsatt fail-closed tills den säkra drivrutinen är klar.";
+  return { summary, whyImportant, proposedAction, approvalOutcome, targetUrl: action?.targetUrl?.trim() || "" };
+}
 export const editSchema = z.object({ draft: z.string().trim().max(4000), recipientPersonId: z.string().uuid().nullable(), followUpAt: z.iso.datetime({ offset: true }).nullable() });
 
 const bulk = new Set(["Marketing", "Newsletter", "Spam", "Notification", "Information Only", "Receipt / Invoice"]);
