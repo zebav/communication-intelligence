@@ -13,9 +13,9 @@ create table if not exists public.assistant_browser_agent_runs (
   task_id uuid not null references public.assistant_tasks(id) on delete cascade,
   execution_revision integer not null check (execution_revision > 0),
   host text not null check (host ~ '^[a-z0-9.-]+$'),
-  run_id text not null unique check (length(run_id) between 1 and 200),
+  run_id text unique check (run_id is null or length(run_id) between 1 and 200),
   session_id text,
-  status text not null check (status in ('PENDING','RUNNING','COMPLETED','FAILED','TIMED_OUT','STOPPED')),
+  status text not null check (status in ('PREPARING','PENDING','RUNNING','COMPLETED','FAILED','TIMED_OUT','STOPPED')),
   result jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -26,7 +26,7 @@ create index if not exists assistant_browser_agent_runs_owner_status
   on public.assistant_browser_agent_runs(owner_id, status, updated_at desc);
 create unique index if not exists assistant_browser_agent_one_active_per_owner
   on public.assistant_browser_agent_runs(owner_id)
-  where status in ('PENDING','RUNNING');
+  where status in ('PREPARING','PENDING','RUNNING');
 
 alter table public.assistant_browser_contexts enable row level security;
 alter table public.assistant_browser_agent_runs enable row level security;
