@@ -223,3 +223,7 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .sent-detail { padding: 24px; }
 .sent-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; margin-top: 24px; }
 @media (max-width: 760px) { .sent-inbox.inbox { grid-template-columns: minmax(0,1fr); height: auto; } .sent-inbox .inbox-col { max-height: 300px; } .sent-workspace { padding: 12px; } }
+
+.decision-link-row { min-width:0; display:flex; gap:6px; align-items:center; }
+.decision-link-row a { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#9bd7ff; text-decoration:none; }
+.decision-link-row a:hover { text-decoration:underline; }
