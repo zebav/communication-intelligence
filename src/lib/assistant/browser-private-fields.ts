@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { Plan } from "@/lib/assistant/model";
+import type { Plan, Task } from "@/lib/assistant/model";
 import { listKnowledgeEntries, upsertKnowledgeEntry } from "@/lib/personal-knowledge";
 
 export type BrowserFieldKind = "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other";
@@ -78,9 +78,46 @@ export function browserFieldRequirements(plan: Plan): BrowserFieldRequirement[] 
   }).slice(0, 12);
 }
 
-export async function browserFieldStates(ownerId: string, plan: Plan) {
-  const { host } = browserActionHost(plan);
-  const requirements = browserFieldRequirements(plan);
+function runtimeRequirements(plan: Plan, result: Record<string, unknown>): BrowserFieldRequirement[] {
+  const raw = Array.isArray(result.browserMissingInformation) ? result.browserMissingInformation : [];
+  let host: string;
+  try { host = browserActionHost(plan).host; } catch { return []; }
+  return raw.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const field = value as Record<string, unknown>;
+    const kind = typeof field.kind === "string" ? field.kind : "";
+    const sensitivity = typeof field.sensitivity === "string" ? field.sensitivity : "";
+    if (
+      typeof field.key !== "string" ||
+      typeof field.label !== "string" ||
+      !["text","email","phone","date","username","password","account_number","one_time_code","other"].includes(kind) ||
+      !["personal","sensitive","restricted"].includes(sensitivity)
+    ) return [];
+    return [requirement({
+      host,
+      key: field.key,
+      label: field.label,
+      kind: kind as BrowserFieldKind,
+      description: typeof field.description === "string" ? field.description : "",
+      sensitivity: sensitivity as "personal" | "sensitive" | "restricted",
+    })];
+  }).slice(0, 12);
+}
+
+export function browserTaskFieldRequirements(task: Pick<Task, "plan" | "result">) {
+  const combined = [...browserFieldRequirements(task.plan), ...runtimeRequirements(task.plan, task.result)];
+  const seen = new Set<string>();
+  return combined.filter((field) => {
+    const unique = `${field.kind}:${field.key}`;
+    if (seen.has(unique)) return false;
+    seen.add(unique);
+    return true;
+  }).slice(0, 12);
+}
+
+export async function browserFieldStates(ownerId: string, task: Pick<Task, "plan" | "result">) {
+  const { host } = browserActionHost(task.plan);
+  const requirements = browserTaskFieldRequirements(task);
   const entries = await listKnowledgeEntries(ownerId);
   return requirements.map((field) => {
     const existing = entries.find((entry) =>
@@ -97,9 +134,9 @@ export async function browserFieldStates(ownerId: string, plan: Plan) {
   });
 }
 
-export async function saveBrowserField(ownerId: string, plan: Plan, input: { key: string; value: string }) {
-  const { host } = browserActionHost(plan);
-  const requirements = browserFieldRequirements(plan);
+export async function saveBrowserField(ownerId: string, task: Pick<Task, "plan" | "result">, input: { key: string; value: string }) {
+  const { host } = browserActionHost(task.plan);
+  const requirements = browserTaskFieldRequirements(task);
   const field = requirements.find((item) => item.key === normalizedFieldKey(input.key));
   if (!field) throw new Error("Uppgiften ingår inte i den godkända webbåtgärden.");
   if (!field.persist) throw new Error("Engångskoder sparas inte. Ange koden direkt när webbuppgiften körs.");
@@ -128,9 +165,9 @@ function variableName(field: BrowserFieldRequirement, index: number) {
   return `vault_${index + 1}_${base}`;
 }
 
-export async function browserVariables(ownerId: string, plan: Plan, ephemeral: Record<string, string> = {}) {
-  const { host } = browserActionHost(plan);
-  const requirements = browserFieldRequirements(plan);
+export async function browserVariables(ownerId: string, task: Pick<Task, "plan" | "result">, ephemeral: Record<string, string> = {}) {
+  const { host } = browserActionHost(task.plan);
+  const requirements = browserTaskFieldRequirements(task);
   const entries = await listKnowledgeEntries(ownerId);
   const variables: Record<string, { value: string; description: string }> = {};
   const placeholders: Record<string, string> = {};
