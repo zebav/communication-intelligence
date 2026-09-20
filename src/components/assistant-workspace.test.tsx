@@ -42,6 +42,12 @@ describe("assistant review interface", () => {
     fireEvent.click(screen.getByRole("checkbox")); expect(send.disabled).toBe(false);
     fireEvent.click(send); expect(act).toHaveBeenCalledWith({ action: "execute", id: "task", revision: 2, approved: true });
   });
+  it("shows a decision summary and exact approval outcome before action", () => {
+    mount();
+    expect(screen.getByText("Sammanfattning")).toBeTruthy();
+    expect(screen.getByText("Varför detta är viktigt")).toBeTruthy();
+    expect(screen.getAllByText("Detta händer när du godkänner").length).toBeGreaterThan(0);
+  });
   it("edits revoke approval until saved and reviewed", () => {
     mount(); fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.change(screen.getByLabelText("Förslag på svar"), { target: { value: "Nytt svar" } });

@@ -110,9 +110,16 @@ export async function POST(request: NextRequest) {
       if (e.direction !== "in" && a.kind !== "follow_up") throw new Error("Välj ett inkommande originalmeddelande.");
       // Manual creation is permitted even when the classifier missed the message.
       // It remains a proposal and cannot authorize an external action.
-      const { data, error } = await db.from("assistant_tasks").upsert({ owner_id: owner, message_id: e.messageId, kind: a.kind, plan: makePlan(e, a.kind) }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true }).select("*").maybeSingle();
+      const initialPlan = makePlan(e, a.kind);
+      const { data, error } = await db.from("assistant_tasks").upsert({ owner_id: owner, message_id: e.messageId, kind: a.kind, plan: initialPlan }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true }).select("*").maybeSingle();
       if (error) throw new Error("Uppdraget kunde inte sparas.");
-      if (data) return json({ task: data });
+      if (data) {
+        const created = data as Task;
+        if (!sendCapability(initialPlan, a.kind) && ["reply", "follow_up"].includes(a.kind)) {
+          return json({ task: await changeTask(db, owner, created, "ready", initialPlan) });
+        }
+        return json({ task: created });
+      }
       const { data: existing, error: read } = await db.from("assistant_tasks").select("*").eq("owner_id", owner).eq("message_id", e.messageId).eq("kind", a.kind).single();
       if (read) throw new Error("Uppdraget finns redan men kunde inte läsas.");
       return json({ task: existing, duplicate: true });

@@ -34,3 +34,12 @@
 .assistant-browser-status dd { margin:6px 0 0; line-height:1.6; overflow-wrap:anywhere; }
 .assistant-browser-result { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; font:inherit; line-height:1.6; padding:12px; background:#080f19; border-radius:8px; }
 @media(max-width:900px) { .assistant-layout { grid-template-columns:1fr; } .assistant-list { max-height:360px; } .assistant-detail { padding:16px; } }
+
+.decision-card { display:grid; gap:12px; margin:20px 0; }
+.decision-card-section { padding:16px; border:1px solid #334155; border-radius:12px; background:#0b1420; }
+.decision-card-section > span { display:block; margin-bottom:6px; font-size:.78rem; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; }
+.decision-card-section p { margin:0; }
+.decision-card-section a { display:block; margin-top:8px; overflow-wrap:anywhere; }
+.decision-card-section.approval-outcome { border-color:#2f8f74; background:#10231f; }
+.assistant-source-details { margin:14px 0 20px; }
+.assistant-source-details > summary { color:#94a3b8; }

@@ -33,14 +33,14 @@ export function AssistantMeeting({ plan, timezone, onDone }: { plan: Plan; timez
     finally { setBusy(false); }
   }
   const wall = (instant: string) => new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(instant)).replace(" ", "T");
-  return <section className="assistant-meeting"><h3>Från förfrågan till bokning</h3>
+  return <section className="assistant-meeting"><h3>Mötesförslag</h3><p>Ta fram ett kort beslutsunderlag med plats, resa och 2–3 bokningsbara tider. Ingen bokning sker utan separat slutgodkännande.</p>
     <button className="btn" disabled={busy} onClick={() => run("analyze")}>Hämta mötesönskemål från konversationen</button>
     {intent && <div><p>{intent.summary}</p>{intent.locationText && <p>Föreslagen plats: {intent.locationText} – välj rätt träff i Maps nedan.</p>}<ul>{intent.questions.map(q => <li key={q}>{q}</li>)}</ul>{intent.operation !== "propose" && <p>Analysen föreslår ingen ny bokning. Hantera eventuell ändring i kalendern.</p>}</div>}
     <label>Granskat datum ({timezone})<input type="date" value={date} onChange={e => { setDate(e.target.value); setChosen(null); setSlots([]); }} /></label>
     <label>Möteslängd i minuter<input type="number" min={5} max={600} value={duration} onChange={e => { setDuration(Number(e.target.value)); setChosen(null); setSlots([]); }} /></label>
     <button className="btn" disabled={busy || !date || duration < 5 || duration > 600} onClick={() => run("suggest")}>Kontrollera kalendrar och föreslå tider</button>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <div className="assistant-buttons">{slots.filter(s => s.bookable).slice(0, 8).map(s => <button className="btn" key={s.start} disabled={busy} onClick={() => setChosen(s)}>{wall(s.start).replace("T", " ")} – {wall(s.end).slice(11)}</button>)}</div>
+    <div className="assistant-buttons">{slots.filter(s => s.bookable).slice(0, 3).map(s => <button className="btn" key={s.start} disabled={busy} onClick={() => setChosen(s)}>{wall(s.start).replace("T", " ")} – {wall(s.end).slice(11)}</button>)}</div>
     {chosen && <CalendarMeetingComposer key={chosen.start} timezone={timezone} expanded initialStart={wall(chosen.start)} initialEnd={wall(chosen.end)} initialTitle={plan.evidence.title} conversationId={plan.evidence.conversationId} onDone={onDone} />}
     <details><summary>Jag vill ange tid manuellt</summary><CalendarMeetingComposer timezone={timezone} expanded initialTitle={plan.evidence.title} conversationId={plan.evidence.conversationId} onDone={onDone} /></details>
   </section>;

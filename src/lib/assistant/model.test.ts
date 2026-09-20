@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { candidateRank, makePlan, mayTransition, propose, sendCapability, taskBucket, type Evidence, type Task } from "./model";
+import { candidateRank, decisionCard, makePlan, mayTransition, propose, sendCapability, taskBucket, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
@@ -36,6 +36,18 @@ describe("action discovery", () => {
   it("keeps unknown providers and missing accounts fail-closed", () => {
     expect(sendCapability({ ...task().plan, evidence: { ...example, provider: "unknown" } }, "reply")).not.toBeNull();
     expect(sendCapability({ ...task().plan, evidence: { ...example, connectionId: null } }, "reply")).not.toBeNull();
+  });
+  it("builds a deterministic decision card from stored evidence without new AI", () => {
+    const card = decisionCard(makePlan({ ...example, analysis: { ...example.analysis, summary: "Kort sammanfattning", priorityReason: "Behöver svar idag" } }, "reply"), "reply");
+    expect(card.summary).toBe("Kort sammanfattning");
+    expect(card.whyImportant).toBe("Behöver svar idag");
+    expect(card.approvalOutcome).toContain("skickas en gång");
+  });
+  it("keeps website execution fail-closed in the decision card", () => {
+    const plan = makePlan({ ...example, analysis: { actionSuggestion: { detected: true, type: "website_task", task: "Kontrollera bokningen", reason: "Behöver extern kontroll", targetUrl: "https://example.com/task", requiresLogin: false, contactIds: [], confidence: .9 } } }, "website");
+    const card = decisionCard(plan, "website");
+    expect(card.targetUrl).toBe("https://example.com/task");
+    expect(card.approvalOutcome).toContain("fail-closed");
   });
   it("surfaces overdue waiting tasks without declaring them answered", () => {
     const t = { ...task(), status: "waiting" as const };

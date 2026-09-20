@@ -130,6 +130,7 @@ export interface LearningSignal {
   proposedRule: string;
   confidence: number;
   status: "suggested" | "approved" | "dismissed";
+  evidence?: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -145,6 +146,14 @@ export interface CommunicationOutcome {
   createdAt: string;
   updatedAt: string;
 }
+export interface CalendarLearningEvent {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  status: "active" | "released" | "executing" | "confirmed";
+}
+
 
 export interface ChannelConnection {
   id: string;
