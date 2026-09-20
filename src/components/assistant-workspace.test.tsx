@@ -124,7 +124,8 @@ describe("assistant review interface", () => {
 
   it("meeting composer keeps the originating conversation", () => {
     mount(false, "meeting");
-    fireEvent.click(screen.getByRole("button", { name: "Planera i masterkalendern" }));
+    fireEvent.click(screen.getByText("Ändra eller planera manuellt"));
+    fireEvent.click(screen.getByRole("button", { name: "Öppna masterkalenderns planering" }));
     expect(screen.getByText("Bokning för conversation")).toBeTruthy();
   });
 });
