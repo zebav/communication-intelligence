@@ -1,6 +1,8 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { exactBrowserTarget } from "./browserbase-agent-policy";
+export { browserActionRisk, browserAgentResultSchema, exactBrowserTarget } from "./browserbase-agent-policy";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const terminal = new Set(["COMPLETED", "FAILED", "STOPPED", "TIMED_OUT"]);
@@ -12,24 +14,6 @@ const runSchema = z.object({
   cause: z.object({ code: z.string(), message: z.string().optional() }).optional(),
 });
 export type BrowserbaseAgentRun = z.infer<typeof runSchema>;
-
-export const browserAgentResultSchema = z.object({
-  completed: z.boolean(),
-  submitted: z.boolean(),
-  summary: z.string().max(2000),
-  finalUrl: z.string().max(4096),
-  confirmationText: z.string().max(2000),
-  requiresHuman: z.boolean(),
-  blockedReason: z.string().max(1000),
-  missingInformation: z.array(z.object({
-    key: z.string().min(1).max(80),
-    label: z.string().min(1).max(120),
-    kind: z.enum(["text","email","phone","date","username","password","account_number","one_time_code","other"]),
-    description: z.string().max(240),
-    sensitivity: z.enum(["personal","sensitive","restricted"]),
-  })).max(12),
-});
-export type BrowserAgentResult = z.infer<typeof browserAgentResultSchema>;
 
 const resultSchema = {
   type: "object",
@@ -87,31 +71,6 @@ async function request(path: string, init: RequestInit) {
   }
   try { return JSON.parse(raw) as unknown; }
   catch { throw new Error("Browserbase returnerade ett ogiltigt svar."); }
-}
-
-export function exactBrowserTarget(raw: string) {
-  const url = new URL(raw);
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    (url.port && url.port !== "443") ||
-    !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(url.hostname)
-  ) throw new Error("Webbadressen är inte tillåten.");
-  return { url: url.href, host: url.hostname.toLowerCase() };
-}
-
-export function browserActionRisk(text: string) {
-  const normalized = text.toLocaleLowerCase();
-  const critical = [
-    /\b(pay|payment|purchase|buy|checkout|charge|transfer money|wire|bank transfer)\b/i,
-    /\b(bet|gambl|casino)\b/i,
-    /\b(sign (the )?(contract|agreement|document)|legal signature|e-sign)\b/i,
-    /\b(delete (my )?(account|profile)|close account)\b/i,
-    /\b(change (my )?password|reset password|disable mfa|remove mfa|security settings)\b/i,
-    /\b(godkänn avtal|signera|betala|betalning|köp|banköverföring|överför pengar|radera konto|byt lösenord)\b/i,
-  ];
-  return critical.some((pattern) => pattern.test(normalized)) ? "critical" as const : "standard" as const;
 }
 
 function contextName(ownerId: string, host: string) {
