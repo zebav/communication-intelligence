@@ -274,10 +274,12 @@ export async function POST(request: NextRequest) {
 
     const metadata = (connection.token_metadata as Record<string, unknown> | null) ?? {};
     let providerCursor: string | undefined;
-    if (parsed.data.cursor) {
+    const resumeToken = parsed.data.cursor
+      ?? (typeof metadata.contacts_resume_token === "string" ? metadata.contacts_resume_token : undefined);
+    if (resumeToken) {
       let decoded: SyncCursor;
       try {
-        decoded = decryptCredential<SyncCursor>(parsed.data.cursor, encryptionKey);
+        decoded = decryptCredential<SyncCursor>(resumeToken, encryptionKey);
       } catch {
         return NextResponse.json({ error: "The contact sync cursor is invalid. Start the sync again." }, { status: 400 });
       }
@@ -288,7 +290,7 @@ export async function POST(request: NextRequest) {
         decoded.provider !== connection.provider ||
         !decoded.cursor ||
         !Number.isFinite(issuedAt) ||
-        Date.now() - issuedAt > 15 * 60_000
+        Date.now() - issuedAt > 30 * 60_000
       ) {
         return NextResponse.json({ error: "The contact sync cursor has expired. Start the sync again." }, { status: 400 });
       }
@@ -365,8 +367,9 @@ export async function POST(request: NextRequest) {
       token_metadata: {
         ...metadata,
         expires_at: authorized.credentials.expiresAt,
-        contacts_sync_started_at: parsed.data.cursor ? metadata.contacts_sync_started_at ?? new Date().toISOString() : new Date().toISOString(),
+        contacts_sync_started_at: resumeToken ? metadata.contacts_sync_started_at ?? new Date().toISOString() : new Date().toISOString(),
         contacts_processed_count: complete ? 0 : processedTotal,
+        contacts_resume_token: complete ? null : nextCursor,
         contacts_last_synced_at: complete ? new Date().toISOString() : metadata.contacts_last_synced_at ?? null,
         contacts_count: complete ? processedTotal : metadata.contacts_count ?? null,
       },
