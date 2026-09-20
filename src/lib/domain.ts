@@ -130,6 +130,7 @@ export interface LearningSignal {
   proposedRule: string;
   confidence: number;
   status: "suggested" | "approved" | "dismissed";
+  evidence?: Record<string, unknown>;
   createdAt: string;
 }
 
