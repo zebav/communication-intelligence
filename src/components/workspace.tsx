@@ -385,22 +385,68 @@ function CleanUp() {
     </div>)}</div>}
   </div>;
 }
-function Intelligence({ items }: { items: LearningSignal[] }) {
+function Intelligence({ items, people }: { items: LearningSignal[]; people: CommunicationPersonOption[] }) {
   const router = useRouter();
   const [status, setStatus] = useState<LearningSignal["status"]>("suggested");
+  const [category, setCategory] = useState<"all" | "priority" | "tone" | "actions">("all");
   const [rules, setRules] = useState<Record<string, string>>({});
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
-  const counts = { suggested: items.filter((item) => item.status === "suggested").length, approved: items.filter((item) => item.status === "approved").length, dismissed: items.filter((item) => item.status === "dismissed").length };
-  const visible = items.filter((item) => item.status === status);
-  const decide = async (item: LearningSignal, decision: "approve" | "dismiss" | "delete") => { setWorking(item.id); setError(""); const proposedRule = rules[item.id] ?? item.proposedRule; const result = await reviewLearningSignal({ signalId: item.id, decision, proposedRule }); if (result.error) setError(result.error); else router.refresh(); setWorking(""); };
-  const labels: Record<LearningSignal["signalType"], string> = { draft_accepted: "Draft accepted", draft_edited: "Draft edited", tone_requested: "Rewrite requested", category_corrected: "Category corrected", outcome_confirmed: "Successful outcome" };
-  return <div className="page learning-page"><PageHeader eyebrow="Learning & Feedback Engine V2" title="What the system has learned" subtitle="Observed behavior remains a suggestion until you approve it. You can edit, dismiss, or permanently delete every learning signal." />
-    <div className="summary-bar"><div className="summary-stat"><strong>{counts.suggested}</strong><span>waiting for your review</span></div><div className="summary-stat"><strong>{counts.approved}</strong><span>approved AI rules</span></div><div className="summary-stat"><strong>{counts.dismissed}</strong><span>dismissed observations</span></div></div>
-    <div className="learning-notice"><CheckCircle2 size={16} /><div><strong>You remain in control</strong><p>Only approved rules can influence future analyses and reply suggestions. A single edit never becomes a permanent preference automatically.</p></div></div>
-    <div className="learning-tabs">{(["suggested", "approved", "dismissed"] as const).map((value) => <button className={status === value ? "active" : ""} key={value} onClick={() => setStatus(value)}>{value === "suggested" ? "Review" : value === "approved" ? "Approved" : "Dismissed"} <span>{counts[value]}</span></button>)}</div>
+  const categoryFor = (item: LearningSignal) => item.signalType === "category_corrected" ? "priority" as const
+    : item.signalType === "outcome_confirmed" ? "actions" as const
+    : "tone" as const;
+  const labels: Record<LearningSignal["signalType"], string> = {
+    draft_accepted: "Svarsstil bekräftad",
+    draft_edited: "Svar redigerat",
+    tone_requested: "Tonpreferens",
+    category_corrected: "Prioriteringsregel",
+    outcome_confirmed: "Åtgärd / utfall",
+  };
+  const counts = {
+    suggested: items.filter((item) => item.status === "suggested").length,
+    approved: items.filter((item) => item.status === "approved").length,
+    dismissed: items.filter((item) => item.status === "dismissed").length,
+  };
+  const visible = items.filter((item) => item.status === status && (category === "all" || categoryFor(item) === category));
+  const decide = async (item: LearningSignal, decision: "approve" | "dismiss" | "delete") => {
+    setWorking(item.id); setError("");
+    const proposedRule = rules[item.id] ?? item.proposedRule;
+    const result = await reviewLearningSignal({ signalId: item.id, decision, proposedRule });
+    if (result.error) setError(result.error); else router.refresh();
+    setWorking("");
+  };
+  const provenance = (item: LearningSignal) => {
+    const evidence = item.evidence ?? {};
+    const repetitions = typeof evidence.repetitions === "number" ? `${evidence.repetitions} observationer` : null;
+    const origin = typeof evidence.assistant_relevance === "string" ? "Handlingsinkorg" : item.signalType === "outcome_confirmed" ? "Bekräftat utfall" : "Svar och redigeringar";
+    return [origin, item.personName, item.conversationTitle, item.source, repetitions].filter(Boolean).join(" · ");
+  };
+  const confirmedPeople = people.filter((person) =>
+    (person.relationship && person.relationship !== "unknown")
+    || Boolean(person.organization)
+    || Boolean(person.professionalSpecialty)
+    || Boolean(person.jurisdiction)
+  ).slice(0, 40);
+  return <div className="page learning-page"><PageHeader eyebrow="Learning & Memory" title="Vad systemet har lärt sig" subtitle="Endast bekräftade regler påverkar framtida AI. Varje post visar källa och kan ändras, stoppas eller tas bort." />
+    <div className="summary-bar"><div className="summary-stat"><strong>{counts.suggested}</strong><span>väntar på ditt beslut</span></div><div className="summary-stat"><strong>{counts.approved}</strong><span>aktiva regler</span></div><div className="summary-stat"><strong>{confirmedPeople.length}</strong><span>bekräftade kontaktkontexter i denna vy</span></div></div>
+    <div className="learning-notice"><CheckCircle2 size={16} /><div><strong>Minne med tydlig källa</strong><p>En observation blir inte automatiskt en permanent regel. Du kan korrigera formuleringen innan du godkänner den.</p></div></div>
+    <div className="learning-tabs">{(["suggested", "approved", "dismissed"] as const).map((value) => <button className={status === value ? "active" : ""} key={value} onClick={() => setStatus(value)}>{value === "suggested" ? "Att granska" : value === "approved" ? "Aktiva regler" : "Avfärdade"} <span>{counts[value]}</span></button>)}</div>
+    <div className="toolbar" aria-label="Lärandekategori">{([
+      ["all", "Allt"],
+      ["priority", "Prioritering"],
+      ["tone", "Svar & ton"],
+      ["actions", "Åtgärder & mönster"],
+    ] as const).map(([value, label]) => <button className={`btn ${category === value ? "primary" : ""}`} key={value} onClick={() => setCategory(value)}>{label}</button>)}</div>
     {error && <div className="empty-card negative">{error}</div>}
-    {visible.length === 0 ? <div className="empty-card">{status === "suggested" ? "No learning suggestions yet. Editing or sending an AI reply, requesting a rewrite, or correcting a category will create a reviewable suggestion here." : `No ${status} learning signals.`}</div> : <div className="learning-list">{visible.map((item) => <article className="learning-card" key={item.id}><div className="learning-card-head"><span className="pill">{labels[item.signalType]}</span><small>{new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(item.createdAt))}</small></div><p className="learning-observation">{item.observation}</p>{(item.personName || item.conversationTitle) && <div className="learning-context">{[item.personName, item.conversationTitle, item.source].filter(Boolean).join(" · ")}</div>}<label>Rule for future AI suggestions<textarea value={rules[item.id] ?? item.proposedRule} onChange={(event) => setRules((values) => ({ ...values, [item.id]: event.target.value }))} /></label><div className="learning-confidence"><span>Evidence confidence</span><strong>{Math.round(item.confidence * 100)}%</strong></div><div className="learning-actions">{status !== "dismissed" && <button className="btn" disabled={working === item.id} onClick={() => void decide(item, "dismiss")}>{status === "approved" ? "Stop using rule" : "Dismiss"}</button>}{status === "dismissed" && <button className="btn negative-button" disabled={working === item.id} onClick={() => void decide(item, "delete")}>{working === item.id ? "Deleting…" : "Delete permanently"}</button>}<button className="btn primary" disabled={working === item.id || !(rules[item.id] ?? item.proposedRule).trim()} onClick={() => void decide(item, "approve")}>{working === item.id ? "Saving…" : status === "approved" ? "Save changes" : "Approve rule"}</button></div></article>)}</div>}
+    {visible.length === 0 ? <div className="empty-card">{status === "suggested" ? "Inga nya AI-förslag väntar på ditt beslut i denna kategori." : "Inga poster matchar denna vy."}</div> : <div className="learning-list">{visible.map((item) => <article className="learning-card" key={item.id}>
+      <div className="learning-card-head"><span className="pill">{labels[item.signalType]}</span><small>{new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium" }).format(new Date(item.createdAt))}</small></div>
+      <p className="learning-observation">{item.observation}</p>
+      <div className="learning-context"><strong>Källa:</strong> {provenance(item)}</div>
+      <label>Regel / minne för framtida beslut<textarea value={rules[item.id] ?? item.proposedRule} onChange={(event) => setRules((values) => ({ ...values, [item.id]: event.target.value }))} /></label>
+      <div className="learning-confidence"><span>Stöd i underlaget</span><strong>{Math.round(item.confidence * 100)}%</strong></div>
+      <div className="learning-actions">{status !== "dismissed" && <button className="btn" disabled={working === item.id} onClick={() => void decide(item, "dismiss")}>{status === "approved" ? "Sluta använda" : "Avfärda"}</button>}{status === "dismissed" && <button className="btn negative-button" disabled={working === item.id} onClick={() => void decide(item, "delete")}>{working === item.id ? "Tar bort…" : "Ta bort permanent"}</button>}<button className="btn primary" disabled={working === item.id || !(rules[item.id] ?? item.proposedRule).trim()} onClick={() => void decide(item, "approve")}>{working === item.id ? "Sparar…" : status === "approved" ? "Spara korrigering" : "Godkänn och använd"}</button></div>
+    </article>)}</div>}
+    <section className="learning-confirmed-context"><div className="section-title"><CircleUserRound size={14} /> Bekräftade relationer och roller</div><p className="subtitle">Detta är strukturerad kontaktkontext som redan är sparad i Contacts, inte AI-gissningar.</p>{confirmedPeople.length === 0 ? <div className="empty-card">Ingen bekräftad relations- eller rollkontext ännu.</div> : <div className="list">{confirmedPeople.map((person) => <div className="list-row" key={person.id}><div className="avatar"><CircleUserRound size={14} /></div><div><strong>{person.name}</strong><small>{[person.relationship, person.organization, person.professionalSpecialty, person.jurisdiction].filter((value) => value && value !== "unknown").join(" · ")}</small></div><div><span className="pill">Verifierad kontaktdata</span></div></div>)}</div>}</section>
   </div>;
 }
 function Connections({ connections }: { connections: ChannelConnection[] }) {
@@ -474,9 +520,9 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
 function SettingsView({ persona, people, learningSignals, connections, onSaved }: { persona: UniversalCommunicationProfile; people: CommunicationPersonOption[]; learningSignals: LearningSignal[]; connections: ChannelConnection[]; onSaved: (profile: UniversalCommunicationProfile) => void }) {
   const [tab, setTab] = useState<"context" | "intelligence" | "connections" | "security">("context");
   return <div className="page"><PageHeader eyebrow="Private workspace" title="Settings" subtitle="Din personliga kontext, dina AI-regler och dina anslutna källor finns samlade här." />
-    <div className="toolbar" aria-label="Inställningar"><button className={`btn ${tab === "context" ? "primary" : ""}`} onClick={() => setTab("context")}>Personal Context</button><button className={`btn ${tab === "intelligence" ? "primary" : ""}`} onClick={() => setTab("intelligence")}>Intelligence</button><button className={`btn ${tab === "connections" ? "primary" : ""}`} onClick={() => setTab("connections")}>Connections</button><button className={`btn ${tab === "security" ? "primary" : ""}`} onClick={() => setTab("security")}>Security</button></div>
+    <div className="toolbar" aria-label="Inställningar"><button className={`btn ${tab === "context" ? "primary" : ""}`} onClick={() => setTab("context")}>Personal Context</button><button className={`btn ${tab === "intelligence" ? "primary" : ""}`} onClick={() => setTab("intelligence")}>Learning & Memory</button><button className={`btn ${tab === "connections" ? "primary" : ""}`} onClick={() => setTab("connections")}>Connections</button><button className={`btn ${tab === "security" ? "primary" : ""}`} onClick={() => setTab("security")}>Security</button></div>
     {tab === "context" && <><div className="section-title"><CircleUserRound size={14} /> Your shared foundation</div><p className="subtitle">Din befintliga kommunikationsprofil är kvar som enda källa för hur AI skriver och agerar. Personliga uppgifter ligger säkert i Personal Context nedan — utan en parallell profil.</p><PersonaForm initial={persona} people={people} onSaved={onSaved} /><PersonalKnowledgeVault /></>}
-    {tab === "intelligence" && <Intelligence items={learningSignals} />}
+    {tab === "intelligence" && <Intelligence items={learningSignals} people={people} />}
     {tab === "connections" && <Connections connections={connections} />}
     {tab === "security" && <div className="cards"><div className="card"><CircleUserRound size={17} /><h3>Account & security</h3><p>Supabase Auth architecture with manual provisioning and mandatory TOTP MFA.</p><span className="pill">MFA required</span></div><div className="card"><Sparkles size={17} /><h3>AI & privacy</h3><p>Only the relevant channel, situation and person profile is sent for the active message.</p><span className="pill">Minimal context</span></div><div className="card"><CheckCircle2 size={17} /><h3>Profile control</h3><p>AI can use your profile but cannot change it or turn an inference into a saved fact.</p><span className="pill">Owner verified</span></div></div>}
   </div>;
