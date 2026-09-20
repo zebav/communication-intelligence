@@ -119,7 +119,7 @@ export async function verifiedRecipient(db: SupabaseClient, owner: string, perso
   if (pe || ie || !person || !identity || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity.external_identifier)) throw new Error("Kontakten behöver en verifierad e-postadress.");
   return { recipient: String(identity.external_identifier).trim(), recipientName: String(person.display_name) };
 }
-export async function generateDraft(db: SupabaseClient, owner: string, plan: Plan, followUp: boolean) {
+export async function generateDraft(db: SupabaseClient, owner: string, plan: Plan, followUp: boolean, additionalContext = "") {
   const e = plan.evidence;
   const [profile, history, memories, rules] = await Promise.all([
     db.from("profiles").select("preferences").eq("id", owner).single(),
@@ -131,6 +131,6 @@ export async function generateDraft(db: SupabaseClient, owner: string, plan: Pla
   const prefs = object(profile.data?.preferences);
   const context = resolveCommunicationProfile(normalizeUniversalProfile(prefs.universal_communication_profile, prefs.communication_persona), { source: e.source, personId: e.personId, situation: followUp ? "followUp" : situationForClassification(e.classification) });
   const messages = [...(history.data ?? [])].reverse().map(m => ({ direction: m.direction as "in" | "out", body: String(m.body_text ?? "") }));
-  const analysis = await getAIService().analyzeEmail({ ownerId: owner, source: e.source, senderName: e.personName, subject: e.title, preview: followUp ? `Prepare a polite follow-up draft, without claiming any new facts or promises. Original message:\n${e.body}` : e.body, currentClassification: e.classification || "Business", personaContext: context + "\n" + approvedLearningContext((rules.data ?? []).filter(r => !r.person_id || r.person_id === e.personId)), verifiedPersonMemories: (memories.data ?? []).map(m => String(m.content)), conversationMessages: messages, styleExamples: messages.filter(m => m.direction === "out").map(m => m.body).slice(-6) });
+  const analysis = await getAIService().analyzeEmail({ ownerId: owner, source: e.source, senderName: e.personName, subject: e.title, preview: (followUp ? `Prepare a polite follow-up draft, without claiming any new facts or promises. Original message:\n${e.body}` : e.body) + (additionalContext ? `\n\nVerified preparation context from the owner-approved planning step:\n${additionalContext}` : ""), currentClassification: e.classification || "Business", personaContext: context + "\n" + approvedLearningContext((rules.data ?? []).filter(r => !r.person_id || r.person_id === e.personId)), verifiedPersonMemories: (memories.data ?? []).map(m => String(m.content)), conversationMessages: messages, styleExamples: messages.filter(m => m.direction === "out").map(m => m.body).slice(-6) });
   return analysis.draftResponse;
 }
