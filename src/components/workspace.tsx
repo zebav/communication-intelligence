@@ -59,8 +59,6 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const router = useRouter();
   const microsoftConnections = connections.filter((item) => item.provider === "microsoft-graph");
   const automaticSyncStarted = useRef(false);
-  const automaticAnalysisInFlight = useRef(false);
-  const automaticAnalysisFailures = useRef(new Set<string>());
   const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>("today");
   const [inboxTab, setInboxTab] = useState("received");
@@ -80,7 +78,6 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
   useEffect(() => { if (backgroundPaused || !microsoftConnections.length || automaticSyncStarted.current) return; const due = microsoftConnections.filter((connection) => !connection.lastSyncAt || Date.now() - new Date(connection.lastSyncAt).getTime() >= 5 * 60 * 1000); if (!due.length) return; automaticSyncStarted.current = true; void Promise.all(due.map((connection) => fetch(`/api/connectors/microsoft/sync?connectionId=${connection.id}`, { method: "POST", headers: { "x-sync-trigger": "automatic" } }))).then(() => router.refresh()).catch(() => undefined); }, [backgroundPaused, microsoftConnections, router]);
-  useEffect(() => { if (backgroundPaused) return; const next = syncedEmails.find((email) => email.messageId && isRelevantEmail(email.classification) && !email.analysis && !automaticAnalysisFailures.current.has(email.messageId)); if (!next || automaticAnalysisInFlight.current) return; automaticAnalysisInFlight.current = true; void analyzeEmailWithAI({ messageId: next.messageId, conversationId: next.id }).then((result) => { if (result.error) automaticAnalysisFailures.current.add(next.messageId); else router.refresh(); }).finally(() => { automaticAnalysisInFlight.current = false; }); }, [backgroundPaused, router, syncedEmails]);
   return <div className="workspace">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication<br />Intelligence</span></div>
