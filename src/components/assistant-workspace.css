@@ -55,3 +55,8 @@
 .assistant-original-visible { margin-top:14px; }
 .assistant-prepared-meeting { margin:18px 0; padding:16px; border:1px solid #315f50; border-radius:12px; background:#102019; }
 .assistant-prepared-meeting h3 { margin-top:0; }
+
+.assistant-prepared-research,.assistant-prepared-reply { margin:18px 0; padding:16px; border:1px solid #334155; border-radius:12px; background:#0b1420; }
+.assistant-prepared-research h3,.assistant-prepared-reply h3 { margin-top:0; }
+.assistant-research-sources { display:flex; flex-wrap:wrap; gap:8px; }
+.assistant-research-sources a { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:6px 9px; border:1px solid #334155; border-radius:999px; color:#9bd7ff; text-decoration:none; }
