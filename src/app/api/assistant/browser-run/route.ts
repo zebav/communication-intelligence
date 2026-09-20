@@ -26,6 +26,22 @@ async function session() {
   return { db, owner: user.id };
 }
 
+async function ensureNoActiveRun(admin: ReturnType<typeof createAdminClient>, owner: string) {
+  const { data, error } = await admin.from("assistant_browser_agent_runs")
+    .select("id,run_id,status").eq("owner_id", owner).in("status", ["PREPARING","PENDING","RUNNING"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error("Pågående Browserbase-körningar kunde inte kontrolleras.");
+  if (!data) return;
+  if (!data.run_id || data.status === "PREPARING") throw new Error("En Browserbase-körning håller fortfarande på att starta. Vänta och hämta status innan en ny körning startas.");
+  const run = await getBrowserbaseAgent(data.run_id);
+  if (!terminalBrowserbaseRun(run.status)) throw new Error("En annan Browserbase-körning pågår. Vänta tills den är klar.");
+  await admin.from("assistant_browser_agent_runs").update({
+    status: run.status,
+    session_id: run.sessionId ?? null,
+    result: run.result ?? {},
+    updated_at: new Date().toISOString(),
+  }).eq("id", data.id).eq("owner_id", owner);
+}
+
 function safeMissingInformation(value: unknown) {
   const parsed = z.array(z.object({
     key: z.string().min(1).max(80),
@@ -55,6 +71,7 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
   try {
     if (!process.env.BROWSERBASE_API_KEY?.trim()) return NextResponse.json({ error: "Browserbase är inte konfigurerat i production." }, { status: 503 });
+    await ensureNoActiveRun(admin, auth.owner);
     const task = await readTask(auth.db, auth.owner, parsed.data.taskId);
     if (task.kind !== "website" || task.revision !== parsed.data.revision || !["decision","ready","waiting"].includes(task.status)) {
       return NextResponse.json({ error: "Webbuppgiften har ändrats. Granska den senaste versionen först." }, { status: 409 });
