@@ -158,7 +158,8 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
   const needsResearch = /(restaurant|restaurang|hotel|hotell|flight|flyg|travel|resa|place|plats|book|boka|reserve|reservation|research|undersök|jämför)/i.test(context);
 
   if (!needsResearch) {
-    const draft = plan.draft || (e.analysis.requiresReply ? await generateDraft(db, owner, plan, false) : "");
+    const shouldDraft = e.analysis.requiresReply || ["instagram", "whatsapp"].includes(e.source);
+    const draft = plan.draft || (shouldDraft ? await generateDraft(db, owner, plan, false) : "");
     return {
       ...plan,
       draft,
@@ -193,7 +194,8 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
       deep.sources.length ? `Sources: ${deep.sources.slice(0, 6).map((source) => `${source.title} — ${source.url}`).join(" | ")}` : "",
       "Use only facts supported by the research. Do not say a booking has been made unless a provider has actually confirmed it.",
     ].filter(Boolean).join("\n");
-    const draft = e.analysis.requiresReply ? await generateDraft(db, owner, plan, false, contextText) : (deep.suggestedReply || plan.draft);
+    const shouldDraft = e.analysis.requiresReply || ["instagram", "whatsapp"].includes(e.source);
+    const draft = shouldDraft ? await generateDraft(db, owner, plan, false, contextText) : (deep.suggestedReply || plan.draft);
     return {
       ...plan,
       draft,
@@ -206,7 +208,8 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
       },
     };
   } catch {
-    const draft = plan.draft || (e.analysis.requiresReply ? await generateDraft(db, owner, plan, false) : "");
+    const shouldDraft = e.analysis.requiresReply || ["instagram", "whatsapp"].includes(e.source);
+    const draft = plan.draft || (shouldDraft ? await generateDraft(db, owner, plan, false) : "");
     return {
       ...plan,
       draft,
