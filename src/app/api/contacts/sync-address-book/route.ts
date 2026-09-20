@@ -9,7 +9,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 60;
 
-const requestSchema = z.object({ connectionId: z.string().uuid() });
+const requestSchema = z.object({ connectionId: z.string().uuid(), cursor: z.string().max(12000).optional() });
+type SyncCursor = { ownerId: string; connectionId: string; provider: string; cursor: string; issuedAt: string };
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type AddressBookContact = {
   id: string;
@@ -272,11 +273,30 @@ export async function POST(request: NextRequest) {
     }
 
     const metadata = (connection.token_metadata as Record<string, unknown> | null) ?? {};
-    const cursorKey = connection.provider === "gmail" ? "contacts_google_page_token" : "contacts_microsoft_next_link";
-    const cursor = typeof metadata[cursorKey] === "string" && metadata[cursorKey] ? String(metadata[cursorKey]) : undefined;
+    let providerCursor: string | undefined;
+    if (parsed.data.cursor) {
+      let decoded: SyncCursor;
+      try {
+        decoded = decryptCredential<SyncCursor>(parsed.data.cursor, encryptionKey);
+      } catch {
+        return NextResponse.json({ error: "The contact sync cursor is invalid. Start the sync again." }, { status: 400 });
+      }
+      const issuedAt = new Date(decoded.issuedAt).getTime();
+      if (
+        decoded.ownerId !== user.id ||
+        decoded.connectionId !== connection.id ||
+        decoded.provider !== connection.provider ||
+        !decoded.cursor ||
+        !Number.isFinite(issuedAt) ||
+        Date.now() - issuedAt > 15 * 60_000
+      ) {
+        return NextResponse.json({ error: "The contact sync cursor has expired. Start the sync again." }, { status: 400 });
+      }
+      providerCursor = decoded.cursor;
+    }
     const page = connection.provider === "gmail"
-      ? await loadGoogleContacts(authorized.token, cursor)
-      : await loadMicrosoftContacts(authorized.token, cursor);
+      ? await loadGoogleContacts(authorized.token, providerCursor)
+      : await loadMicrosoftContacts(authorized.token, providerCursor);
     const contacts = page.contacts;
 
     let created = 0;
@@ -329,20 +349,30 @@ export async function POST(request: NextRequest) {
     }
 
     const complete = !page.cursor;
-    const previousProcessed = Number(metadata.contacts_processed_count ?? 0);
-    const processedTotal = complete ? 0 : previousProcessed + contacts.length;
-    await db.from("connections").update({
+    const previousProcessed = parsed.data.cursor ? Number(metadata.contacts_processed_count ?? 0) : 0;
+    const processedTotal = previousProcessed + contacts.length;
+    const nextCursor = page.cursor
+      ? encryptCredential({
+          ownerId: user.id,
+          connectionId: connection.id,
+          provider: connection.provider,
+          cursor: page.cursor,
+          issuedAt: new Date().toISOString(),
+        } satisfies SyncCursor, encryptionKey)
+      : null;
+
+    const { error: metadataError } = await db.from("connections").update({
       token_metadata: {
         ...metadata,
         expires_at: authorized.credentials.expiresAt,
-        [cursorKey]: page.cursor,
-        contacts_sync_started_at: metadata.contacts_sync_started_at ?? new Date().toISOString(),
-        contacts_processed_count: processedTotal,
+        contacts_sync_started_at: parsed.data.cursor ? metadata.contacts_sync_started_at ?? new Date().toISOString() : new Date().toISOString(),
+        contacts_processed_count: complete ? 0 : processedTotal,
         contacts_last_synced_at: complete ? new Date().toISOString() : metadata.contacts_last_synced_at ?? null,
-        contacts_count: complete ? previousProcessed + contacts.length : metadata.contacts_count ?? null,
+        contacts_count: complete ? processedTotal : metadata.contacts_count ?? null,
       },
       updated_at: new Date().toISOString(),
     }).eq("id", connection.id).eq("owner_id", user.id);
+    if (metadataError) console.error("address_book_sync_metadata_failed", { provider: connection.provider, reason: metadataError.message });
 
     await db.from("audit_logs").insert({
       owner_id: user.id, actor_id: user.id, actor_type: "user", action: "contacts.address_book_sync_page",
@@ -350,7 +380,7 @@ export async function POST(request: NextRequest) {
       new_value: { provider: connection.provider, fetched: contacts.length, created, linked, conflicts, complete },
     });
 
-    return NextResponse.json({ success: true, fetched: contacts.length, created, linked, conflicts, complete });
+    return NextResponse.json({ success: true, fetched: contacts.length, created, linked, conflicts, complete, cursor: nextCursor });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("address_book_sync_failed", { provider: connection.provider, reason });

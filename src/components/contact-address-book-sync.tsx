@@ -22,16 +22,16 @@ export function ContactAddressBookSync({ connections }: { connections: ChannelCo
   const open = () => { setMessage(""); setError(""); setReconnectProvider(""); dialog.current?.showModal(); };
   const sync = async (connection: ChannelConnection) => {
     setBusy(connection.id); setMessage(""); setError(""); setReconnectProvider("");
-    let totalFetched = 0; let totalCreated = 0; let totalLinked = 0; let totalConflicts = 0;
+    let totalFetched = 0; let totalCreated = 0; let totalLinked = 0; let totalConflicts = 0; let cursor: string | undefined;
     try {
       for (let page = 0; page < 40; page += 1) {
         const response = await fetch("/api/contacts/sync-address-book", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ connectionId: connection.id }),
+          body: JSON.stringify({ connectionId: connection.id, ...(cursor ? { cursor } : {}) }),
         });
         const raw = await response.text();
-        let result: { fetched?: number; created?: number; linked?: number; conflicts?: number; complete?: boolean; error?: string; reconnectRequired?: boolean } = {};
+        let result: { fetched?: number; created?: number; linked?: number; conflicts?: number; complete?: boolean; cursor?: string | null; error?: string; reconnectRequired?: boolean } = {};
         try {
           result = raw ? JSON.parse(raw) as typeof result : {};
         } catch {
@@ -47,6 +47,7 @@ export function ContactAddressBookSync({ connections }: { connections: ChannelCo
         totalCreated += result.created ?? 0;
         totalLinked += result.linked ?? 0;
         totalConflicts += result.conflicts ?? 0;
+        cursor = result.cursor ?? undefined;
         setMessage(`${accountDisplayLabel(connection)}: ${totalFetched} kontakter kontrollerade hittills…`);
         if (result.complete) {
           setMessage(`${accountDisplayLabel(connection)}: ${totalFetched} kontakter kontrollerade · ${totalCreated} nya · ${totalLinked} säkra kopplingar${totalConflicts ? ` · ${totalConflicts} behöver granskas` : ""}.`);
