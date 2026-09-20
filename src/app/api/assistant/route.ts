@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { candidateRank, editSchema, kinds, makePlan, propose, sendCapability, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
-import { prepareDecisionPlan } from "@/lib/assistant/preparation";
 import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
 import { chooseAdvisorConversation } from "@/lib/assistant/follow-up";
@@ -138,6 +137,7 @@ export async function POST(request: NextRequest) {
       // The owner explicitly asked to prepare this decision. Research/planning may run here,
       // but no external message, calendar booking or website side effect is authorized.
       const initialPlan = makePlan(e, a.kind);
+      const { prepareDecisionPlan } = await import("@/lib/assistant/preparation");
       const preparedPlan = await prepareDecisionPlan(db, owner, initialPlan, a.kind);
       const { data, error } = await db.from("assistant_tasks").upsert({
         owner_id: owner, message_id: e.messageId, kind: a.kind, plan: preparedPlan,
