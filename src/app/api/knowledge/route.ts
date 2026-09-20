@@ -22,7 +22,16 @@ export async function GET() {
   const session = await sessionUser();
   if ("error" in session) return session.error;
   try {
-    return NextResponse.json({ entries: await listKnowledgeEntries(session.user.id) });
+    const entries = await listKnowledgeEntries(session.user.id);
+    return NextResponse.json({ entries: entries.map((entry) => {
+      const secret = entry.category === "credentials" || entry.metadata?.secret === true;
+      return {
+        ...entry,
+        value: secret ? "" : entry.value,
+        hasValue: Boolean(entry.value),
+        masked: secret,
+      };
+    }) });
   } catch (error) {
     console.error("knowledge_vault_list_failed", { reason: error instanceof Error ? error.message : "unknown" });
     return NextResponse.json({ error: "The knowledge vault could not be loaded." }, { status: 500 });
