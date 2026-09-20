@@ -10,6 +10,44 @@ import { getAIService } from "@/lib/ai/service";
 import { generateDraft } from "./repository";
 import type { Plan, PreparedDecision, TaskKind } from "./model";
 
+function dateInTimezone(timezone: string, instant = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function isoDay(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveRelativeMeetingDate(messages: Array<{ body: string }>, timezone: string) {
+  const text = messages.map((message) => message.body).reverse().join("\n").toLocaleLowerCase();
+  const base = dateInTimezone(timezone);
+  const plus = (days: number) => { const value = new Date(base); value.setUTCDate(value.getUTCDate() + days); return isoDay(value); };
+  if (/\b(i övermorgon|day after tomorrow)\b/i.test(text)) return plus(2);
+  if (/\b(imorgon|tomorrow)\b/i.test(text)) return plus(1);
+  if (/\b(idag|today)\b/i.test(text)) return plus(0);
+
+  const weekdays: Record<string, number> = {
+    söndag: 0, sunday: 0, måndag: 1, monday: 1, tisdag: 2, tuesday: 2,
+    onsdag: 3, wednesday: 3, torsdag: 4, thursday: 4, fredag: 5, friday: 5,
+    lördag: 6, saturday: 6,
+  };
+  for (const [name, target] of Object.entries(weekdays)) {
+    const nextPattern = new RegExp(`\\b(nästa|next)\\s+${name}\\b`, "i");
+    const ordinaryPattern = new RegExp(`\\b(på|on)?\\s*${name}\\b`, "i");
+    if (!nextPattern.test(text) && !ordinaryPattern.test(text)) continue;
+    const current = base.getUTCDay();
+    let delta = (target - current + 7) % 7;
+    if (delta === 0) delta = 7;
+    if (nextPattern.test(text) && delta < 7) delta += 7;
+    return plus(delta);
+  }
+  return null;
+}
+
 function svTime(instant: string, timezone: string) {
   return new Intl.DateTimeFormat("sv-SE", {
     timeZone: timezone,
@@ -48,13 +86,14 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
   const intent = await analyzeCalendarIntent({ ownerId: owner, timezone: settings.data.timezone, messages: evidence });
   const defaults = meetingDefaults[intent.meetingType] ?? meetingDefaults.OTHER;
   const duration = intent.durationMinutes ?? defaults.durationMinutes;
+  const resolvedDate = intent.date ?? resolveRelativeMeetingDate(evidence, settings.data.timezone);
 
   let preparation: PreparedDecision = {
     status: "needs_input",
     summary: intent.summary,
     preparedAt: new Date().toISOString(),
     meeting: {
-      date: intent.date ?? "",
+      date: resolvedDate ?? "",
       durationMinutes: duration,
       location: intent.locationText,
       placeName: "",
@@ -73,7 +112,7 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
     return { ...plan, draft, originalDraft: draft, preparation };
   }
 
-  if (!intent.date) {
+  if (!resolvedDate) {
     const context = [
       `Mötesönskemål: ${intent.summary}`,
       `Datum saknas eller behöver bekräftas.`,
@@ -84,7 +123,7 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
   }
 
   const slotsResult = await calendarSuggestions(db, owner, {
-    date: intent.date,
+    date: resolvedDate,
     duration,
     preparation: defaults.preparationMinutes,
     recovery: defaults.recoveryMinutes,
@@ -129,7 +168,7 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
     summary: intent.summary,
     preparedAt: new Date().toISOString(),
     meeting: {
-      date: intent.date,
+      date: resolvedDate,
       durationMinutes: duration,
       location: intent.locationText,
       placeName,
