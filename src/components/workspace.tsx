@@ -385,7 +385,7 @@ function CleanUp() {
     </div>)}</div>}
   </div>;
 }
-function Intelligence({ items, people }: { items: LearningSignal[]; people: CommunicationPersonOption[] }) {
+function Intelligence({ items, people, followUps, outcomes, calendarHistory }: { items: LearningSignal[]; people: CommunicationPersonOption[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[] }) {
   const router = useRouter();
   const [status, setStatus] = useState<LearningSignal["status"]>("suggested");
   const [category, setCategory] = useState<"all" | "priority" | "tone" | "actions">("all");
@@ -427,6 +427,19 @@ function Intelligence({ items, people }: { items: LearningSignal[]; people: Comm
     || Boolean(person.professionalSpecialty)
     || Boolean(person.jurisdiction)
   ).slice(0, 40);
+  const openDeadlines = followUps.filter((item) => item.dueAt && (item.status === "open" || item.status === "suggested")).slice(0, 12);
+  const confirmedOutcomes = outcomes.filter((item) => item.userConfirmed || Boolean(item.ownerRating)).slice(0, 12);
+  const bookingBuckets = calendarHistory.reduce<Record<string, { label: string; count: number }>>((buckets, event) => {
+    const date = new Date(event.startsAt);
+    if (Number.isNaN(date.getTime())) return buckets;
+    const weekday = new Intl.DateTimeFormat("sv-SE", { weekday: "long" }).format(date);
+    const hour = new Intl.DateTimeFormat("sv-SE", { hour: "2-digit", hourCycle: "h23" }).format(date);
+    const key = `${weekday}|${hour}`;
+    const label = `${weekday} runt ${hour}:00`;
+    buckets[key] = { label, count: (buckets[key]?.count ?? 0) + 1 };
+    return buckets;
+  }, {});
+  const bookingPatterns = Object.values(bookingBuckets).filter((item) => item.count >= 2).sort((a, b) => b.count - a.count).slice(0, 4);
   return <div className="page learning-page"><PageHeader eyebrow="Learning & Memory" title="Vad systemet har lärt sig" subtitle="Endast bekräftade regler påverkar framtida AI. Varje post visar källa och kan ändras, stoppas eller tas bort." />
     <div className="summary-bar"><div className="summary-stat"><strong>{counts.suggested}</strong><span>väntar på ditt beslut</span></div><div className="summary-stat"><strong>{counts.approved}</strong><span>aktiva regler</span></div><div className="summary-stat"><strong>{confirmedPeople.length}</strong><span>bekräftade kontaktkontexter i denna vy</span></div></div>
     <div className="learning-notice"><CheckCircle2 size={16} /><div><strong>Minne med tydlig källa</strong><p>En observation blir inte automatiskt en permanent regel. Du kan korrigera formuleringen innan du godkänner den.</p></div></div>
@@ -447,6 +460,13 @@ function Intelligence({ items, people }: { items: LearningSignal[]; people: Comm
       <div className="learning-actions">{status !== "dismissed" && <button className="btn" disabled={working === item.id} onClick={() => void decide(item, "dismiss")}>{status === "approved" ? "Sluta använda" : "Avfärda"}</button>}{status === "dismissed" && <button className="btn negative-button" disabled={working === item.id} onClick={() => void decide(item, "delete")}>{working === item.id ? "Tar bort…" : "Ta bort permanent"}</button>}<button className="btn primary" disabled={working === item.id || !(rules[item.id] ?? item.proposedRule).trim()} onClick={() => void decide(item, "approve")}>{working === item.id ? "Sparar…" : status === "approved" ? "Spara korrigering" : "Godkänn och använd"}</button></div>
     </article>)}</div>}
     <section className="learning-confirmed-context"><div className="section-title"><CircleUserRound size={14} /> Bekräftade relationer och roller</div><p className="subtitle">Detta är strukturerad kontaktkontext som redan är sparad i Contacts, inte AI-gissningar.</p>{confirmedPeople.length === 0 ? <div className="empty-card">Ingen bekräftad relations- eller rollkontext ännu.</div> : <div className="list">{confirmedPeople.map((person) => <div className="list-row" key={person.id}><div className="avatar"><CircleUserRound size={14} /></div><div><strong>{person.name}</strong><small>{[person.relationship, person.organization, person.professionalSpecialty, person.jurisdiction].filter((value) => value && value !== "unknown").join(" · ")}</small></div><div><span className="pill">Verifierad kontaktdata</span></div></div>)}</div>}</section>
+    <section className="learning-confirmed-context"><div className="section-title"><Clock3 size={14} /> Åtgärder, deadlines och bokningsmönster</div><p className="subtitle">Detta är observerad strukturerad historik. Den blir inte automatiskt en AI-regel.</p>
+      <div className="cards">
+        <div className="card"><h3>Aktuella deadlines</h3>{openDeadlines.length === 0 ? <p className="muted">Inga daterade öppna åtaganden.</p> : openDeadlines.map((item) => <div className="learning-context" key={item.id}><strong>{item.personName}</strong> · {item.description}<br /><small>{item.dueAt ? new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium" }).format(new Date(item.dueAt)) : ""} · källa: konversation</small></div>)}</div>
+        <div className="card"><h3>Bekräftade utfall</h3>{confirmedOutcomes.length === 0 ? <p className="muted">Inga bekräftade utfall ännu.</p> : confirmedOutcomes.slice(0, 6).map((item) => <div className="learning-context" key={item.id}><strong>{item.personName}</strong> · {item.desiredOutcome}<br /><small>{item.ownerRating ?? item.status} · källa: skickat meddelande / svar</small></div>)}</div>
+        <div className="card"><h3>Bokningsmönster</h3>{bookingPatterns.length === 0 ? <p className="muted">För lite bekräftad kalenderhistorik för att visa ett återkommande mönster.</p> : bookingPatterns.map((pattern) => <div className="learning-context" key={pattern.label}><strong>{pattern.label}</strong><br /><small>{pattern.count} bekräftade bokningar · källa: masterkalender</small></div>)}</div>
+      </div>
+    </section>
   </div>;
 }
 function Connections({ connections }: { connections: ChannelConnection[] }) {
