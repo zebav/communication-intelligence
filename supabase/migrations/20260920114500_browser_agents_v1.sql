@@ -24,6 +24,9 @@ create table if not exists public.assistant_browser_agent_runs (
 
 create index if not exists assistant_browser_agent_runs_owner_status
   on public.assistant_browser_agent_runs(owner_id, status, updated_at desc);
+create unique index if not exists assistant_browser_agent_one_active_per_owner
+  on public.assistant_browser_agent_runs(owner_id)
+  where status in ('PENDING','RUNNING');
 
 alter table public.assistant_browser_contexts enable row level security;
 alter table public.assistant_browser_agent_runs enable row level security;
