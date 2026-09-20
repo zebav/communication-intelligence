@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { browserActionRisk, browserAgentResultSchema, exactBrowserTarget } from "./browserbase-agent";
+import { browserActionRisk, browserAgentResultSchema, exactBrowserTarget } from "./browserbase-agent-policy";
 
 describe("managed Browserbase Agent boundary", () => {
   it("accepts a public exact HTTPS target", () => {
