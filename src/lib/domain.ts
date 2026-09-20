@@ -146,6 +146,14 @@ export interface CommunicationOutcome {
   createdAt: string;
   updatedAt: string;
 }
+export interface CalendarLearningEvent {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  status: "active" | "released" | "executing" | "confirmed";
+}
+
 
 export interface ChannelConnection {
   id: string;
