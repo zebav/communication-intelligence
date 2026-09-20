@@ -30,14 +30,37 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
   const refresh = async () => { setSnapshot(await load()); };
   const act: Api = async body => {
     setBusy(true); setError("");
+    const previous = snapshot;
+    const action = typeof body.action === "string" ? body.action : "";
+    const optimistic = action === "dismiss" || action === "dismiss_candidate";
+    if (optimistic) {
+      setSnapshot((current) => {
+        if (!current) return current;
+        if (action === "dismiss" && typeof body.id === "string") {
+          return { ...current, tasks: current.tasks.filter((task) => task.id !== body.id) };
+        }
+        if (action === "dismiss_candidate" && typeof body.messageId === "string" && typeof body.kind === "string") {
+          return { ...current, candidates: current.candidates.filter((candidate) => !(candidate.messageId === body.messageId && candidate.kind === body.kind)) };
+        }
+        return current;
+      });
+      if (action === "dismiss" && body.id === selected) setSelected("");
+    }
     try {
       const r = await fetch("/api/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Åtgärden misslyckades.");
-      if (data.task?.id) setSelected(data.task.id);
-      await refresh();
-    } catch (e) { await refresh().catch(() => undefined); setError(e instanceof Error ? e.message : "Åtgärden misslyckades."); }
-    finally { setBusy(false); }
+      if (data.task?.id && !optimistic) setSelected(data.task.id);
+      if (optimistic) {
+        void load().then(setSnapshot).catch(() => undefined);
+      } else {
+        await refresh();
+      }
+    } catch (e) {
+      if (optimistic && previous) setSnapshot(previous);
+      else await refresh().catch(() => undefined);
+      setError(e instanceof Error ? e.message : "Åtgärden misslyckades.");
+    } finally { setBusy(false); }
   };
   return <div className="page assistant-workspace"><header><p className="eyebrow">Decision & Execution Center V2</p><h1>Handlingsinkorg</h1><p>Beslutsunderlag först. Varje uppgift visar vad som är viktigt, exakt förslag och vad som händer om du godkänner.</p></header>
     <button className="btn" disabled={busy} onClick={() => { setError(""); void refresh().catch(e => setError(e.message)); }}>Uppdatera uppdrag</button>
@@ -63,7 +86,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {visible.map(t => <button key={t.id} className={`assistant-task ${t.id === selected ? "selected" : ""}`} onClick={() => onSelect(t.id)}><span>{kindLabels[t.kind]} · {statusLabels[t.status]}</span><strong>{t.plan.evidence.title || "Konversation"}</strong><span>{t.plan.evidence.personName}</span><small>{t.plan.evidence.source} · {t.plan.evidence.account} · Prioritet {t.plan.evidence.priority.toFixed(1)}/10{t.plan.evidence.unread ? " · Oläst" : ""}</small>{t.plan.followUpAt && <small>Följ upp {new Date(t.plan.followUpAt).toLocaleString("sv-SE")}</small>}</button>)}
     </section><section className="assistant-detail" aria-label="Granska uppdrag">{task ? <TaskDetail key={`${task.id}:${task.revision}`} task={task} people={people} busy={busy} act={act} snapshot={snapshot} onRefresh={onRefresh} /> : <div className="empty-card"><h2>Välj ett uppdrag</h2><p>Här visas original, föreslagna steg, mottagare och ditt redigerbara svar.</p></div>}</section></div>
     <section className="assistant-proposals"><h2>Nya beslut från konversationer</h2><p>Senaste hämtningen granskade {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post från de senaste ${snapshot.emailWindowDays ?? 7} dagarna och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden föreslås inte. Förslagen är inte godkännanden.</p>
-      <div className="assistant-proposal-grid">{snapshot.candidates.map(c => <article className="assistant-task" key={`${c.messageId}:${c.kind}`}><small>{kindLabels[c.kind]} · {c.plan.evidence.source} · Prioritet {c.plan.evidence.priority.toFixed(1)}/10{c.plan.evidence.unread ? " · Oläst" : ""}</small><h3>{c.plan.evidence.title}</h3><p>{c.plan.evidence.personName} · {c.plan.evidence.account}</p><p>{c.plan.reason}</p><div className="assistant-buttons"><button className="btn primary" disabled={busy} onClick={() => act({ action: "start", messageId: c.messageId, kind: c.kind })}>Förbered uppdrag</button><button className="btn" disabled={busy} onClick={() => act({ action: "dismiss_candidate", messageId: c.messageId, kind: c.kind, scope: "message" })}>Inte relevant</button>{c.plan.evidence.personId && <button className="btn" disabled={busy} onClick={() => act({ action: "dismiss_candidate", messageId: c.messageId, kind: c.kind, scope: "sender" })}>Prioritera inte avsändaren</button>}</div><small><q>Inte relevant</q> gäller bara detta meddelande. Avsändarvalet filtrerar framtida förslag från samma person och kanal.</small></article>)}</div>
+      <div className="assistant-proposal-grid">{snapshot.candidates.map(c => <article className="assistant-task" key={`${c.messageId}:${c.kind}`}><small>{kindLabels[c.kind]} · {c.plan.evidence.source} · Prioritet {c.plan.evidence.priority.toFixed(1)}/10{c.plan.evidence.unread ? " · Oläst" : ""}</small><h3>{c.plan.evidence.title}</h3><p>{c.plan.evidence.personName} · {c.plan.evidence.account}</p><p>{c.plan.reason}</p><div className="assistant-buttons"><button className="btn primary" disabled={busy} onClick={() => act({ action: "start", messageId: c.messageId, kind: c.kind })}>Förbered uppdrag</button><button className="btn" disabled={busy} onClick={() => act({ action: "dismiss_candidate", messageId: c.messageId, kind: c.kind })}>Inte relevant</button></div><small><q>Inte relevant</q> tar bort detta beslut direkt och sänker avsändarens framtida prioritet utan att blockera personen helt.</small></article>)}</div>
       {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska nästa 100 äldre meddelanden</button>}
       <details><summary>AI missade ett uppdrag</summary><label>Välj meddelande från hämtat underlag<select value={manualMessage} onChange={e => setManualMessage(e.target.value)}><option value="">Välj meddelande</option>{snapshot.reviewMessages.map(m => <option key={m.id} value={m.id}>{m.person} · {m.title}</option>)}</select></label><label>Vad behöver göras?<select value={manualKind} onChange={e => setManualKind(e.target.value as TaskKind)}>{kinds.map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label><button className="btn" disabled={busy || !manualMessage} onClick={() => act({ action: "start", messageId: manualMessage, kind: manualKind })}>Skapa för granskning</button></details>
     </section>

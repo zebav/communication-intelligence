@@ -1,9 +1,25 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { browserReadiness } from "./browser-readiness";
+
 afterEach(() => vi.unstubAllEnvs());
-it("cannot enable the missing live driver using environment flags", () => {
-  vi.stubEnv("ASSISTANT_EXECUTION_ENABLED", "true");
-  vi.stubEnv("BROWSER_EXECUTION_ENABLED", "true");
+
+it("keeps Browserbase unavailable when its server credential is missing", () => {
+  vi.stubEnv("BROWSERBASE_API_KEY", "");
   expect(browserReadiness()).toMatchObject({ enabled: false, mode: "preparation" });
-  expect(browserReadiness().blockers).toHaveLength(3);
+  expect(browserReadiness().blockers).toHaveLength(1);
+});
+
+it("enables managed standard web actions when Browserbase is configured", () => {
+  vi.stubEnv("BROWSERBASE_API_KEY", "test-browserbase-key");
+  expect(browserReadiness()).toMatchObject({
+    enabled: true,
+    mode: "managed_agent",
+    blockers: [],
+    capabilities: {
+      executeStandardWebTasks: true,
+      persistentSiteLogin: true,
+      secureVariables: true,
+      criticalActions: false,
+    },
+  });
 });

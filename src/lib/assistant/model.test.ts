@@ -43,11 +43,12 @@ describe("action discovery", () => {
     expect(card.whyImportant).toBe("Behöver svar idag");
     expect(card.approvalOutcome).toContain("skickas en gång");
   });
-  it("keeps website execution fail-closed in the decision card", () => {
-    const plan = makePlan({ ...example, analysis: { actionSuggestion: { detected: true, type: "website_task", task: "Kontrollera bokningen", reason: "Behöver extern kontroll", targetUrl: "https://example.com/task", requiresLogin: false, contactIds: [], confidence: .9 } } }, "website");
+  it("describes guarded Browserbase execution in the decision card", () => {
+    const plan = makePlan({ ...example, analysis: { actionSuggestion: { detected: true, type: "website_task", task: "Kontrollera bokningen", reason: "Behöver extern kontroll", targetUrl: "https://example.com/task", requiresLogin: false, contactIds: [], requiredFields: [], confidence: .9 } } }, "website");
     const card = decisionCard(plan, "website");
     expect(card.targetUrl).toBe("https://example.com/task");
-    expect(card.approvalOutcome).toContain("fail-closed");
+    expect(card.approvalOutcome).toContain("Browserbase");
+    expect(card.approvalOutcome).toContain("Betalningar");
   });
   it("surfaces overdue waiting tasks without declaring them answered", () => {
     const t = { ...task(), status: "waiting" as const };

@@ -35,7 +35,7 @@ function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").Emai
     } : undefined,
     forwardingSuggestion: Object.keys(forwarding).length ? {
       recommended: bool(forwarding.recommended) ?? false,
-      recipientRole: (["lawyer", "accountant", "advisor", "insurance_contact", "colleague", "other", "none"].includes(str(forwarding.recipientRole)) ? str(forwarding.recipientRole) : "none") as "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "other" | "none",
+      recipientRole: (["lawyer", "accountant", "advisor", "insurance_contact", "colleague", "business_partner", "other", "none"].includes(str(forwarding.recipientRole)) ? str(forwarding.recipientRole) : "none") as "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "business_partner" | "other" | "none",
       reason: str(forwarding.reason), introduction: str(forwarding.introduction),
     } : undefined,
     actionSuggestion: Object.keys(action).length ? {
@@ -44,6 +44,13 @@ function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").Emai
       task: str(action.task), reason: str(action.reason), targetUrl: str(action.targetUrl),
       requiresLogin: bool(action.requiresLogin) ?? false,
       contactIds: Array.isArray(action.contactIds) ? action.contactIds.filter((id): id is string => typeof id === "string").slice(0, 3) : [],
+      requiredFields: Array.isArray(action.requiredFields) ? action.requiredFields.flatMap((value) => {
+        const field = object(value);
+        const kind = str(field.kind);
+        const sensitivity = str(field.sensitivity);
+        if (!str(field.key) || !str(field.label) || !["text","email","phone","date","username","password","account_number","one_time_code","other"].includes(kind) || !["personal","sensitive","restricted"].includes(sensitivity)) return [];
+        return [{ key: str(field.key), label: str(field.label), kind: kind as "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other", description: str(field.description), sensitivity: sensitivity as "personal" | "sensitive" | "restricted" }];
+      }).slice(0, 12) : [],
       confidence: num(action.confidence) ?? 0,
     } : undefined,
     relationshipSuggestion: Object.keys(relationship).length ? {
