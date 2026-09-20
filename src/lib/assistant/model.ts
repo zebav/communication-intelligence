@@ -50,7 +50,7 @@ export function decisionCard(plan: Plan, kind: TaskKind): DecisionCard {
     : kind === "forward" ? `Originalmejlet och den sparade introduktionen skickas en gång från ${e.account} till ${plan.recipientName || "den verifierade rådgivaren"}.`
     : kind === "follow_up" ? `En uppföljning skickas en gång till ${plan.recipientName || e.personName}. Automatisk omsändning är spärrad.`
     : kind === "meeting" ? "Godkännandet här förbereder mötesplaneringen. Själva kalenderbokningen och inbjudningarna kräver kalenderflödets separata slutgodkännande."
-    : "Ingen webbåtgärd utförs ännu. Browserbase live execution är fortsatt fail-closed tills den säkra drivrutinen är klar.";
+    : "När du godkänner kör Browserbase den sparade webbuppgiften. Saknade privata uppgifter efterfrågas först och kan sparas krypterat. Betalningar, juridiska signeringar, säkerhetsändringar och destruktiva kontoåtgärder blockeras.";
   return { summary, whyImportant, proposedAction, approvalOutcome, targetUrl: action?.targetUrl?.trim() || "" };
 }
 export const editSchema = z.object({ draft: z.string().trim().max(4000), recipientPersonId: z.string().uuid().nullable(), followUpAt: z.iso.datetime({ offset: true }).nullable() });
