@@ -16,10 +16,31 @@ export type Evidence = {
   /** Read state affects ranking only. It can never create an action by itself. */
   unread?: boolean; analysis: Partial<EmailAnalysis>; recipient: string; version: string;
 };
+export type PreparedDecision = {
+  status: "ready" | "needs_input" | "failed";
+  summary: string;
+  preparedAt: string;
+  meeting?: {
+    date: string;
+    durationMinutes: number;
+    location: string;
+    placeName: string;
+    placeAddress: string;
+    travelSummary: string;
+    slots: Array<{ start: string; end: string }>;
+  };
+  research?: {
+    overview: string;
+    recommendedApproach: string;
+    sources: Array<{ title: string; url: string; supports: string }>;
+  };
+};
+
 export type Plan = {
   evidence: Evidence; draft: string; originalDraft: string; reason: string;
   recipientPersonId: string | null; recipient: string; recipientName: string;
   followUpAt: string | null; steps: string[];
+  preparation?: PreparedDecision;
 };
 export type Task = { id: string; message_id: string; kind: TaskKind; status: TaskStatus; revision: number; plan: Plan; result: Record<string, unknown>; created_at: string; updated_at: string; observedReplyAt?: string };
 export type DecisionCard = {
@@ -41,15 +62,20 @@ export function decisionCard(plan: Plan, kind: TaskKind): DecisionCard {
   const whyImportant = plan.reason?.trim()
     || e.analysis.priorityReason?.trim()
     || `Prioritet ${Math.max(0, Math.min(10, e.priority || 0)).toFixed(1)}/10.`;
+  const preparedMeeting = plan.preparation?.meeting;
   const proposedAction = kind === "reply" ? "Skicka det sparade svaret i samma konversation."
     : kind === "forward" ? `Vidarebefordra originalet med introduktionen till ${plan.recipientName || "vald rådgivare"}.`
     : kind === "follow_up" ? "Skicka den sparade uppföljningen en gång."
-    : kind === "meeting" ? "Ta fram 2–3 bokningsbara tider, kontrollera plats och resa och boka först efter kalenderns slutgodkännande."
-    : action?.task?.trim() || "Öppna den föreslagna webbuppgiften för säker granskning.";
+    : kind === "meeting" && preparedMeeting?.slots.length
+      ? `Svara med de ${preparedMeeting.slots.length} kontrollerade tiderna${preparedMeeting.placeName ? ` och platsen ${preparedMeeting.placeName}` : ""}.`
+      : kind === "meeting" ? "Förbered mötesalternativ från masterkalendern innan du svarar."
+      : action?.task?.trim() || "Öppna den föreslagna webbuppgiften för säker granskning.";
   const approvalOutcome = kind === "reply" ? `Ett meddelande skickas en gång från ${e.account} till ${plan.recipientName || e.personName}. Därefter väntar uppdraget på svar.`
     : kind === "forward" ? `Originalmejlet och den sparade introduktionen skickas en gång från ${e.account} till ${plan.recipientName || "den verifierade rådgivaren"}.`
     : kind === "follow_up" ? `En uppföljning skickas en gång till ${plan.recipientName || e.personName}. Automatisk omsändning är spärrad.`
-    : kind === "meeting" ? "Godkännandet här förbereder mötesplaneringen. Själva kalenderbokningen och inbjudningarna kräver kalenderflödets separata slutgodkännande."
+    : kind === "meeting" ? (plan.draft.trim()
+      ? `Det färdiga svaret med de kontrollerade mötesalternativen skickas en gång till ${plan.recipientName || e.personName}. Ingen tid bokas i kalendern innan motparten har bekräftat ett alternativ.`
+      : "Förbered uppdraget först så att kalender, plats och eventuella reseförutsättningar kan kontrolleras innan du tar beslut.")
     : "När du godkänner kör Browserbase den sparade webbuppgiften. Saknade privata uppgifter efterfrågas först och kan sparas krypterat. Betalningar, juridiska signeringar, säkerhetsändringar och destruktiva kontoåtgärder blockeras.";
   return { summary, whyImportant, proposedAction, approvalOutcome, targetUrl: action?.targetUrl?.trim() || "" };
 }
@@ -101,7 +127,8 @@ export function makePlan(e: Evidence, kind: TaskKind): Plan {
   return { evidence: e, draft, originalDraft: draft, reason: e.analysis.forwardingSuggestion?.recommended && kind === "forward" ? e.analysis.forwardingSuggestion.reason : e.analysis.priorityReason ?? e.analysis.summary ?? "Granska originalmeddelandet.", recipientPersonId: kind === "forward" ? null : e.personId, recipient: kind === "forward" ? "" : e.recipient, recipientName: kind === "forward" ? "" : e.personName, followUpAt: null, steps: steps[kind] };
 }
 export function sendCapability(plan: Plan, kind: TaskKind): string | null {
-  if (!["reply", "forward", "follow_up"].includes(kind)) return "Använd det separata granskningsflödet nedan.";
+  if (kind === "website") return "Använd Browserbase-granskningen nedan.";
+  if (!["reply", "forward", "follow_up", "meeting"].includes(kind)) return "Använd det separata granskningsflödet nedan.";
   if (!plan.draft.trim()) return "Skriv eller generera ett fullständigt svar först.";
   if (!plan.evidence.connectionId) return "Meddelandet saknar ett entydigt ursprungskonto.";
   if ((plan.evidence.provider === "microsoft-graph" && plan.evidence.source !== "email") || (plan.evidence.provider === "instagram-professional" && plan.evidence.source !== "instagram")) return "Kontot stämmer inte med meddelandets källa.";
