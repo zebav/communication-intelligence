@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
-const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), recipientPersonId: z.string().uuid(), comment: z.string().trim().min(1).max(4000) });
+const requestSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), recipientPersonId: z.string().uuid(), comment: z.string().trim().min(1).max(4000), expectedRecipient: z.string().email().optional(), expectedConnectionId: z.string().uuid().optional() });
 const jsonError = (message: string, status = 500) => NextResponse.json({ error: message }, { status });
 
 async function getAccessToken(credentials: StoredCredentials, origin: string) {
@@ -37,7 +37,9 @@ export async function POST(request: NextRequest) {
   const { data: identity } = await supabase.from("identities").select("external_identifier").eq("owner_id", user.id).eq("person_id", parsed.data.recipientPersonId).eq("source", "email").eq("verified_match", true).order("created_at", { ascending: false }).limit(1).maybeSingle();
   const recipient = identity?.external_identifier?.trim();
   if (!recipient || !z.string().email().safeParse(recipient).success) return jsonError("The selected person has no verified email address.", 409);
+  if (parsed.data.expectedRecipient && recipient.toLowerCase() !== parsed.data.expectedRecipient.toLowerCase()) return jsonError("The reviewed recipient has changed. Nothing was sent.", 409);
   const linkedConversation = Array.isArray(message.conversations) ? message.conversations[0] : message.conversations;
+  if (parsed.data.expectedConnectionId && linkedConversation?.connection_id !== parsed.data.expectedConnectionId) return jsonError("The reviewed account has changed. Nothing was sent.", 409);
   let connectionQuery = supabase.from("connections").select("id,encrypted_credentials,token_metadata").eq("owner_id", user.id).eq("provider", microsoftGraphConnector.id).eq("status", "connected");
   if (linkedConversation?.connection_id) connectionQuery = connectionQuery.eq("id", linkedConversation.connection_id);
   const { data: connection } = await connectionQuery.limit(1).maybeSingle();

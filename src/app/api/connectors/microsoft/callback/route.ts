@@ -10,19 +10,37 @@ import { createClient } from "@/lib/supabase/server";
 type TokenResponse = { access_token: string; refresh_token?: string; expires_in: number; scope?: string; token_type: string };
 type MicrosoftProfile = { id: string; displayName?: string; mail?: string; userPrincipalName?: string };
 
+function stateReturnOrigin(state: string | null) {
+  if (!state) return null;
+  const encoded = state.split(".")[1];
+  if (!encoded) return null;
+  try {
+    const url = new URL(Buffer.from(encoded, "base64url").toString("utf8"));
+    return url.protocol === "https:" && /^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname) ? url.origin : null;
+  } catch { return null; }
+}
+
 function sameState(left: string, right: string) {
   const a = Buffer.from(left);
   const b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function resultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
-  return NextResponse.redirect(new URL(`/?microsoft=${result}`, request.url));
+async function resultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed", validatedState?: string | null) {
+  const cookieStore = await cookies();
+  const target = cookieStore.get("microsoft_oauth_return_to")?.value ?? stateReturnOrigin(validatedState ?? null);
+  cookieStore.delete({ name: "microsoft_oauth_return_to", path: "/api/connectors/microsoft" });
+  try {
+    const url = new URL(target ?? request.nextUrl.origin);
+    if (url.protocol !== "https:" || !/^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname)) throw new Error("invalid return target");
+    url.pathname = "/"; url.search = `?microsoft=${result}`; url.hash = "";
+    return NextResponse.redirect(url);
+  } catch { return NextResponse.redirect(new URL(`/?microsoft=${result}`, request.url)); }
 }
 
 export async function GET(request: NextRequest) {
-  if((await cookies()).get("microsoft_oauth_purpose")?.value==="calendar") return finishCalendarConsent(request,"microsoft");
-  if (request.nextUrl.searchParams.get("error")) return resultRedirect(request, "denied");
+  if ((await cookies()).get("microsoft_oauth_purpose")?.value === "calendar") return finishCalendarConsent(request, "microsoft");
+  if (request.nextUrl.searchParams.get("error")) return await resultRedirect(request, "denied");
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
   const cookieStore = await cookies();
@@ -30,7 +48,7 @@ export async function GET(request: NextRequest) {
   const verifier = cookieStore.get("microsoft_oauth_verifier")?.value;
   cookieStore.delete("microsoft_oauth_state");
   cookieStore.delete("microsoft_oauth_verifier");
-  if (!code || !state || !expectedState || !verifier || !sameState(state, expectedState)) return resultRedirect(request, "invalid");
+  if (!code || !state || !expectedState || !verifier || !sameState(state, expectedState)) return await resultRedirect(request, "invalid");
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -54,18 +72,18 @@ export async function GET(request: NextRequest) {
       }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!tokenResponse.ok) return resultRedirect(request, "failed");
+    if (!tokenResponse.ok) return await resultRedirect(request, "failed");
     const tokens = await tokenResponse.json() as TokenResponse;
-    if (!tokens.access_token) return resultRedirect(request, "failed");
+    if (!tokens.access_token) return await resultRedirect(request, "failed");
 
     const profileResponse = await fetch("https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName", {
       headers: { authorization: `Bearer ${tokens.access_token}` },
       signal: AbortSignal.timeout(15_000),
     });
-    if (!profileResponse.ok) return resultRedirect(request, "failed");
+    if (!profileResponse.ok) return await resultRedirect(request, "failed");
     const profile = await profileResponse.json() as MicrosoftProfile;
     const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
-    if (!encryptionKey || !profile.id) return resultRedirect(request, "failed");
+    if (!encryptionKey || !profile.id) return await resultRedirect(request, "failed");
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
     const encryptedCredentials = encryptCredential({
       accessToken: tokens.access_token,
@@ -96,9 +114,9 @@ export async function GET(request: NextRequest) {
       ? supabase.from("connections").update(values).eq("id", existing.id)
       : supabase.from("connections").insert(values);
     const { error: saveError } = await query;
-    if (saveError) return resultRedirect(request, "failed");
-    return resultRedirect(request, "connected");
+    if (saveError) return await resultRedirect(request, "failed");
+    return await resultRedirect(request, "connected", state);
   } catch {
-    return resultRedirect(request, "failed");
+    return await resultRedirect(request, "failed");
   }
 }

@@ -1,0 +1,11 @@
+import { expect, it } from "vitest";
+import { reserveWebBudget, WEB_BUDGET } from "./browser-budget";
+const input = { now: 1_000, periodStart: 0, periodEnd: 1_000_000, browserSeconds: 0, aiMicroUsd: 0, requestedAiMicroUsd: 100_000, activeSessions: 0 };
+it("reserves full browser duration and AI worst case", () => expect(reserveWebBudget(input)).toEqual({ browserSeconds: 300, aiMicroUsd: 100_000, activeSessions: 1 }));
+it.each([NaN, Infinity, -1, 0.5])("rejects invalid accounting %s", aiMicroUsd => expect(() => reserveWebBudget({ ...input, aiMicroUsd })).toThrow());
+it("blocks AI overspend", () => expect(() => reserveWebBudget({ ...input, aiMicroUsd: WEB_BUDGET.aiMicroUsd })).toThrow());
+it("blocks browser overspend", () => expect(() => reserveWebBudget({ ...input, browserSeconds: WEB_BUDGET.browserSeconds })).toThrow());
+it("allows exact budget boundary", () => expect(reserveWebBudget({ ...input, browserSeconds: WEB_BUDGET.browserSeconds - 300, aiMicroUsd: WEB_BUDGET.aiMicroUsd - 100_000 }).aiMicroUsd).toBe(WEB_BUDGET.aiMicroUsd));
+it("blocks concurrent sessions", () => expect(() => reserveWebBudget({ ...input, activeSessions: 1 })).toThrow());
+it.each([1_000_000, 999_999, 700_000])("blocks expired or imminent reset %s", now => expect(() => reserveWebBudget({ ...input, now })).toThrow());
+it("rejects future periods", () => expect(() => reserveWebBudget({ ...input, periodStart: 2_000 })).toThrow());

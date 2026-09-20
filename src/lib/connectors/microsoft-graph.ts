@@ -10,7 +10,7 @@ export const microsoftGraphConnector: ConnectorDefinition = {
   availability: "available",
   description: "Email, conversation history, approved sending and incremental synchronization.",
   setupNote: "Connected through Microsoft OAuth.",
-  scopes: ["openid", "profile", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send"],
+  scopes: ["openid", "profile", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Contacts.Read"],
   capabilities: {
     validateConnection: true,
     fullSync: true,

@@ -6,7 +6,7 @@ import { instagramConnector } from "@/lib/connectors/instagram";
 import { createClient } from "@/lib/supabase/server";
 
 type StoredCredentials = { accessToken: string; expiresAt: string };
-const requestSchema = z.object({ conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000) });
+const requestSchema = z.object({ conversationId: z.string().uuid(), body: z.string().trim().min(1).max(4000), expectedRecipient: z.string().min(1).max(300).optional(), expectedConnectionId: z.string().uuid().optional() });
 const jsonError = (message: string, status = 500) => NextResponse.json({ error: message }, { status });
 
 export async function POST(request: NextRequest) {
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
   const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
   const accountId = String(metadata.instagram_user_id ?? "");
   const participantId = conversation.external_conversation_id?.split(":").at(-1) ?? "";
+  if ((parsed.data.expectedRecipient && participantId !== parsed.data.expectedRecipient) || (parsed.data.expectedConnectionId && conversation.connection_id !== parsed.data.expectedConnectionId)) return jsonError("The reviewed recipient or account has changed. Nothing was sent.", 409);
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!encryptionKey) return jsonError("The server encryption key is not configured.");
 
