@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { decisionCard, kinds, kindLabels, sendCapability, statusLabels, taskBucket, type Task, type Plan, type TaskKind } from "@/lib/assistant/model";
 import { AssistantBrowserStatus } from "./assistant-browser-status";
 import type { BrowserReadiness } from "@/lib/assistant/browser-readiness";
@@ -53,7 +53,6 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
   const [manualMessage, setManualMessage] = useState(""), [manualKind, setManualKind] = useState<TaskKind>("reply");
   const visible = snapshot.tasks.filter(t => taskBucket(t) === bucket && `${t.plan.evidence.personName} ${t.plan.evidence.title} ${t.plan.evidence.account}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const task = snapshot.tasks.find(t => t.id === selected);
-  const quality = useMemo(() => Object.fromEntries(["wrong_recipient", "not_relevant", "missed_task", "draft_edited", "useful"].map(k => [k, snapshot.feedback.filter(f => f.category === k).length])), [snapshot.feedback]);
   return <>
     {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: nya direktutskick från handlingsinkorgen är avstängda. Kalenderflödet har sina egna separata godkännanden.</p>}
     <nav className="assistant-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
@@ -68,7 +67,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska nästa 100 äldre meddelanden</button>}
       <details><summary>AI missade ett uppdrag</summary><label>Välj meddelande från hämtat underlag<select value={manualMessage} onChange={e => setManualMessage(e.target.value)}><option value="">Välj meddelande</option>{snapshot.reviewMessages.map(m => <option key={m.id} value={m.id}>{m.person} · {m.title}</option>)}</select></label><label>Vad behöver göras?<select value={manualKind} onChange={e => setManualKind(e.target.value as TaskKind)}>{kinds.map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label><button className="btn" disabled={busy || !manualMessage} onClick={() => act({ action: "start", messageId: manualMessage, kind: manualKind })}>Skapa för granskning</button></details>
     </section>
-    <details className="assistant-quality"><summary>Kvalitetsuppföljning</summary><p>Senaste högst 1 000 registrerade omdömen: {quality.wrong_recipient} fel mottagare · {quality.not_relevant} irrelevanta · {quality.missed_task} missade uppdrag · {quality.draft_edited} ändrade utkast · {quality.useful} användbara.</p><p>Detta mäter dina omdömen, inte en automatiskt uppmätt träffsäkerhet. Prioritetskorrigeringar använder befintlig inlärning. Övriga omdömen ändrar inte din persona utan granskning.</p></details>
+    <div className="assistant-notice"><strong>Lärande är separerat från besluten.</strong><p>Regler, svarston, irrelevanta avsändare och bekräftad kontaktkontext granskas under Settings → Learning & Memory. Handlingsinkorgen visar bara det du behöver besluta om nu.</p></div>
   </>;
 }
 function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Task; people: CommunicationPersonOption[]; busy: boolean; act: Api; snapshot: AssistantSnapshot; onRefresh: () => Promise<void> }) {
