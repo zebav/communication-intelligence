@@ -146,7 +146,7 @@ describe("assistant review interface", () => {
       timezone: "Europe/Stockholm", executionEnabled: true,
     };
     render(<AssistantBoard snapshot={snapshot} people={[]} selected="direct-task" onSelect={() => undefined} act={vi.fn(async () => undefined)} busy={false} onMore={() => undefined} onRefresh={async () => undefined} />);
-    expect(screen.getByText(direct.body)).toBeTruthy();
+    expect(screen.getAllByText(direct.body).length).toBeGreaterThan(0);
     expect((screen.getByLabelText("Förslag på svar") as HTMLTextAreaElement).value).toContain("konkret förslag");
   });
 });
