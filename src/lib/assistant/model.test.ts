@@ -44,7 +44,7 @@ describe("action discovery", () => {
     expect(card.approvalOutcome).toContain("skickas en gång");
   });
   it("keeps website execution fail-closed in the decision card", () => {
-    const plan = makePlan({ ...example, analysis: { actionSuggestion: { detected: true, type: "website_task", task: "Kontrollera bokningen", reason: "Behöver extern kontroll", targetUrl: "https://example.com/task", requiresLogin: false, contactIds: [], confidence: .9 } } }, "website");
+    const plan = makePlan({ ...example, analysis: { actionSuggestion: { detected: true, type: "website_task", task: "Kontrollera bokningen", reason: "Behöver extern kontroll", targetUrl: "https://example.com/task", requiresLogin: false, contactIds: [], requiredFields: [], confidence: .9 } } }, "website");
     const card = decisionCard(plan, "website");
     expect(card.targetUrl).toBe("https://example.com/task");
     expect(card.approvalOutcome).toContain("fail-closed");
