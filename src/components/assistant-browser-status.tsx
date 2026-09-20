@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, LockKeyhole, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { safeExternalActionUrl } from "@/lib/safe-action";
 import type { Task } from "@/lib/assistant/model";
@@ -46,18 +46,22 @@ export function AssistantBrowserStatus({ task, readiness, onRefresh = async () =
     blockedReason: typeof task.result.browserBlockedReason === "string" ? task.result.browserBlockedReason : "",
   });
 
-  async function loadFields() {
+  const loadFields = useCallback(async () => {
     const response = await fetch(`/api/assistant/browser-inputs?taskId=${encodeURIComponent(task.id)}`, { cache: "no-store" });
     const data = await response.json() as { fields?: Field[]; error?: string };
     if (!response.ok) throw new Error(data.error ?? "Privata uppgifter kunde inte hämtas.");
     setFields(data.fields ?? []);
-  }
+  }, [task.id]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void loadFields().catch((error) => { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Privata uppgifter kunde inte hämtas."); });
-    return () => controller.abort();
-  }, [task.id, task.revision]);
+    let active = true;
+    queueMicrotask(() => {
+      void loadFields().catch((error) => {
+        if (active) setNotice(error instanceof Error ? error.message : "Privata uppgifter kunde inte hämtas.");
+      });
+    });
+    return () => { active = false; };
+  }, [loadFields, task.revision]);
 
   const missingPersistent = useMemo(() => fields.filter((field) => field.persist && !field.hasValue), [fields]);
   const missingEphemeral = useMemo(() => fields.filter((field) => !field.persist && !(values[field.key] ?? "").trim()), [fields, values]);
