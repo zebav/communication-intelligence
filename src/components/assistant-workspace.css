@@ -43,3 +43,20 @@
 .decision-card-section.approval-outcome { border-color:#2f8f74; background:#10231f; }
 .assistant-source-details { margin:14px 0 20px; }
 .assistant-source-details > summary { color:#94a3b8; }
+
+.assistant-proposal-card { gap:11px; }
+.assistant-proposal-person { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.assistant-proposal-person strong { font-size:14px; }
+.assistant-proposal-person span { color:#94a3b8; font-size:11px; text-align:right; }
+.assistant-proposal-summary { margin:0; color:#d7dee7; }
+.assistant-proposal-action { padding:11px 12px; border-radius:9px; background:#0b1420; border:1px solid #334155; }
+.assistant-proposal-action > span { display:block; margin-bottom:4px; color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
+.assistant-proposal-action p { margin:0; }
+.assistant-original-visible { margin-top:14px; }
+.assistant-prepared-meeting { margin:18px 0; padding:16px; border:1px solid #315f50; border-radius:12px; background:#102019; }
+.assistant-prepared-meeting h3 { margin-top:0; }
+
+.assistant-prepared-research,.assistant-prepared-reply { margin:18px 0; padding:16px; border:1px solid #334155; border-radius:12px; background:#0b1420; }
+.assistant-prepared-research h3,.assistant-prepared-reply h3 { margin-top:0; }
+.assistant-research-sources { display:flex; flex-wrap:wrap; gap:8px; }
+.assistant-research-sources a { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:6px 9px; border:1px solid #334155; border-radius:999px; color:#9bd7ff; text-decoration:none; }

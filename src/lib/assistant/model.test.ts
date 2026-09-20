@@ -43,6 +43,33 @@ describe("action discovery", () => {
     expect(card.whyImportant).toBe("Behöver svar idag");
     expect(card.approvalOutcome).toContain("skickas en gång");
   });
+  it("turns a prepared meeting into a send-ready decision instead of a planning placeholder", () => {
+    const plan = {
+      ...makePlan(example, "meeting"),
+      draft: "Jag kan tisdag 14:00 eller onsdag 16:00. Passar någon av tiderna?",
+      preparation: {
+        status: "ready" as const,
+        summary: "Två lediga tider har kontrollerats.",
+        preparedAt: new Date().toISOString(),
+        meeting: {
+          date: "2026-09-22",
+          durationMinutes: 60,
+          location: "",
+          placeName: "",
+          placeAddress: "",
+          travelSummary: "",
+          slots: [
+            { start: "2026-09-22T12:00:00Z", end: "2026-09-22T13:00:00Z" },
+            { start: "2026-09-23T14:00:00Z", end: "2026-09-23T15:00:00Z" },
+          ],
+        },
+      },
+    };
+    const card = decisionCard(plan, "meeting");
+    expect(card.proposedAction).toContain("2 kontrollerade tider");
+    expect(card.approvalOutcome).toContain("skickas en gång");
+    expect(card.approvalOutcome).not.toContain("förbereder mötesplaneringen");
+  });
   it("describes guarded Browserbase execution in the decision card", () => {
     const plan = makePlan({ ...example, analysis: { actionSuggestion: { detected: true, type: "website_task", task: "Kontrollera bokningen", reason: "Behöver extern kontroll", targetUrl: "https://example.com/task", requiresLogin: false, contactIds: [], requiredFields: [], confidence: .9 } } }, "website");
     const card = decisionCard(plan, "website");

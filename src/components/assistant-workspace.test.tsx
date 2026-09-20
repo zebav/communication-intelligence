@@ -77,10 +77,12 @@ function mountCandidate() {
 }
 
 describe("assistant review interface", () => {
-  it("uses one not-relevant action that also lowers future sender priority", () => {
+  it("removes a not-relevant candidate immediately and uses one relevance action", () => {
     const act = mountCandidate();
+    expect(screen.getByText("Anna")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Inte relevant" }));
     expect(act).toHaveBeenCalledWith({ action: "dismiss_candidate", messageId: "m", kind: "reply" });
+    expect(screen.queryByRole("button", { name: "Inte relevant" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Prioritera inte avsändaren" })).toBeNull();
   });
 
@@ -124,8 +126,28 @@ describe("assistant review interface", () => {
 
   it("meeting composer keeps the originating conversation", () => {
     mount(false, "meeting");
-    fireEvent.click(screen.getByRole("button", { name: "Planera i masterkalendern" }));
+    fireEvent.click(screen.getByText("Ändra eller planera manuellt"));
+    fireEvent.click(screen.getByRole("button", { name: "Öppna masterkalenderns planering" }));
     expect(screen.getByText("Bokning för conversation")).toBeTruthy();
+  });
+  it("shows the full direct message and its reply suggestion in the decision view", () => {
+    const direct: Evidence = {
+      ...e,
+      source: "whatsapp",
+      provider: "whatsapp-business",
+      body: "Det här är hela WhatsApp-meddelandet som jag behöver kunna läsa innan beslut.",
+      recipient: "46700000000",
+      lastOtherAt: new Date().toISOString(),
+      analysis: { requiresReply: true, draftResponse: "Absolut, jag kollar detta och återkommer med ett konkret förslag." },
+    };
+    const snapshot: AssistantSnapshot = {
+      tasks: [{ id: "direct-task", message_id: "m", kind: "reply", status: "ready", revision: 2, plan: makePlan(direct, "reply"), result: {}, created_at: direct.sentAt, updated_at: direct.sentAt }],
+      candidates: [], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+      timezone: "Europe/Stockholm", executionEnabled: true,
+    };
+    render(<AssistantBoard snapshot={snapshot} people={[]} selected="direct-task" onSelect={() => undefined} act={vi.fn(async () => undefined)} busy={false} onMore={() => undefined} onRefresh={async () => undefined} />);
+    expect(screen.getAllByText(direct.body).length).toBeGreaterThan(0);
+    expect((screen.getByLabelText("Förslag på svar") as HTMLTextAreaElement).value).toContain("konkret förslag");
   });
 });
 

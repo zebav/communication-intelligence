@@ -12,7 +12,7 @@ import { POST as outlookReply } from "@/app/api/connectors/microsoft/reply/route
 import { POST as outlookForward } from "@/app/api/connectors/microsoft/forward/route";
 import { POST as instagramReply } from "@/app/api/connectors/instagram/reply/route";
 import { POST as whatsappReply } from "@/app/api/connectors/whatsapp/reply/route";
-export const maxDuration = 60;
+export const maxDuration = 120;
 const base = { id: z.string().uuid(), revision: z.number().int().positive() };
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), messageId: z.string().uuid(), kind: z.enum(kinds) }),
@@ -134,17 +134,19 @@ export async function POST(request: NextRequest) {
     if (a.action === "start") {
       const e = await readEvidence(db, owner, a.messageId);
       if (e.direction !== "in" && a.kind !== "follow_up") throw new Error("Välj ett inkommande originalmeddelande.");
-      // Manual creation is permitted even when the classifier missed the message.
-      // It remains a proposal and cannot authorize an external action.
+      // The owner explicitly asked to prepare this decision. Research/planning may run here,
+      // but no external message, calendar booking or website side effect is authorized.
       const initialPlan = makePlan(e, a.kind);
-      const { data, error } = await db.from("assistant_tasks").upsert({ owner_id: owner, message_id: e.messageId, kind: a.kind, plan: initialPlan }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true }).select("*").maybeSingle();
+      const { prepareDecisionPlan } = await import("@/lib/assistant/preparation");
+      const preparedPlan = await prepareDecisionPlan(db, owner, initialPlan, a.kind);
+      const { data, error } = await db.from("assistant_tasks").upsert({
+        owner_id: owner, message_id: e.messageId, kind: a.kind, plan: preparedPlan,
+      }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true }).select("*").maybeSingle();
       if (error) throw new Error("Uppdraget kunde inte sparas.");
       if (data) {
         const created = data as Task;
-        if (!sendCapability(initialPlan, a.kind) && ["reply", "follow_up"].includes(a.kind)) {
-          return json({ task: await changeTask(db, owner, created, "ready", initialPlan) });
-        }
-        return json({ task: created });
+        const canSendPrepared = !sendCapability(preparedPlan, a.kind) && ["reply", "follow_up", "meeting"].includes(a.kind) && preparedPlan.preparation?.status === "ready";
+        return json({ task: canSendPrepared ? await changeTask(db, owner, created, "ready", preparedPlan) : created });
       }
       const { data: existing, error: read } = await db.from("assistant_tasks").select("*").eq("owner_id", owner).eq("message_id", e.messageId).eq("kind", a.kind).single();
       if (read) throw new Error("Uppdraget finns redan men kunde inte läsas.");
