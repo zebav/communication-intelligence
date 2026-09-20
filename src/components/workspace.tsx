@@ -14,7 +14,7 @@ import { PriorityFeedback } from "@/components/priority-feedback";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
-import { actionLabels, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type Source, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
+import { actionLabels, type CalendarLearningEvent, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type Source, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
 import { conversations } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, deeplyAnalyzeEmailWithAI, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
