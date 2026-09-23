@@ -72,7 +72,8 @@ export function evidenceFromRow(value: unknown): Evidence {
     unread: object(row.metadata).is_read === false || object(row.metadata).isRead === false,
     recipient: row.source === "email" ? str(identity.external_identifier) : str(c.external_conversation_id).split(":").at(-1) ?? "",
   };
-  return { ...e, version: createHash("sha256").update(JSON.stringify(e)).digest("hex") };
+  const versionEvidence = { ...e, analysis: { ...e.analysis, draftResponse: undefined, draftTone: undefined } };
+  return { ...e, version: createHash("sha256").update(JSON.stringify(versionEvidence)).digest("hex") };
 }
 export async function readEvidence(db: SupabaseClient, owner: string, id: string) {
   const { data, error } = await db.from("messages").select(fields).eq("owner_id", owner).eq("id", id).maybeSingle();
