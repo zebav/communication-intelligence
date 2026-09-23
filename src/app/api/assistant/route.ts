@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { candidateRank, editSchema, kinds, makePlan, propose, sendCapability, type Task } from "@/lib/assistant/model";
-import { changeTask, generateDraft, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
+import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
 import { chooseAdvisorConversation } from "@/lib/assistant/follow-up";
@@ -196,10 +196,12 @@ export async function POST(request: NextRequest) {
       if (a.action === "generate") {
         if (task.kind === "forward") throw new Error("Redigera introduktionen till rådgivaren; ett svar till avsändaren ska inte användas som vidarebefordran.");
         const draft = await generateDraft(db, owner, plan, task.kind === "follow_up");
+        await persistDraftAnalysis(db, owner, task.message_id, draft, "Natural");
         plan = { ...plan, draft, originalDraft: draft };
         return json({ task: await changeTask(db, owner, task, "decision", plan) });
       }
       if (a.edit.followUpAt && Date.parse(a.edit.followUpAt) <= Date.now()) throw new Error("Välj en framtida tid för uppföljning.");
+      await persistDraftAnalysis(db, owner, task.message_id, a.edit.draft, "Owner edited");
       plan = { ...plan, draft: a.edit.draft, followUpAt: a.edit.followUpAt };
       if (task.kind === "forward") {
         if (!a.edit.recipientPersonId) throw new Error("Välj rådgivaren från Contacts.");
