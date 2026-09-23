@@ -72,7 +72,8 @@ export function evidenceFromRow(value: unknown): Evidence {
     unread: object(row.metadata).is_read === false || object(row.metadata).isRead === false,
     recipient: row.source === "email" ? str(identity.external_identifier) : str(c.external_conversation_id).split(":").at(-1) ?? "",
   };
-  return { ...e, version: createHash("sha256").update(JSON.stringify(e)).digest("hex") };
+  const versionEvidence = { ...e, analysis: { ...e.analysis, draftResponse: undefined, draftTone: undefined } };
+  return { ...e, version: createHash("sha256").update(JSON.stringify(versionEvidence)).digest("hex") };
 }
 export async function readEvidence(db: SupabaseClient, owner: string, id: string) {
   const { data, error } = await db.from("messages").select(fields).eq("owner_id", owner).eq("id", id).maybeSingle();
@@ -111,6 +112,17 @@ export async function changeTask(db: SupabaseClient, owner: string, task: Task, 
   if (error || !data) throw new Error("Uppdraget har ändrats eller behandlas redan. Hämta det igen innan du fortsätter.");
   return data as Task;
 }
+export async function persistDraftAnalysis(db: SupabaseClient, owner: string, messageId: string, draftResponse: string, draftTone = "Natural") {
+  const { data: row, error: readError } = await db.from("messages").select("metadata").eq("owner_id", owner).eq("id", messageId).maybeSingle();
+  if (readError || !row) throw new Error("Originalmeddelandet kunde inte läsas när svaret skulle sparas.");
+  const metadata = object(row.metadata);
+  const analysis = { ...object(metadata.ai_analysis), draftResponse, draftTone };
+  const { error } = await db.from("messages").update({
+    metadata: { ...metadata, ai_analysis: analysis, assistant_draft_updated_at: new Date().toISOString() },
+  }).eq("owner_id", owner).eq("id", messageId);
+  if (error) throw new Error("Det föreslagna svaret kunde inte sparas i konversationen.");
+}
+
 export async function verifiedRecipient(db: SupabaseClient, owner: string, personId: string) {
   const [{ data: person, error: pe }, { data: identity, error: ie }] = await Promise.all([
     db.from("people").select("display_name").eq("owner_id", owner).eq("id", personId).maybeSingle(),
