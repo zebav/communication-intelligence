@@ -21,12 +21,14 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState("");
   const load = useCallback(async (signal?: AbortSignal) => {
-    const r = await fetch(`/api/assistant?cursor=${cursor}`, { cache: "no-store", signal });
+    const timeout = AbortSignal.timeout(15_000);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const r = await fetch(`/api/assistant?cursor=${cursor}`, { cache: "no-store", signal: combined });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "Uppdragen kunde inte hämtas.");
     return data as AssistantSnapshot;
   }, [cursor]);
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.message); }); return () => controller.abort(); }, [load]);
+  useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Handlingsinkorgen tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [load]);
   const refresh = async () => { setSnapshot(await load()); };
   const act: Api = async body => {
     setBusy(true); setError("");
@@ -60,8 +62,7 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
       setError(e instanceof Error ? e.message : "Åtgärden misslyckades.");
     } finally { setBusy(false); }
   };
-  return <div className="page assistant-workspace"><header><p className="eyebrow">Decision & Execution Center V2</p><h1>Handlingsinkorg</h1><p>Beslutsunderlag först. Varje uppgift visar vad som är viktigt, exakt förslag och vad som händer om du godkänner.</p></header>
-    <button className="btn" disabled={busy} onClick={() => { setError(""); void refresh().catch(e => setError(e.message)); }}>Uppdatera uppdrag</button>
+  return <div className="page assistant-workspace"><header className="assistant-header"><div><p className="eyebrow">Beslut och utförande</p><h1>Handlingsinkorg</h1><p>Välj bara vad du vill hantera. Du får sedan ett tydligt förslag att godkänna.</p></div><button className="btn" disabled={busy} onClick={() => { setError(""); void refresh().catch(e => setError(e.message)); }}>Uppdatera</button></header>
     {error && <p role="alert" className="assistant-alert">{error}</p>}
     {!snapshot ? <p role="status">{error ? "Senast sparade uppdrag visas när anslutningen är återställd." : "Hämtar uppdrag…"}</p> : <AssistantBoard snapshot={snapshot} people={people} selected={selected} onSelect={setSelected} act={act} busy={busy} onMore={() => setCursor(snapshot.next ?? "0")} onRefresh={refresh} />}
   </div>;
