@@ -21,9 +21,9 @@ const message = z.object({
   from: phone, to: phone, sendTime: z.string().datetime({ offset: true }), type: z.string().min(1),
   customerProfile: z.object({ name: z.string().optional() }).optional(),
   text: z.object({ body: z.string() }).optional(),
-  image: z.object({ caption: z.string().optional() }).optional(),
-  video: z.object({ caption: z.string().optional() }).optional(),
-  document: z.object({ caption: z.string().optional() }).optional(),
+  image: z.object({ caption: z.string().optional(), link: z.string().url().optional(), id: z.string().optional(), mimeType: z.string().optional(), sha256: z.string().optional() }).passthrough().optional(),
+  video: z.object({ caption: z.string().optional(), link: z.string().url().optional(), id: z.string().optional(), mimeType: z.string().optional(), sha256: z.string().optional() }).passthrough().optional(),
+  document: z.object({ caption: z.string().optional(), link: z.string().url().optional(), id: z.string().optional(), filename: z.string().optional(), mimeType: z.string().optional(), sha256: z.string().optional() }).passthrough().optional(),
 });
 const envelope = z.object({ id: z.string().min(1), type: z.string(), whatsappInboundMessage: z.unknown().optional(), whatsappMessage: z.unknown().optional() });
 export function parseYCloudEvent(raw: string) {

@@ -61,6 +61,7 @@ create table if not exists public.vault_ingestion_jobs (
   source_conversation_id uuid references public.conversations(id) on delete cascade,
   source_person_id uuid references public.people(id) on delete set null,
   message_text text not null default '',
+  metadata jsonb not null default '{}'::jsonb,
   state text not null default 'pending' check (state in ('pending','processing','done','failed')),
   attempts integer not null default 0 check (attempts between 0 and 10),
   last_error_code text,

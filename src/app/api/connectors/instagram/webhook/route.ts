@@ -6,8 +6,20 @@ import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-inte
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 export const maxDuration = 60;
+
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
+}
 
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
@@ -28,6 +40,17 @@ export async function POST(request: NextRequest) {
   }
   const events = parseInstagramWebhook(rawBody);
   if (!events.length) return NextResponse.json({ received: true, imported: 0 });
+  let rawPayload: { entry?: Array<{ id?: string; messaging?: Array<{ message?: { mid?: string; attachments?: Array<{ type?: string; payload?: { url?: string } }> } }> }> } = {};
+  try { rawPayload = JSON.parse(rawBody) as typeof rawPayload; } catch {}
+  const mediaByMessage = new Map<string, Array<{ type?: string; url: string }>>();
+  for (const entry of rawPayload.entry ?? []) for (const messaging of entry.messaging ?? []) {
+    const mid = messaging.message?.mid;
+    if (!mid) continue;
+    const refs = (messaging.message?.attachments ?? []).flatMap((attachment) =>
+      typeof attachment.payload?.url === "string" && attachment.payload.url.startsWith("https://") ? [{ type: attachment.type, url: attachment.payload.url }] : []
+    ).slice(0, 10);
+    if (refs.length) mediaByMessage.set(mid, refs);
+  }
 
   const database = createAdminClient();
   const { data: connections, error: connectionError } = await database.from("connections").select("id,owner_id,account_name,account_identifier,token_metadata,encrypted_credentials").eq("provider", instagramConnector.id).eq("status", "connected");
@@ -123,6 +146,32 @@ export async function POST(request: NextRequest) {
       if (messageError) throw messageError;
       if (savedMessage) {
         imported += 1;
+        if (event.message.attachmentCount > 0) {
+          const refs = mediaByMessage.get(event.message.externalId) ?? [];
+          if (refs.length) {
+            const { error: mediaRefError } = await database.from("vault_media_references").upsert(refs.map((ref) => ({
+              owner_id: connection.owner_id,
+              connection_id: connection.id,
+              source: "instagram",
+              provider: instagramConnector.id,
+              provider_message_id: event.message.externalId,
+              media_type: ref.type ?? null,
+              media_reference: ref.url,
+            })), { onConflict: "owner_id,source,provider,provider_message_id,media_reference", ignoreDuplicates: true });
+            if (mediaRefError) throw mediaRefError;
+          }
+          await queueVaultIngestion(database, {
+            ownerId: connection.owner_id,
+            connectionId: connection.id,
+            provider: instagramConnector.id,
+            sourceType: "instagram",
+            providerMessageId: event.message.externalId,
+            sourceMessageId: savedMessage.id,
+            sourceConversationId: conversationResult.data.id,
+            sourcePersonId: resolved.personId,
+            messageText: event.message.body,
+          });
+        }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
       }
     } catch (error) {
@@ -137,5 +186,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item))); });
+  const owners = [...new Set((connections ?? []).map((connection) => connection.owner_id))];
+  if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
   return NextResponse.json({ received: true, imported, failed });
 }

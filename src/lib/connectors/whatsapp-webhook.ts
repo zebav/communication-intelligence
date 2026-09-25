@@ -3,7 +3,8 @@ import { normalizeCommunicationMessage } from "./normalization";
 import { whatsappConnector } from "./whatsapp";
 import type { WhatsAppProviderAdapter, WhatsAppProviderMessage, WhatsAppProviderStatus } from "./whatsapp-provider";
 
-type WhatsAppMessage = { id?: string; from?: string; timestamp?: string; type?: string; text?: { body?: string }; image?: unknown; audio?: unknown; video?: unknown; document?: unknown; sticker?: unknown; location?: unknown; contacts?: unknown; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } } };
+type WhatsAppMedia = { id?: string; mime_type?: string; sha256?: string; filename?: string; caption?: string };
+type WhatsAppMessage = { id?: string; from?: string; timestamp?: string; type?: string; text?: { body?: string }; image?: WhatsAppMedia; audio?: WhatsAppMedia; video?: WhatsAppMedia; document?: WhatsAppMedia; sticker?: WhatsAppMedia; location?: unknown; contacts?: unknown; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } } };
 type WhatsAppValue = { metadata?: { display_phone_number?: string; phone_number_id?: string }; contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>; messages?: WhatsAppMessage[]; statuses?: Array<{ id?: string; status?: string; timestamp?: string; recipient_id?: string; errors?: unknown }> };
 type WhatsAppPayload = { object?: string; entry?: Array<{ id?: string; changes?: Array<{ field?: string; value?: WhatsAppValue }> }> };
 

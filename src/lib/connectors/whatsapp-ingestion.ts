@@ -5,6 +5,18 @@ import { findWhatsAppWebhookConnection } from "@/lib/connectors/whatsapp-webhook
 import type { WhatsAppProviderEvents } from "@/lib/connectors/whatsapp-provider";
 import { analyzeIncomingWhatsAppMessage } from "@/lib/connectors/whatsapp-intelligence";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
+
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
+}
 
 export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   if (!events.messages.length && !events.statuses.length) {
@@ -125,6 +137,19 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
       if (saved.error) throw saved.error;
       if (saved.data) {
         imported += 1;
+        if (event.message.attachmentCount > 0) {
+          await queueVaultIngestion(database, {
+            ownerId: connection.owner_id,
+            connectionId: connection.id,
+            provider: `whatsapp:${events.provider}`,
+            sourceType: "whatsapp",
+            providerMessageId: event.message.externalId,
+            sourceMessageId: saved.data.id,
+            sourceConversationId: conversation.data.id,
+            sourcePersonId: resolved.personId,
+            messageText: event.message.body,
+          });
+        }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversation.data.id, messageId: saved.data.id });
       }
     } catch (error) {
@@ -147,6 +172,8 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   }
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage)); });
+  const owners = [...new Set(events.messages.filter((event) => event.message.attachmentCount > 0).flatMap((event) => { const connection = findWhatsAppWebhookConnection(connections ?? [], event.phoneNumberId); return connection ? [connection.owner_id] : []; }))];
+  if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
   const retry = failed > 0 || failedStatuses > 0 || unmatchedMessages > 0;
   console.info("WhatsApp webhook processed", { provider: events.provider, imported, duplicates, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
   return NextResponse.json({
