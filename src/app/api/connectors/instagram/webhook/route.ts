@@ -29,6 +29,17 @@ export async function POST(request: NextRequest) {
   }
   const events = parseInstagramWebhook(rawBody);
   if (!events.length) return NextResponse.json({ received: true, imported: 0 });
+  let rawPayload: { entry?: Array<{ id?: string; messaging?: Array<{ message?: { mid?: string; attachments?: Array<{ type?: string; payload?: { url?: string } }> } }> }> } = {};
+  try { rawPayload = JSON.parse(rawBody) as typeof rawPayload; } catch {}
+  const mediaByMessage = new Map<string, Array<{ type?: string; url: string }>>();
+  for (const entry of rawPayload.entry ?? []) for (const messaging of entry.messaging ?? []) {
+    const mid = messaging.message?.mid;
+    if (!mid) continue;
+    const refs = (messaging.message?.attachments ?? []).flatMap((attachment) =>
+      typeof attachment.payload?.url === "string" && attachment.payload.url.startsWith("https://") ? [{ type: attachment.type, url: attachment.payload.url }] : []
+    ).slice(0, 10);
+    if (refs.length) mediaByMessage.set(mid, refs);
+  }
 
   const database = createAdminClient();
   const { data: connections, error: connectionError } = await database.from("connections").select("id,owner_id,account_name,account_identifier,token_metadata,encrypted_credentials").eq("provider", instagramConnector.id).eq("status", "connected");
@@ -125,6 +136,19 @@ export async function POST(request: NextRequest) {
       if (savedMessage) {
         imported += 1;
         if (event.message.attachmentCount > 0) {
+          const refs = mediaByMessage.get(event.message.externalId) ?? [];
+          if (refs.length) {
+            const { error: mediaRefError } = await database.from("vault_media_references").upsert(refs.map((ref) => ({
+              owner_id: connection.owner_id,
+              connection_id: connection.id,
+              source: "instagram",
+              provider: instagramConnector.id,
+              provider_message_id: event.message.externalId,
+              media_type: ref.type ?? null,
+              media_reference: ref.url,
+            })), { onConflict: "owner_id,source,provider,provider_message_id,media_reference", ignoreDuplicates: true });
+            if (mediaRefError) throw mediaRefError;
+          }
           await queueVaultIngestion(database, {
             ownerId: connection.owner_id,
             connectionId: connection.id,
@@ -135,7 +159,6 @@ export async function POST(request: NextRequest) {
             sourceConversationId: conversationResult.data.id,
             sourcePersonId: resolved.personId,
             messageText: event.message.body,
-            metadata: event.message.providerMetadata,
           });
         }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
