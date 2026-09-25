@@ -69,6 +69,17 @@ async function getAccessToken(credentials: StoredCredentials, origin: string) {
   return { accessToken: tokens.access_token, credentials: next, refreshed: true };
 }
 
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
+}
+
 export async function POST(request: NextRequest) {
   const background = isAuthorizedCron(request.headers.get("authorization"));
   const backgroundOwner = z.string().uuid().safeParse(request.headers.get("x-owner-id"));
