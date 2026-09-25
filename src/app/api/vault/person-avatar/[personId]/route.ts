@@ -13,8 +13,6 @@ async function auth(){
 export async function GET(_request:NextRequest,{params}:{params:Promise<{personId:string}>}){
  const session=await auth(); if(!session)return new NextResponse(null,{status:403});
  const {personId}=await params;
- const sourceTypeParsed=z.enum(["manual","chatgpt_upload","google_photos","instagram","whatsapp","email","other"]).safeParse(String(form.get("sourceType")||"manual"));
- if(!sourceTypeParsed.success)return NextResponse.json({error:"Ogiltig bildkälla."},{status:400});
  const admin=createAdminClient();
  const {data:person,error}=await admin.from("people").select("avatar_asset_id").eq("owner_id",session.user.id).eq("id",personId).maybeSingle();
  if(error||!person?.avatar_asset_id)return new NextResponse(null,{status:404});
@@ -31,6 +29,8 @@ export async function POST(request:NextRequest,{params}:{params:Promise<{personI
  const {personId}=await params;
  const form=await request.formData(); const file=form.get("file");
  if(!(file instanceof File)||!file.type.startsWith("image/"))return NextResponse.json({error:"Välj en bildfil."},{status:400});
+ const sourceTypeParsed=z.enum(["manual","chatgpt_upload","google_photos","instagram","whatsapp","email","other"]).safeParse(String(form.get("sourceType")||"manual"));
+ if(!sourceTypeParsed.success)return NextResponse.json({error:"Ogiltig bildkälla."},{status:400});
  const admin=createAdminClient();
  const {data:person,error:personError}=await admin.from("people").select("id").eq("owner_id",session.user.id).eq("id",personId).maybeSingle();
  if(personError||!person)return NextResponse.json({error:"Kontakten kunde inte hittas."},{status:404});
