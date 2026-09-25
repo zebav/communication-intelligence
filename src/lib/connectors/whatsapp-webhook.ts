@@ -3,7 +3,8 @@ import { normalizeCommunicationMessage } from "./normalization";
 import { whatsappConnector } from "./whatsapp";
 import type { WhatsAppProviderAdapter, WhatsAppProviderMessage, WhatsAppProviderStatus } from "./whatsapp-provider";
 
-type WhatsAppMessage = { id?: string; from?: string; timestamp?: string; type?: string; text?: { body?: string }; image?: unknown; audio?: unknown; video?: unknown; document?: unknown; sticker?: unknown; location?: unknown; contacts?: unknown; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } } };
+type WhatsAppMedia = { id?: string; mime_type?: string; sha256?: string; filename?: string; caption?: string };
+type WhatsAppMessage = { id?: string; from?: string; timestamp?: string; type?: string; text?: { body?: string }; image?: WhatsAppMedia; audio?: WhatsAppMedia; video?: WhatsAppMedia; document?: WhatsAppMedia; sticker?: WhatsAppMedia; location?: unknown; contacts?: unknown; interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } } };
 type WhatsAppValue = { metadata?: { display_phone_number?: string; phone_number_id?: string }; contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>; messages?: WhatsAppMessage[]; statuses?: Array<{ id?: string; status?: string; timestamp?: string; recipient_id?: string; errors?: unknown }> };
 type WhatsAppPayload = { object?: string; entry?: Array<{ id?: string; changes?: Array<{ field?: string; value?: WhatsAppValue }> }> };
 
@@ -42,7 +43,8 @@ export function parseWhatsAppWebhook(rawBody: string): { messages: WhatsAppWebho
       const body = messageBody(item);
       if (!externalId || !participantId || !body) continue;
       const attachmentCount = item.type && item.type !== "text" && item.type !== "interactive" ? 1 : 0;
-      messages.push({ businessAccountId: entry.id ?? "", phoneNumberId, displayPhoneNumber: value?.metadata?.display_phone_number, participantId, participantName: contactNames.get(participantId), message: normalizeCommunicationMessage(whatsappConnector, { externalId, externalConversationId: participantId, direction: "in", senderIdentifier: participantId, senderName: contactNames.get(participantId), body, sentAt: item.timestamp ? new Date(Number(item.timestamp) * 1000).toISOString() : undefined, attachmentCount, metadata: { whatsapp_business_account_id: entry.id ?? null, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: item.type ?? "unknown", media_analysis_status: attachmentCount ? "pending" : "not_applicable" } }) });
+      const media = item.type && ["image","audio","video","document","sticker"].includes(item.type) ? item[item.type as "image"|"audio"|"video"|"document"|"sticker"] : undefined;
+      messages.push({ businessAccountId: entry.id ?? "", phoneNumberId, displayPhoneNumber: value?.metadata?.display_phone_number, participantId, participantName: contactNames.get(participantId), message: normalizeCommunicationMessage(whatsappConnector, { externalId, externalConversationId: participantId, direction: "in", senderIdentifier: participantId, senderName: contactNames.get(participantId), body, sentAt: item.timestamp ? new Date(Number(item.timestamp) * 1000).toISOString() : undefined, attachmentCount, metadata: { whatsapp_business_account_id: entry.id ?? null, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: item.type ?? "unknown", media_id: media?.id ?? null, media_mime_type: media?.mime_type ?? null, media_sha256: media?.sha256 ?? null, media_filename: media?.filename ?? null, media_analysis_status: attachmentCount ? "pending" : "not_applicable" } }) });
     }
     for (const item of value?.statuses ?? []) if (item.id && item.status) statuses.push({ phoneNumberId, externalMessageId: item.id, status: item.status, timestamp: item.timestamp ? new Date(Number(item.timestamp) * 1000).toISOString() : undefined, recipientId: item.recipient_id, errors: item.errors });
   }
