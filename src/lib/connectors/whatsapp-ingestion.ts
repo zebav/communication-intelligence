@@ -137,7 +137,6 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
             sourceConversationId: conversation.data.id,
             sourcePersonId: resolved.personId,
             messageText: event.message.body,
-            metadata: event.message.providerMetadata,
           });
         }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversation.data.id, messageId: saved.data.id });
