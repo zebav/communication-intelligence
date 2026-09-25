@@ -21,9 +21,9 @@ const message = z.object({
   from: phone, to: phone, sendTime: z.string().datetime({ offset: true }), type: z.string().min(1),
   customerProfile: z.object({ name: z.string().optional() }).optional(),
   text: z.object({ body: z.string() }).optional(),
-  image: z.object({ caption: z.string().optional() }).optional(),
-  video: z.object({ caption: z.string().optional() }).optional(),
-  document: z.object({ caption: z.string().optional() }).optional(),
+  image: z.object({ caption: z.string().optional(), link: z.string().url().optional(), id: z.string().optional(), mimeType: z.string().optional(), sha256: z.string().optional() }).passthrough().optional(),
+  video: z.object({ caption: z.string().optional(), link: z.string().url().optional(), id: z.string().optional(), mimeType: z.string().optional(), sha256: z.string().optional() }).passthrough().optional(),
+  document: z.object({ caption: z.string().optional(), link: z.string().url().optional(), id: z.string().optional(), filename: z.string().optional(), mimeType: z.string().optional(), sha256: z.string().optional() }).passthrough().optional(),
 });
 const envelope = z.object({ id: z.string().min(1), type: z.string(), whatsappInboundMessage: z.unknown().optional(), whatsappMessage: z.unknown().optional() });
 export function parseYCloudEvent(raw: string) {
@@ -38,8 +38,9 @@ export function ycloudMessage(event: NonNullable<ReturnType<typeof parseYCloudEv
   const participantId = (direction === "in" ? value.from : value.to).replace(/^\+/, "");
   const body = value.type === "text" ? value.text?.body ?? "" : value.image?.caption || value.video?.caption || value.document?.caption || `[WhatsApp ${value.type}]`;
   if (!body.trim()) throw new Error("empty_message");
+  const media = value.type === "image" ? value.image : value.type === "video" ? value.video : value.type === "document" ? value.document : undefined;
   return { businessAccountId: value.wabaId, phoneNumberId, participantId, participantName: value.customerProfile?.name,
-    message: normalizeCommunicationMessage(whatsappConnector, { externalId: value.wamid, externalConversationId: participantId, direction, senderIdentifier: direction === "in" ? participantId : event.businessPhone, body, sentAt: value.sendTime, attachmentCount: value.type === "text" ? 0 : 1, metadata: { provider: "ycloud", ycloud_event_id: event.eventId, whatsapp_business_account_id: value.wabaId, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: value.type } }) };
+    message: normalizeCommunicationMessage(whatsappConnector, { externalId: value.wamid, externalConversationId: participantId, direction, senderIdentifier: direction === "in" ? participantId : event.businessPhone, body, sentAt: value.sendTime, attachmentCount: value.type === "text" ? 0 : 1, metadata: { provider: "ycloud", ycloud_event_id: event.eventId, whatsapp_business_account_id: value.wabaId, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: value.type, media_url: media?.link ?? null, media_id: media?.id ?? null, media_mime_type: media?.mimeType ?? null, media_sha256: media?.sha256 ?? null, media_filename: value.type === "document" ? value.document?.filename ?? null : null } }) };
 }
 
 export const ycloudWhatsAppProvider: WhatsAppProviderAdapter<{ phoneNumberId: string }> = {
