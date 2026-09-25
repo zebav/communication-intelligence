@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   try { event = parseYCloudEvent(raw); } catch { return NextResponse.json({ error: "Invalid event." }, { status: 400 }); }
   if (!event) return NextResponse.json({ received: true, ignored: true });
   const database = createAdminClient();
-  const { data, error } = await database.from("connections").select("account_identifier,token_metadata").eq("provider", "whatsapp-business").eq("status", "connected");
+  const { data, error } = await database.from("connections").select("id,owner_id,account_identifier,token_metadata").eq("provider", "whatsapp-business").eq("status", "connected");
   if (error) return NextResponse.json({ error: "Connection lookup failed." }, { status: 503 });
   const matches = (data ?? []).filter((connection) => {
     const metadata = connection.token_metadata as Record<string, unknown> | null;
@@ -25,5 +25,23 @@ export async function POST(request: NextRequest) {
   const metadata = matches[0].token_metadata as Record<string, unknown>;
   let normalized;
   try { normalized = ycloudWhatsAppProvider.parseWebhook(raw, { phoneNumberId: String(metadata.phone_number_id) }); } catch { return NextResponse.json({ error: "Invalid message." }, { status: 400 }); }
+  const providerMessage = normalized.messages[0];
+  const mediaUrl = providerMessage?.message.providerMetadata?.media_url;
+  const mediaId = providerMessage?.message.providerMetadata?.media_id;
+  const mediaReference = typeof mediaUrl === "string" && mediaUrl.startsWith("https://") ? mediaUrl : typeof mediaId === "string" ? mediaId : "";
+  if (providerMessage?.message.attachmentCount && mediaReference) {
+    const { error: mediaRefError } = await database.from("vault_media_references").upsert({
+      owner_id: (matches[0] as { owner_id?: string }).owner_id,
+      connection_id: (matches[0] as { id?: string }).id,
+      source: "whatsapp",
+      provider: "ycloud",
+      provider_message_id: providerMessage.message.externalId,
+      media_type: providerMessage.message.providerMetadata?.whatsapp_message_type ?? null,
+      media_reference: mediaReference,
+      mime_type: providerMessage.message.providerMetadata?.media_mime_type ?? null,
+      filename: providerMessage.message.providerMetadata?.media_filename ?? null,
+    }, { onConflict: "owner_id,source,provider,provider_message_id,media_reference", ignoreDuplicates: true });
+    if (mediaRefError) return NextResponse.json({ error: "Media reference could not be stored." }, { status: 503 });
+  }
   return ingestWhatsAppEvents(normalized);
 }
