@@ -172,7 +172,7 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   }
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage)); });
-  const owners = [...new Set(events.messages.flatMap((event) => { const connection = findWhatsAppWebhookConnection(connections ?? [], event.phoneNumberId); return connection ? [connection.owner_id] : []; }))];
+  const owners = [...new Set(events.messages.filter((event) => event.message.attachmentCount > 0).flatMap((event) => { const connection = findWhatsAppWebhookConnection(connections ?? [], event.phoneNumberId); return connection ? [connection.owner_id] : []; }))];
   if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
   const retry = failed > 0 || failedStatuses > 0 || unmatchedMessages > 0;
   console.info("WhatsApp webhook processed", { provider: events.provider, imported, duplicates, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
