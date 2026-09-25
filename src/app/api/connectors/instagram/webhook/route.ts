@@ -6,6 +6,7 @@ import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-inte
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 export const maxDuration = 60;
 
@@ -123,6 +124,20 @@ export async function POST(request: NextRequest) {
       if (messageError) throw messageError;
       if (savedMessage) {
         imported += 1;
+        if (event.message.attachmentCount > 0) {
+          await queueVaultIngestion(database, {
+            ownerId: connection.owner_id,
+            connectionId: connection.id,
+            provider: instagramConnector.id,
+            sourceType: "instagram",
+            providerMessageId: event.message.externalId,
+            sourceMessageId: savedMessage.id,
+            sourceConversationId: conversationResult.data.id,
+            sourcePersonId: resolved.personId,
+            messageText: event.message.body,
+            metadata: event.message.providerMetadata,
+          });
+        }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
       }
     } catch (error) {
