@@ -1,4 +1,4 @@
-export type GmailPayload = { mimeType?: string; headers?: Array<{ name?: string; value?: string }>; body?: { data?: string }; parts?: GmailPayload[] };
+export type GmailPayload = { mimeType?: string; filename?: string; headers?: Array<{ name?: string; value?: string }>; body?: { data?: string; attachmentId?: string; size?: number }; parts?: GmailPayload[] };
 
 function decode(data?: string) {
   if (!data) return "";
@@ -32,4 +32,11 @@ export function gmailDisplayName(value?: string) {
 
 export function extractGmailBody(payload?: GmailPayload, snippet?: string) {
   return body(payload) || snippet?.trim() || "";
+}
+
+
+export function gmailHasAttachments(payload?: GmailPayload): boolean {
+  if (!payload) return false;
+  if (payload.filename?.trim() && (payload.body?.attachmentId || payload.body?.data)) return true;
+  return (payload.parts ?? []).some(gmailHasAttachments);
 }
