@@ -23,12 +23,14 @@ export async function POST(request:NextRequest){
  const session=await auth(); if(!session)return NextResponse.json({error:"MFA krävs."},{status:403});
  const form=await request.formData(); const file=form.get("file");
  if(!(file instanceof File))return NextResponse.json({error:"Välj en fil."},{status:400});
- const sourceType=String(form.get("sourceType")??"manual");
- if(!["email","whatsapp","instagram","chatgpt_upload","google_photos","manual","other"].includes(sourceType))return NextResponse.json({error:"Ogiltig källa."},{status:400});
+ const sourceTypeParsed=z.enum(["email","whatsapp","instagram","chatgpt_upload","google_photos","manual","other"]).safeParse(String(form.get("sourceType")??"manual"));
+ if(!sourceTypeParsed.success)return NextResponse.json({error:"Ogiltig källa."},{status:400});
+ const kindParsed=z.enum(["document","person_image","image","other"]).optional().safeParse(String(form.get("forceKind")||"")||undefined);
+ if(!kindParsed.success)return NextResponse.json({error:"Ogiltig filtyp."},{status:400});
  try{
-  const asset=await storeVaultFile({ownerId:session.user.id,bytes:new Uint8Array(await file.arrayBuffer()),filename:file.name,mimeType:file.type||"application/octet-stream",sourceType:sourceType as any,
+  const asset=await storeVaultFile({ownerId:session.user.id,bytes:new Uint8Array(await file.arrayBuffer()),filename:file.name,mimeType:file.type||"application/octet-stream",sourceType:sourceTypeParsed.data,
    sourceMessageId:String(form.get("sourceMessageId")||"")||null,sourceConversationId:String(form.get("sourceConversationId")||"")||null,sourcePersonId:String(form.get("sourcePersonId")||"")||null,
-   messageText:String(form.get("messageText")||""),forceKind:(String(form.get("forceKind")||"")||undefined) as any,forceSave:String(form.get("forceSave")||"")==="true"});
+   messageText:String(form.get("messageText")||""),forceKind:kindParsed.data,forceSave:String(form.get("forceSave")||"")==="true"});
   return NextResponse.json({asset});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Filen kunde inte sparas."},{status:409});}
 }
