@@ -101,21 +101,23 @@ export async function POST(request:NextRequest){
   try{
    const {data:conn}=await db.from("connections").select("id,provider,encrypted_credentials").eq("owner_id",actor.id).eq("id",job.connection_id).single();
    if(!conn?.encrypted_credentials)throw new Error("connection_missing");
-   const metadata=job.metadata&&typeof job.metadata==="object"&&!Array.isArray(job.metadata)?job.metadata as Record<string,unknown>:{};
    const original=decryptCredential<Credentials>(conn.encrypted_credentials,key); let creds:Credentials=original; let files:Attachment[]=[]; let sourceType:"email"|"whatsapp"|"instagram"="email";
    if(conn.provider===microsoftGraphConnector.id){creds=await refreshMicrosoft(original,request.nextUrl.origin);files=await microsoftAttachments(creds.accessToken,job.provider_message_id);}
    else if(conn.provider===googleGmailConnector.id){creds=await refreshGoogle(original,request.nextUrl.origin);files=await gmailAttachments(creds.accessToken,job.provider_message_id);}
    else if(conn.provider==="instagram"){
      sourceType="instagram";
-     const urls=Array.isArray(metadata.attachment_urls)?metadata.attachment_urls.filter((url):url is string=>typeof url==="string"&&url.startsWith("https://")).slice(0,10):[];
-     for(const url of urls)files.push(...await fetchExternalMedia(url));
+     const {data:refs}=await db.from("vault_media_references").select("media_reference").eq("owner_id",actor.id).eq("connection_id",conn.id).eq("source","instagram").eq("provider_message_id",job.provider_message_id);
+     for(const ref of refs??[])if(typeof ref.media_reference==="string"&&ref.media_reference.startsWith("https://"))files.push(...await fetchExternalMedia(ref.media_reference));
    }
    else if(conn.provider==="whatsapp-business"){
      sourceType="whatsapp";
-     const provider=String(metadata.provider??"");
-     if(provider==="ycloud"&&typeof metadata.media_url==="string"&&metadata.media_url.startsWith("https://"))files=await fetchExternalMedia(metadata.media_url);
-     else if(typeof metadata.media_id==="string"&&metadata.media_id)files=await metaWhatsAppMedia(original.accessToken,metadata.media_id,metadata);
-     else throw new Error("whatsapp_media_reference_missing");
+     const provider=String(job.provider??"").replace(/^whatsapp:/,"");
+     const {data:refs}=await db.from("vault_media_references").select("media_reference,mime_type,filename").eq("owner_id",actor.id).eq("connection_id",conn.id).eq("source","whatsapp").eq("provider",provider).eq("provider_message_id",job.provider_message_id);
+     for(const ref of refs??[]){
+       if(provider==="ycloud"&&typeof ref.media_reference==="string"&&ref.media_reference.startsWith("https://"))files.push(...await fetchExternalMedia(ref.media_reference));
+       else if(provider==="meta-direct"&&typeof ref.media_reference==="string"&&ref.media_reference)files.push(...await metaWhatsAppMedia(original.accessToken,ref.media_reference,{media_mime_type:ref.mime_type,media_filename:ref.filename}));
+     }
+     if(!files.length)throw new Error("whatsapp_media_reference_missing");
    }
    else throw new Error("unsupported_provider");
    if(creds.accessToken!==original.accessToken)await db.from("connections").update({encrypted_credentials:encryptCredential(creds,key),updated_at:new Date().toISOString()}).eq("id",conn.id).eq("owner_id",actor.id);
