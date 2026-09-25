@@ -7,6 +7,17 @@ import { analyzeIncomingWhatsAppMessage } from "@/lib/connectors/whatsapp-intell
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
+}
+
 export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   if (!events.messages.length && !events.statuses.length) {
     console.info("WhatsApp webhook received without message/status events");
@@ -161,6 +172,8 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   }
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage)); });
+  const owners = [...new Set(events.messages.flatMap((event) => { const connection = findWhatsAppWebhookConnection(connections ?? [], event.phoneNumberId); return connection ? [connection.owner_id] : []; }))];
+  if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
   const retry = failed > 0 || failedStatuses > 0 || unmatchedMessages > 0;
   console.info("WhatsApp webhook processed", { provider: events.provider, imported, duplicates, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
   return NextResponse.json({
