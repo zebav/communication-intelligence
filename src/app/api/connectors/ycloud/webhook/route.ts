@@ -26,9 +26,16 @@ export async function POST(request: NextRequest) {
   let normalized;
   try { normalized = ycloudWhatsAppProvider.parseWebhook(raw, { phoneNumberId: String(metadata.phone_number_id) }); } catch { return NextResponse.json({ error: "Invalid message." }, { status: 400 }); }
   const providerMessage = normalized.messages[0];
-  const mediaUrl = providerMessage?.message.providerMetadata?.media_url;
-  const mediaId = providerMessage?.message.providerMetadata?.media_id;
-  const mediaReference = typeof mediaUrl === "string" && mediaUrl.startsWith("https://") ? mediaUrl : typeof mediaId === "string" ? mediaId : "";
+  let rawMedia: Record<string, unknown> | null = null;
+  try {
+    const parsedRaw = JSON.parse(raw) as { whatsappInboundMessage?: Record<string, unknown>; whatsappMessage?: Record<string, unknown> };
+    const rawMessage = event.direction === "in" ? parsedRaw.whatsappInboundMessage : parsedRaw.whatsappMessage;
+    const type = typeof rawMessage?.type === "string" ? rawMessage.type : "";
+    rawMedia = type && rawMessage?.[type] && typeof rawMessage[type] === "object" ? rawMessage[type] as Record<string, unknown> : null;
+  } catch {}
+  const mediaUrl = typeof rawMedia?.link === "string" ? rawMedia.link : "";
+  const mediaId = typeof rawMedia?.id === "string" ? rawMedia.id : "";
+  const mediaReference = mediaUrl.startsWith("https://") ? mediaUrl : mediaId;
   if (providerMessage?.message.attachmentCount && mediaReference) {
     const { error: mediaRefError } = await database.from("vault_media_references").upsert({
       owner_id: (matches[0] as { owner_id?: string }).owner_id,
@@ -38,8 +45,8 @@ export async function POST(request: NextRequest) {
       provider_message_id: providerMessage.message.externalId,
       media_type: providerMessage.message.providerMetadata?.whatsapp_message_type ?? null,
       media_reference: mediaReference,
-      mime_type: providerMessage.message.providerMetadata?.media_mime_type ?? null,
-      filename: providerMessage.message.providerMetadata?.media_filename ?? null,
+      mime_type: typeof rawMedia?.mimeType === "string" ? rawMedia.mimeType : null,
+      filename: typeof rawMedia?.filename === "string" ? rawMedia.filename : null,
     }, { onConflict: "owner_id,source,provider,provider_message_id,media_reference", ignoreDuplicates: true });
     if (mediaRefError) return NextResponse.json({ error: "Media reference could not be stored." }, { status: 503 });
   }
