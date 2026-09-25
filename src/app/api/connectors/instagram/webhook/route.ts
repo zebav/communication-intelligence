@@ -10,6 +10,17 @@ import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 export const maxDuration = 60;
 
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
+}
+
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
   const token = request.nextUrl.searchParams.get("hub.verify_token");
@@ -175,5 +186,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (analyses.length) after(async () => { await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item))); });
+  const owners = [...new Set((connections ?? []).map((connection) => connection.owner_id))];
+  if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
   return NextResponse.json({ received: true, imported, failed });
 }
