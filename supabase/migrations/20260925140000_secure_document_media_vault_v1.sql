@@ -50,6 +50,26 @@ create table if not exists public.vault_asset_links (
 
 create index if not exists vault_asset_links_lookup_idx on public.vault_asset_links(owner_id, link_type, linked_id);
 
+create table if not exists public.vault_ingestion_jobs (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  connection_id uuid references public.connections(id) on delete cascade,
+  provider text not null,
+  source_type text not null check (source_type in ('email','whatsapp','instagram','manual','other')),
+  provider_message_id text not null,
+  source_message_id uuid references public.messages(id) on delete cascade,
+  source_conversation_id uuid references public.conversations(id) on delete cascade,
+  source_person_id uuid references public.people(id) on delete set null,
+  message_text text not null default '',
+  state text not null default 'pending' check (state in ('pending','processing','done','failed')),
+  attempts integer not null default 0 check (attempts between 0 and 10),
+  last_error_code text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(owner_id, provider, connection_id, provider_message_id)
+);
+create index if not exists vault_ingestion_jobs_pending_idx on public.vault_ingestion_jobs(owner_id, state, created_at);
+
 create table if not exists public.person_media (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
@@ -86,10 +106,12 @@ on conflict (id) do update set
 alter table public.vault_assets enable row level security;
 alter table public.vault_asset_links enable row level security;
 alter table public.person_media enable row level security;
+alter table public.vault_ingestion_jobs enable row level security;
 
-revoke all on public.vault_assets, public.vault_asset_links, public.person_media from anon;
+revoke all on public.vault_assets, public.vault_asset_links, public.person_media, public.vault_ingestion_jobs from anon;
+revoke all on public.vault_ingestion_jobs from authenticated;
 grant select on public.vault_assets, public.vault_asset_links, public.person_media to authenticated;
-grant all on public.vault_assets, public.vault_asset_links, public.person_media to service_role;
+grant all on public.vault_assets, public.vault_asset_links, public.person_media, public.vault_ingestion_jobs to service_role;
 
 drop policy if exists vault_assets_owner_select on public.vault_assets;
 create policy vault_assets_owner_select on public.vault_assets
