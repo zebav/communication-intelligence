@@ -25,8 +25,9 @@ export async function storeVaultFile(input:{
   if(existingError) throw existingError;
   if(existing) return existing;
   const decision=await decideVaultRetention({ownerId:input.ownerId,filename:input.filename,mimeType:input.mimeType,sourceType:input.sourceType,messageText:input.messageText,extractedText:input.extractedText});
+  if (!input.forceSave && !decision.retain) return { skipped:true as const, decision, sha256 };
   const assetKind=input.forceKind??decision.assetKind;
-  const status=input.forceSave||decision.retain?"saved":"candidate";
+  const status="saved";
   const id=randomUUID();
   const path=`${input.ownerId}/${id}/${safeName(input.filename)}`;
   const upload=await db.storage.from("secure-vault").upload(path,input.bytes,{contentType:input.mimeType,upsert:false});
