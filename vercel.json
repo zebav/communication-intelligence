@@ -7,10 +7,6 @@
     {
       "path": "/api/cron/instagram-intelligence",
       "schedule": "15 6 * * *"
-    },
-    {
-      "path": "/api/cron/vault-ingestion",
-      "schedule": "*/10 * * * *"
     }
   ]
 }
