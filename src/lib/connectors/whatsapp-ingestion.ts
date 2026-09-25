@@ -5,6 +5,7 @@ import { findWhatsAppWebhookConnection } from "@/lib/connectors/whatsapp-webhook
 import type { WhatsAppProviderEvents } from "@/lib/connectors/whatsapp-provider";
 import { analyzeIncomingWhatsAppMessage } from "@/lib/connectors/whatsapp-intelligence";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   if (!events.messages.length && !events.statuses.length) {
@@ -125,6 +126,20 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
       if (saved.error) throw saved.error;
       if (saved.data) {
         imported += 1;
+        if (event.message.attachmentCount > 0) {
+          await queueVaultIngestion(database, {
+            ownerId: connection.owner_id,
+            connectionId: connection.id,
+            provider: `whatsapp:${events.provider}`,
+            sourceType: "whatsapp",
+            providerMessageId: event.message.externalId,
+            sourceMessageId: saved.data.id,
+            sourceConversationId: conversation.data.id,
+            sourcePersonId: resolved.personId,
+            messageText: event.message.body,
+            metadata: event.message.providerMetadata,
+          });
+        }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversation.data.id, messageId: saved.data.id });
       }
     } catch (error) {
