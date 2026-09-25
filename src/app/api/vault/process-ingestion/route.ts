@@ -68,6 +68,28 @@ async function gmailAttachments(token:string,messageId:string):Promise<Attachmen
  return out;
 }
 
+async function fetchExternalMedia(url:string):Promise<Attachment[]>{
+ const parsed=new URL(url);
+ if(parsed.protocol!=="https:"||parsed.username||parsed.password||(parsed.port&&parsed.port!=="443"))throw new Error("unsafe_media_url");
+ const r=await fetch(parsed.href,{redirect:"error",signal:AbortSignal.timeout(30_000),headers:{accept:"image/*,video/*,audio/*,application/pdf,application/octet-stream"}});
+ if(!r.ok)throw new Error(`media_fetch_${r.status}`);
+ const length=Number(r.headers.get("content-length")??0); if(length>100*1024*1024)throw new Error("media_too_large");
+ const mime=(r.headers.get("content-type")??"application/octet-stream").split(";")[0].trim();
+ const bytes=new Uint8Array(await r.arrayBuffer()); if(bytes.length>100*1024*1024)throw new Error("media_too_large");
+ const name=decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop()??"media").slice(0,180)||"media";
+ return [{name,mime,bytes}];
+}
+async function metaWhatsAppMedia(token:string,mediaId:string,metadata:Record<string,unknown>):Promise<Attachment[]>{
+ const lookup=await fetch(`https://graph.facebook.com/v23.0/${encodeURIComponent(mediaId)}`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});
+ if(!lookup.ok)throw new Error(`whatsapp_media_lookup_${lookup.status}`);
+ const info=await lookup.json() as {url?:string;mime_type?:string;file_size?:number};
+ if(!info.url||(info.file_size??0)>100*1024*1024)throw new Error("whatsapp_media_missing");
+ const raw=await fetch(info.url,{headers:{authorization:`Bearer ${token}`},redirect:"error",signal:AbortSignal.timeout(30_000)});
+ if(!raw.ok)throw new Error(`whatsapp_media_fetch_${raw.status}`);
+ const bytes=new Uint8Array(await raw.arrayBuffer()); if(bytes.length>100*1024*1024)throw new Error("media_too_large");
+ return [{name:typeof metadata.media_filename==="string"&&metadata.media_filename?metadata.media_filename:`whatsapp-${mediaId}`,mime:info.mime_type||String(metadata.media_mime_type||"application/octet-stream"),bytes}];
+}
+
 export async function POST(request:NextRequest){
  const actor=await owner(request); if(!actor)return NextResponse.json({error:"MFA eller giltig bakgrundsauktorisering krävs."},{status:403});
  const db=createAdminClient(); const key=process.env.CREDENTIAL_ENCRYPTION_KEY; if(!key)return NextResponse.json({error:"Krypteringsnyckel saknas."},{status:503});
@@ -79,13 +101,26 @@ export async function POST(request:NextRequest){
   try{
    const {data:conn}=await db.from("connections").select("id,provider,encrypted_credentials").eq("owner_id",actor.id).eq("id",job.connection_id).single();
    if(!conn?.encrypted_credentials)throw new Error("connection_missing");
-   const original=decryptCredential<Credentials>(conn.encrypted_credentials,key); let creds:Credentials; let files:Attachment[];
+   const metadata=job.metadata&&typeof job.metadata==="object"&&!Array.isArray(job.metadata)?job.metadata as Record<string,unknown>:{};
+   const original=decryptCredential<Credentials>(conn.encrypted_credentials,key); let creds:Credentials=original; let files:Attachment[]=[]; let sourceType:"email"|"whatsapp"|"instagram"="email";
    if(conn.provider===microsoftGraphConnector.id){creds=await refreshMicrosoft(original,request.nextUrl.origin);files=await microsoftAttachments(creds.accessToken,job.provider_message_id);}
    else if(conn.provider===googleGmailConnector.id){creds=await refreshGoogle(original,request.nextUrl.origin);files=await gmailAttachments(creds.accessToken,job.provider_message_id);}
+   else if(conn.provider==="instagram"){
+     sourceType="instagram";
+     const urls=Array.isArray(metadata.attachment_urls)?metadata.attachment_urls.filter((url):url is string=>typeof url==="string"&&url.startsWith("https://")).slice(0,10):[];
+     for(const url of urls)files.push(...await fetchExternalMedia(url));
+   }
+   else if(conn.provider==="whatsapp-business"){
+     sourceType="whatsapp";
+     const provider=String(metadata.provider??"");
+     if(provider==="ycloud"&&typeof metadata.media_url==="string"&&metadata.media_url.startsWith("https://"))files=await fetchExternalMedia(metadata.media_url);
+     else if(typeof metadata.media_id==="string"&&metadata.media_id)files=await metaWhatsAppMedia(original.accessToken,metadata.media_id,metadata);
+     else throw new Error("whatsapp_media_reference_missing");
+   }
    else throw new Error("unsupported_provider");
    if(creds.accessToken!==original.accessToken)await db.from("connections").update({encrypted_credentials:encryptCredential(creds,key),updated_at:new Date().toISOString()}).eq("id",conn.id).eq("owner_id",actor.id);
    for(const file of files){
-    try{const result=await storeVaultFile({ownerId:actor.id,bytes:file.bytes,filename:file.name,mimeType:file.mime,sourceType:"email",sourceMessageId:job.source_message_id,sourceConversationId:job.source_conversation_id,sourcePersonId:job.source_person_id,messageText:job.message_text});if("skipped" in result)skipped++;else saved++;}catch{skipped++;}
+    try{const result=await storeVaultFile({ownerId:actor.id,bytes:file.bytes,filename:file.name,mimeType:file.mime,sourceType,sourceMessageId:job.source_message_id,sourceConversationId:job.source_conversation_id,sourcePersonId:job.source_person_id,messageText:job.message_text});if("skipped" in result)skipped++;else saved++;}catch{skipped++;}
    }
    await db.from("vault_ingestion_jobs").update({state:"done",last_error_code:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
   }catch(e){failed++;await db.from("vault_ingestion_jobs").update({state:"failed",last_error_code:e instanceof Error?e.message.slice(0,120):"unknown",updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);}
