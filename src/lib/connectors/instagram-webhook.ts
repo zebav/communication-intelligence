@@ -80,7 +80,7 @@ export function parseInstagramWebhook(rawBody: string): InstagramWebhookMessage[
         body: text || `[${attachments.length} Instagram attachment${attachments.length === 1 ? "" : "s"}]`,
         sentAt: event.timestamp ? new Date(event.timestamp).toISOString() : undefined,
         attachmentCount: attachments.length,
-        metadata: { instagram_account_id: accountId, instagram_participant_id: participantId, is_echo: Boolean(event.message?.is_echo), attachment_types: attachments.map((attachment) => attachment.type ?? "unknown").slice(0, 10), media_analysis_status: attachments.length ? "pending" : "not_applicable" },
+        metadata: { instagram_account_id: accountId, instagram_participant_id: participantId, is_echo: Boolean(event.message?.is_echo), attachment_types: attachments.map((attachment) => attachment.type ?? "unknown").slice(0, 10), attachment_urls: attachments.map((attachment) => attachment.payload?.url).filter((url): url is string => typeof url === "string" && url.startsWith("https://")).slice(0, 10), media_analysis_status: attachments.length ? "pending" : "not_applicable" },
       }),
     }];
   }));
