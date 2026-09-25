@@ -227,3 +227,16 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .decision-link-row { min-width:0; display:flex; gap:6px; align-items:center; }
 .decision-link-row a { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#9bd7ff; text-decoration:none; }
 .decision-link-row a:hover { text-decoration:underline; }
+
+.person-profile-inline { display:inline-flex; align-items:center; gap:7px; min-width:0; }
+.contact-avatar-wrap,.contact-avatar-fallback { display:inline-grid; place-items:center; flex:none; border-radius:999px; overflow:hidden; background:#17202a; border:1px solid #34404d; }
+.contact-avatar-wrap img { width:100%; height:100%; object-fit:cover; display:block; }
+.contact-avatar-fallback { font-size:9px; font-weight:700; color:#b8c2cc; }
+
+.document-vault { margin-top:24px; }
+.document-vault-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:16px; }
+.document-vault-card { display:grid; gap:10px; min-width:0; }
+.document-vault-card strong,.document-vault-card small { display:block; }
+.document-vault-card small { margin-top:4px; color:var(--muted); font-size:9px; overflow-wrap:anywhere; }
+.document-vault-card p { margin:0; color:#c8d0d8; line-height:1.5; font-size:11px; }
+@media(max-width:760px){.document-vault-grid{grid-template-columns:1fr;}}

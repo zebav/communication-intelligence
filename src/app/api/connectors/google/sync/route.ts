@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
-import { extractGmailBody, gmailAddress, gmailDisplayName, gmailHeader, type GmailPayload } from "@/lib/connectors/gmail-message";
+import { extractGmailBody, gmailAddress, gmailDisplayName, gmailHasAttachments, gmailHeader, type GmailPayload } from "@/lib/connectors/gmail-message";
 import { googleGmailConnector } from "@/lib/connectors/google-gmail";
 import { googleConfig } from "@/lib/connectors/google-oauth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { senderRelevance } from "@/lib/sender-intelligence";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
@@ -102,8 +103,23 @@ export async function POST(request: NextRequest) {
       const conversationValues = { owner_id: userId, person_id: personId, connection_id: connection.id, source: "email", external_conversation_id: externalConversationId, title: subject, conversation_type: "email", priority_score: priority, last_message_at: sentAt, last_other_message_at: sentAt, summary: content.slice(0, 300), recommended_action: { action: recommendedEmailAction(classification), reason: `Initial rule-based classification: ${classification}`, relevance_reasons: relevance.reasons, unread }, updated_at: new Date().toISOString() };
       const conversation = existingConversation?.id ? await supabase.from("conversations").update(conversationValues).eq("id", existingConversation.id).select("id").single() : await supabase.from("conversations").insert(conversationValues).select("id").single();
       if (conversation.error || !conversation.data) throw new Error("conversation_save_failed");
-      const { error: messageError } = await supabase.from("messages").insert({ owner_id: userId, conversation_id: conversation.data.id, external_message_id: externalMessageId, direction: "in", sender_identity_id: identityId, source: "email", body_text: content, sent_at: sentAt, classification, importance_score: priority, metadata: { provider: googleGmailConnector.id, account: connection.account_identifier, gmail_labels: message.labelIds ?? [], is_read: !unread }, processed_at: new Date().toISOString() });
-      if (messageError) throw new Error("message_save_failed"); imported += 1;
+      const hasAttachments = gmailHasAttachments(message.payload);
+      const { data: savedMessage, error: messageError } = await supabase.from("messages").insert({ owner_id: userId, conversation_id: conversation.data.id, external_message_id: externalMessageId, direction: "in", sender_identity_id: identityId, source: "email", body_text: content, sent_at: sentAt, classification, importance_score: priority, attachment_count: hasAttachments ? 1 : 0, metadata: { provider: googleGmailConnector.id, account: connection.account_identifier, gmail_labels: message.labelIds ?? [], is_read: !unread }, processed_at: new Date().toISOString() }).select("id").single();
+      if (messageError || !savedMessage) throw new Error("message_save_failed");
+      if (hasAttachments) {
+        await queueVaultIngestion(supabase, {
+          ownerId:userId,
+          connectionId:connection.id,
+          provider:googleGmailConnector.id,
+          sourceType:"email",
+          providerMessageId:message.id,
+          sourceMessageId:savedMessage.id,
+          sourceConversationId:conversation.data.id,
+          sourcePersonId:personId,
+          messageText:content,
+        });
+      }
+      imported += 1;
     }
 
     const syncedAt = new Date().toISOString();

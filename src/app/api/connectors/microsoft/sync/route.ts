@@ -11,6 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
 import { responseTimeMinutes } from "@/lib/outcomes";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 import { z } from "zod";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
@@ -205,6 +206,19 @@ export async function POST(request: NextRequest) {
         const { data: trigger } = await supabase.from("messages").select("sent_at").eq("id", waitingOutcome.trigger_message_id).eq("owner_id", userId).maybeSingle();
         const responseMinutes = trigger?.sent_at ? responseTimeMinutes(trigger.sent_at, sentAt) : null;
         if (responseMinutes != null) await supabase.from("communication_outcomes").update({ response_message_id: savedIncoming.id, status: "reply_received", response_time_minutes: responseMinutes, evidence: { provider: microsoftGraphConnector.id, detection: "later_incoming_message" }, updated_at: new Date().toISOString() }).eq("id", waitingOutcome.id).eq("owner_id", userId);
+      }
+      if (message.hasAttachments && savedIncoming?.id) {
+        await queueVaultIngestion(supabase, {
+          ownerId:userId,
+          connectionId:connection.id,
+          provider:microsoftGraphConnector.id,
+          sourceType:"email",
+          providerMessageId:message.id,
+          sourceMessageId:savedIncoming.id,
+          sourceConversationId:conversationResult.data.id,
+          sourcePersonId:personId,
+          messageText:content.text,
+        });
       }
       imported += 1;
       }
