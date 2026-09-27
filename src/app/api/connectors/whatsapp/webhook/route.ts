@@ -2,6 +2,7 @@ import { ingestWhatsAppEvents } from "@/lib/connectors/whatsapp-ingestion";
 import { NextResponse, type NextRequest } from "next/server";
 import { metaDirectWhatsAppProvider } from "@/lib/connectors/whatsapp-webhook";
 import { activeWhatsAppProvider, inactiveProviderResponse } from "@/lib/connectors/whatsapp-provider";
+import { ephemeralMetaWhatsAppMediaIds } from "@/lib/connectors/whatsapp-media";
 
 export const maxDuration = 60;
 
@@ -24,5 +25,5 @@ export async function POST(request: NextRequest) {
   }
   const activeProvider = activeWhatsAppProvider();
   if (activeProvider !== metaDirectWhatsAppProvider.id) return NextResponse.json(inactiveProviderResponse(metaDirectWhatsAppProvider.id, activeProvider));
-  return ingestWhatsAppEvents(metaDirectWhatsAppProvider.parseWebhook(rawBody, undefined));
+  return ingestWhatsAppEvents(metaDirectWhatsAppProvider.parseWebhook(rawBody, undefined), ephemeralMetaWhatsAppMediaIds(rawBody));
 }

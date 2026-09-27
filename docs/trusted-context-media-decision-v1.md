@@ -45,8 +45,15 @@ V1 har nu en serverstyrd arbetare för e-postbilagor från Google och Microsoft:
 - PDF- och Office-filer analyseras som privata filinmatningar med strikt
   storleksgräns; större dokument förblir spärrade för en framtida styckad
   dokumentpipeline;
-- Instagram- och WhatsApp-media ligger kvar i samma säkra kö, men deras
-  providerhämtare är nästa steg och får inte markeras som analyserade före dess.
+- Instagram-media hämtas direkt efter en signerad webhook från en hårt
+  begränsad Meta-CDN-allowlist. Tillfälliga URL:er och eventuella query-token
+  finns bara i processminnet och sparas aldrig.
+- Meta Direct-WhatsApp hämtar först ett kortlivat media-URL via Graph från ett
+  transient media-id och laddar sedan ner filen från samma begränsade CDN-lista.
+  Varken media-id eller URL lagras i meddelandets metadata.
+- YCloud-meddelanden hålls säkert spärrade när de innehåller media. Den
+  provider-specifika mediehämtaren byggs först när dess officiella API-kontrakt
+  och åtkomstväg är verifierade.
 
 Arbetaren är medvetet inte schemalagd med ett tredje Vercel-jobb ännu. Projektet
 har redan två schemalagda jobb och Vercel-planens gräns måste bekräftas innan vi

@@ -8,8 +8,8 @@ import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { analyzeStoredMedia } from "@/lib/media/analysis";
 
 type Credentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
-type Job = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; metadata?: unknown };
-type Attachment = { filename: string; mimeType: string; bytes: Buffer };
+export type MediaJob = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; metadata?: unknown };
+export type MediaAttachment = { filename: string; mimeType: string; bytes: Buffer };
 const maxBytes = 100 * 1024 * 1024;
 const textMimeTypes = new Set(["text/plain", "text/csv", "application/json"]);
 const allowedMimeTypes = new Set([
@@ -46,7 +46,7 @@ async function refreshGoogle(credentials: Credentials) {
   return { token: next.accessToken, credentials: next, refreshed: true };
 }
 
-async function loadConnectionToken(database: SupabaseClient, job: Job) {
+async function loadConnectionToken(database: SupabaseClient, job: MediaJob) {
   if (!job.connection_id) throw new Error("missing_connection");
   const { data: connection, error } = await database.from("connections").select("id,provider,encrypted_credentials,token_metadata").eq("id", job.connection_id).eq("owner_id", job.owner_id).eq("status", "connected").maybeSingle();
   if (error || !connection?.encrypted_credentials) throw new Error("connection_unavailable");
@@ -63,7 +63,7 @@ async function loadConnectionToken(database: SupabaseClient, job: Job) {
   return resolved.token;
 }
 
-async function outlookAttachments(accessToken: string, messageId: string): Promise<Attachment[]> {
+async function outlookAttachments(accessToken: string, messageId: string): Promise<MediaAttachment[]> {
   const url = new URL(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments`);
   url.searchParams.set("$select", "id,name,contentType,size,contentBytes");
   const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(25_000) });
@@ -81,7 +81,7 @@ function gmailParts(part: GmailPart | undefined): GmailPart[] {
   if (!part) return [];
   return [(part.body?.attachmentId ? part : null), ...(part.parts ?? []).flatMap(gmailParts)].filter((value): value is GmailPart => Boolean(value));
 }
-async function gmailAttachments(accessToken: string, externalMessageId: string): Promise<Attachment[]> {
+async function gmailAttachments(accessToken: string, externalMessageId: string): Promise<MediaAttachment[]> {
   const messageId = externalMessageId.split(":").at(-1);
   if (!messageId) throw new Error("gmail_message_id_missing");
   const messageResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=full`, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(25_000) });
@@ -98,14 +98,14 @@ async function gmailAttachments(accessToken: string, externalMessageId: string):
   }));
 }
 
-async function markMessage(database: SupabaseClient, job: Job, state: "ready" | "blocked" | "failed", details: Record<string, unknown>) {
+async function markMessage(database: SupabaseClient, job: MediaJob, state: "ready" | "blocked" | "failed", details: Record<string, unknown>) {
   if (!job.source_message_id) return;
   const { data } = await database.from("messages").select("metadata").eq("id", job.source_message_id).eq("owner_id", job.owner_id).maybeSingle();
   const current = metadata(data?.metadata);
   await database.from("messages").update({ metadata: { ...current, media_analysis_status: state, media_analysis: details } }).eq("id", job.source_message_id).eq("owner_id", job.owner_id);
 }
 
-async function storeAttachment(database: SupabaseClient, job: Job, attachment: Attachment) {
+async function storeAttachment(database: SupabaseClient, job: MediaJob, attachment: MediaAttachment) {
   if (!allowedMimeTypes.has(attachment.mimeType) || attachment.bytes.length > maxBytes || attachment.bytes.length === 0) return { state: "blocked" as const, reason: "unsupported_or_invalid_file" };
   const sha256 = createHash("sha256").update(attachment.bytes).digest("hex");
   const path = `${job.owner_id}/${sha256.slice(0, 2)}/${sha256}`;
@@ -127,18 +127,23 @@ async function storeAttachment(database: SupabaseClient, job: Job, attachment: A
   return { state: analyzed.state, assetId: String(asset.id), summary: analyzed.summary };
 }
 
-export async function processEmailMediaJob(database: SupabaseClient, job: Job) {
+export async function ingestTrustedMediaAttachments(database: SupabaseClient, job: MediaJob, attachments: MediaAttachment[]) {
+  const results = await Promise.all(attachments.map((attachment) => storeAttachment(database, job, attachment)));
+  const ready = results.length > 0 && results.every((result) => result.state === "ready");
+  const blocked = results.some((result) => result.state === "blocked");
+  await markMessage(database, job, ready ? "ready" : "blocked", { asset_count: results.length, summaries: results.map((result) => result.summary), reason: blocked ? "specialised_analysis_required" : undefined });
+  return { state: ready ? "ready" as const : "blocked" as const, assetCount: results.length, assetIds: results.map((result) => result.assetId).filter((value): value is string => Boolean(value)) };
+}
+
+export async function processEmailMediaJob(database: SupabaseClient, job: MediaJob) {
   const { data: claimed } = await database.from("vault_ingestion_jobs").update({ state: "processing", attempts: job.attempts + 1, updated_at: new Date().toISOString() }).eq("id", job.id).eq("owner_id", job.owner_id).eq("state", "pending").select("id").maybeSingle();
   if (!claimed) return { processed: false, reason: "already_claimed" };
   try {
     const token = await loadConnectionToken(database, job);
     const attachments = job.provider === microsoftGraphConnector.id ? await outlookAttachments(token, job.provider_message_id) : await gmailAttachments(token, job.provider_message_id);
-    const results = await Promise.all(attachments.map((attachment) => storeAttachment(database, job, attachment)));
-    const ready = results.length > 0 && results.every((result) => result.state === "ready");
-    const blocked = results.some((result) => result.state === "blocked");
-    await database.from("vault_ingestion_jobs").update({ state: "done", last_error_code: null, updated_at: new Date().toISOString(), metadata: { ...metadata(job.metadata), stored_assets: results.map((result) => result.assetId).filter(Boolean), result: ready ? "ready" : blocked ? "blocked" : "empty" } }).eq("id", job.id).eq("owner_id", job.owner_id);
-    await markMessage(database, job, ready ? "ready" : "blocked", { asset_count: results.length, summaries: results.map((result) => result.summary), reason: blocked ? "specialised_analysis_required" : undefined });
-    return { processed: true, state: ready ? "ready" : "blocked", assetCount: results.length };
+    const outcome = await ingestTrustedMediaAttachments(database, job, attachments);
+    await database.from("vault_ingestion_jobs").update({ state: "done", last_error_code: null, updated_at: new Date().toISOString(), metadata: { ...metadata(job.metadata), stored_assets: outcome.assetIds, result: outcome.state } }).eq("id", job.id).eq("owner_id", job.owner_id);
+    return { processed: true, state: outcome.state, assetCount: outcome.assetCount };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "media_worker_failed";
     await database.from("vault_ingestion_jobs").update({ state: "failed", last_error_code: reason.slice(0, 120), updated_at: new Date().toISOString() }).eq("id", job.id).eq("owner_id", job.owner_id);

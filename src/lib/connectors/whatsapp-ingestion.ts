@@ -6,8 +6,11 @@ import type { WhatsAppProviderEvents } from "@/lib/connectors/whatsapp-provider"
 import { analyzeIncomingWhatsAppMessage } from "@/lib/connectors/whatsapp-intelligence";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
+import { decryptCredential } from "@/lib/connectors/credential-crypto";
+import { downloadMetaWhatsAppMedia } from "@/lib/connectors/whatsapp-media";
+import { ingestTrustedMediaAttachments, type MediaJob } from "@/lib/media/email-worker";
 
-export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
+export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents, transientMedia?: Map<string, string[]>) {
   if (!events.messages.length && !events.statuses.length) {
     console.info("WhatsApp webhook received without message/status events");
     return NextResponse.json({ received: true, imported: 0, parsedMessages: 0, parsedStatuses: 0 });
@@ -16,7 +19,7 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   const database = createAdminClient();
   const { data: connections, error: connectionError } = await database
     .from("connections")
-    .select("id,owner_id,account_name,account_identifier,token_metadata")
+    .select("id,owner_id,account_name,account_identifier,token_metadata,encrypted_credentials")
     .eq("provider", whatsappConnector.id)
     .eq("status", "connected");
   if (connectionError) {
@@ -53,6 +56,7 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   let duplicates = 0;
   let unmatchedMessages = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
+  const mediaImports: Array<{ job: MediaJob; mediaIds: string[]; credential: string }> = [];
 
   for (const event of events.messages) {
     try {
@@ -127,7 +131,15 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
       if (saved.data) {
         imported += 1;
         if (event.message.attachmentCount > 0) {
-          try {
+          const mediaIds = events.provider === "meta-direct" ? transientMedia?.get(event.message.externalId) ?? [] : [];
+          const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
+          let credential = "";
+          if (mediaIds.length && encryptionKey && connection.encrypted_credentials) {
+            try { credential = decryptCredential<{ accessToken?: string }>(connection.encrypted_credentials, encryptionKey).accessToken?.trim() ?? ""; } catch { credential = ""; }
+          }
+          if (mediaIds.length && credential) {
+            mediaImports.push({ job: { id: saved.data.id, owner_id: connection.owner_id, connection_id: connection.id, provider: "whatsapp-business", provider_message_id: event.message.externalId, source_message_id: saved.data.id, source_conversation_id: conversation.data.id, source_person_id: resolved.personId, attempts: 0 }, mediaIds, credential });
+          } else try {
             await enqueueMediaAnalysis(database, {
               ownerId: connection.owner_id,
               connectionId: connection.id,
@@ -166,7 +178,19 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
     }
   }
 
-  if (analyses.length) after(async () => { await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage)); });
+  if (mediaImports.length || analyses.length) after(async () => {
+    await Promise.allSettled(mediaImports.map(async (item) => {
+      try {
+        const attachments = await downloadMetaWhatsAppMedia(item.credential, item.mediaIds);
+        await ingestTrustedMediaAttachments(database, item.job, attachments);
+      } catch (error) {
+        const { data: current } = await database.from("messages").select("metadata").eq("id", item.job.source_message_id!).eq("owner_id", item.job.owner_id).maybeSingle();
+        const metadata = current?.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata : {};
+        await database.from("messages").update({ metadata: { ...metadata, media_analysis_status: "failed", media_analysis: { reason: error instanceof Error ? error.message : "whatsapp_media_worker_failed" } } }).eq("id", item.job.source_message_id!).eq("owner_id", item.job.owner_id);
+      }
+    }));
+    await Promise.allSettled(analyses.map(analyzeIncomingWhatsAppMessage));
+  });
   const retry = failed > 0 || failedStatuses > 0 || unmatchedMessages > 0;
   console.info("WhatsApp webhook processed", { provider: events.provider, imported, duplicates, failed, failedStatuses, unmatchedMessages, statusUpdates, unmatchedStatuses });
   return NextResponse.json({

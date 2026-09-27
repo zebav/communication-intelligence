@@ -7,6 +7,8 @@ import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
+import { downloadEphemeralInstagramMedia, ephemeralInstagramMediaUrls } from "@/lib/connectors/instagram-media";
+import { ingestTrustedMediaAttachments, type MediaJob } from "@/lib/media/email-worker";
 
 export const maxDuration = 60;
 
@@ -28,6 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 401 });
   }
   const events = parseInstagramWebhook(rawBody);
+  const transientMediaUrls = ephemeralInstagramMediaUrls(rawBody);
   if (!events.length) return NextResponse.json({ received: true, imported: 0 });
 
   const database = createAdminClient();
@@ -45,6 +48,7 @@ export async function POST(request: NextRequest) {
   let imported = 0;
   let failed = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
+  const mediaImports: Array<{ job: MediaJob; urls: string[]; fallback: string }> = [];
 
   for (const event of events) {
     try {
@@ -120,12 +124,19 @@ export async function POST(request: NextRequest) {
         attachment_count: event.message.attachmentCount,
         metadata: { ...event.message.providerMetadata, connection_id: connection.id },
         processed_at: null,
-      }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
+      }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id,metadata").maybeSingle();
       if (messageError) throw messageError;
       if (savedMessage) {
         imported += 1;
         if (event.message.attachmentCount > 0) {
-          try {
+          const urls = transientMediaUrls.get(event.message.externalId) ?? [];
+          if (urls.length) {
+            mediaImports.push({
+              job: { id: savedMessage.id, owner_id: connection.owner_id, connection_id: connection.id, provider: instagramConnector.id, provider_message_id: event.message.externalId, source_message_id: savedMessage.id, source_conversation_id: conversationResult.data.id, source_person_id: resolved.personId, attempts: 0 },
+              urls,
+              fallback: `instagram-${event.message.externalId}`,
+            });
+          } else try {
             await enqueueMediaAnalysis(database, {
               ownerId: connection.owner_id,
               connectionId: connection.id,
@@ -158,6 +169,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (analyses.length) after(async () => { await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item))); });
+  if (mediaImports.length || analyses.length) after(async () => {
+    await Promise.allSettled(mediaImports.map(async (item) => {
+      try {
+        const attachments = await downloadEphemeralInstagramMedia(item.urls, item.fallback);
+        await ingestTrustedMediaAttachments(database, item.job, attachments);
+      } catch (error) {
+        const { data: current } = await database.from("messages").select("metadata").eq("id", item.job.source_message_id!).eq("owner_id", item.job.owner_id).maybeSingle();
+        const metadata = current?.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata : {};
+        await database.from("messages").update({ metadata: { ...metadata, media_analysis_status: "failed", media_analysis: { reason: error instanceof Error ? error.message : "instagram_media_worker_failed" } } }).eq("id", item.job.source_message_id!).eq("owner_id", item.job.owner_id);
+      }
+    }));
+    await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item)));
+  });
   return NextResponse.json({ received: true, imported, failed });
 }
