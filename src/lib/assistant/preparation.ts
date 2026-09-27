@@ -265,9 +265,8 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
 export async function prepareDecisionPlan(db: SupabaseClient, owner: string, plan: Plan, kind: TaskKind): Promise<Plan> {
   if (kind === "meeting") return meetingPreparation(db, owner, plan);
   if (kind === "website") return researchPreparation(db, owner, plan);
-  if ((kind === "reply" || kind === "follow_up") && !plan.draft.trim()) {
-    const draft = await generateDraft(db, owner, plan, kind === "follow_up");
-    return { ...plan, draft, originalDraft: draft, preparation: { status: "ready", summary: plan.reason, preparedAt: new Date().toISOString() } };
-  }
+  // Opening a reply/follow-up decision must be fast and must not spend an AI call
+  // before the owner has chosen to ask for a draft. Draft generation remains an
+  // explicit action in the task card, where it can use the same profile/history.
   return { ...plan, preparation: { status: "ready", summary: plan.reason, preparedAt: new Date().toISOString() } };
 }
