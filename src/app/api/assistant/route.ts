@@ -49,7 +49,7 @@ export async function GET(request: Request) {
       db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle(),
       db.from("learning_signals").select("person_id,source,evidence").eq("owner_id", owner).eq("signal_type", "category_corrected").eq("status", "approved").limit(1000),
     ]);
-    if (tasks.error || feedback.error || relevanceRules.error) throw new Error("Handlingsinkorgens databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
+    if (tasks.error || feedback.error || relevanceRules.error) throw new Error("Notiscentrets databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
     const evidenceByMessage = new Map(page.messages.map(evidence => [evidence.messageId, evidence]));
     const stored = (tasks.data as Task[]).map(task => {
       const evidence = evidenceByMessage.get(task.message_id);

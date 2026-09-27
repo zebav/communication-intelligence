@@ -124,7 +124,7 @@ function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Ta
   const run = (action: string, extra: Record<string, unknown> = {}) => act({ action, id: task.id, revision: task.revision, ...extra });
   return <>
     <p className="eyebrow">{kindLabels[task.kind]} · {statusLabels[task.status]}</p><h2>{e.title}</h2>
-    <PersonLink personId={e.personId ?? undefined} name={e.personName} /><p>{e.source} · {e.account}</p>
+    <div className="assistant-contact-actions"><PersonLink personId={e.personId ?? undefined} name={e.personName} />{e.personId && <a className="btn" href={`/contacts/${encodeURIComponent(e.personId)}`}>Redigera kontakt</a>}</div><p>{e.source} · {e.account}</p>
     <section className="decision-card" aria-label="Beslutsunderlag">
       <div className="decision-card-section"><span>Sammanfattning</span><p>{decision.summary}</p></div>
       <div className="decision-card-section"><span>Varför detta är viktigt</span><p>{decision.whyImportant}</p></div>

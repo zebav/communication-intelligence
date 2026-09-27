@@ -42,7 +42,7 @@ const navigation: { id: View; label: string; icon: typeof Inbox; count?: number 
   { id: "today", label: "Overview", icon: LayoutDashboard },
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "calendar", label: "Kalender", icon: Clock3 },
-  { id: "assistant", label: "Handlingsinkorg", icon: CheckCircle2 },
+  { id: "assistant", label: "Notiscenter", icon: CheckCircle2 },
   { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "outcomes", label: "Outcomes", icon: Target }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "settings", label: "Settings", icon: Settings },
 ];
 const sources: { label: string; source: Source }[] = [
@@ -278,7 +278,7 @@ function SyncedInbox({ emails, people, onOpenAssistant }: { emails: SyncedEmailC
         <div className="learning-context"><b>Föreslagen åtgärd:</b> {selected.analysis?.forwardingSuggestion?.recommended ? `Vidarebefordra till ${relationshipLabels[selected.analysis.forwardingSuggestion.recipientRole as keyof typeof relationshipLabels] ?? selected.analysis.forwardingSuggestion.recipientRole}` : selected.analysis?.actionSuggestion?.detected ? selected.analysis.actionSuggestion.task : selected.analysis?.requiresReply ? "Granska och skicka det föreslagna svaret" : action}</div>
         {selected.analysis?.actionSuggestion?.targetUrl && (() => { const link = compactActionUrl(selected.analysis!.actionSuggestion!.targetUrl); return link.href ? <div className="learning-context decision-link-row"><b>Webbplats:</b> <a href={link.href} title={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a></div> : null; })()}
         <p className="muted">Öppna beslutet för att se exakt vad som händer vid godkännande. Webbuppgifter använder Browserbase och privata uppgifter hämtas endast efter ditt godkännande.</p>
-        <button className="btn primary" disabled={decisionWorking || !selected.messageId} onClick={() => void prepareDecision()}>{decisionWorking ? "Förbereder…" : "Öppna beslut i Handlingsinkorg"}</button>
+        <button className="btn primary" disabled={decisionWorking || !selected.messageId} onClick={() => void prepareDecision()}>{decisionWorking ? "Förbereder…" : "Öppna beslut i Notiscenter"}</button>
         {decisionMessage && <p className="negative">{decisionMessage}</p>}
       </div>
       <div className="intel-section"><div className="intel-label">Category</div><select className="filter" aria-label="Correct email category" value={selected.classification} disabled={savingCategory} onChange={(event) => void saveCategory(event.target.value)}>{EMAIL_CATEGORIES.slice(3).map((item) => <option key={item}>{item}</option>)}</select>{categoryError && <p className="negative">{categoryError}</p>}</div>
@@ -461,7 +461,7 @@ function Intelligence({ items, people, followUps, outcomes, calendarHistory }: {
   const provenance = (item: LearningSignal) => {
     const evidence = item.evidence ?? {};
     const repetitions = typeof evidence.repetitions === "number" ? `${evidence.repetitions} observationer` : null;
-    const origin = typeof evidence.assistant_relevance === "string" ? "Handlingsinkorg" : item.signalType === "outcome_confirmed" ? "Bekräftat utfall" : "Svar och redigeringar";
+    const origin = typeof evidence.assistant_relevance === "string" ? "Notiscenter" : item.signalType === "outcome_confirmed" ? "Bekräftat utfall" : "Svar och redigeringar";
     return [origin, item.personName, item.conversationTitle, item.source, repetitions].filter(Boolean).join(" · ");
   };
   const confirmedPeople = people.filter((person) =>

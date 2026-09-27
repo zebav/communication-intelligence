@@ -21,7 +21,8 @@ export function ContactPhotoEditor({ personId, name }: { personId: string; name:
     finally { setBusy(false); if (input.current) input.current.value = ""; }
   };
   return <section className="contact-photo-editor" aria-label="Kontaktbild">
-    <div className="contact-photo-frame">{hasPhoto ? <img src={`/api/contacts/${personId}/photo?v=${version}`} alt={`Bild på ${name}`} onError={() => setHasPhoto(false)} /> : <span>{initials}</span>}</div>
-    <div><strong>Kontaktbild</strong><p>Endast du kan se den. Bilden sparas krypterat i ditt privata valv.</p><input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); }} /><button className="btn" type="button" disabled={busy} onClick={() => input.current?.click()}>{busy ? "Sparar…" : hasPhoto ? "Byt bild" : "Lägg till bild"}</button>{message && <small className={message.includes("sparad") ? "positive" : "negative"}>{message}</small>}</div>
+    <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); }} />
+    <button className="contact-photo-frame contact-photo-trigger" type="button" disabled={busy} onClick={() => input.current?.click()} aria-label={hasPhoto ? `Byt bild på ${name}` : `Lägg till bild på ${name}`} title={hasPhoto ? "Byt bild" : "Lägg till bild"}>{hasPhoto ? <img src={`/api/contacts/${personId}/photo?v=${version}`} alt={`Bild på ${name}`} onError={() => setHasPhoto(false)} /> : <span>{initials}</span>}</button>
+    <div><strong>Kontaktbild</strong><p>Tryck på bilden för att {hasPhoto ? "byta" : "lägga till"}. Endast du kan se den.</p><button className="btn" type="button" disabled={busy} onClick={() => input.current?.click()}>{busy ? "Sparar…" : hasPhoto ? "Byt bild" : "Lägg till bild"}</button>{message && <small className={message.includes("sparad") ? "positive" : "negative"}>{message}</small>}</div>
   </section>;
 }
