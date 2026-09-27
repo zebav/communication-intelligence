@@ -6,6 +6,7 @@ import { getAIService } from "@/lib/ai/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
+import { mediaContextForMessage } from "@/lib/media/context";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -32,6 +33,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
   const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
   const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
+  const analyzedMedia = await mediaContextForMessage(supabase, message.owner_id, message.id);
   const analysis = await getAIService().analyzeEmail({
     ownerId: message.owner_id,
     senderName: person?.display_name ?? "Unknown sender",
@@ -43,6 +45,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content),
     styleExamples,
     conversationMessages,
+    analyzedMedia,
   });
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
   const now = new Date().toISOString();

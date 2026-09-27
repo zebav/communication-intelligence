@@ -13,6 +13,7 @@ import { relationshipTypes } from "@/lib/relationship-types";
 import { enforceProfessionalRouting } from "@/lib/action-routing";
 import { bestSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
 import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState } from "@/lib/media/decision-gate";
+import { mediaContextForMessage } from "@/lib/media/context";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -175,7 +176,8 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     const styleExamples = [...(conversationReplies ?? []), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
     const { data: contactRows } = await supabase.from("people").select("id,display_name,organization,relationship_type,professional_specialty,jurisdiction").eq("owner_id", user.id).eq("entity_type", "person").order("last_contact_at", { ascending: false }).limit(200);
     const contactDirectory = (contactRows ?? []).map((person) => ({ id: person.id, name: person.display_name ?? "Unknown contact", organization: person.organization ?? undefined, relationship: person.relationship_type ?? undefined, specialty: person.professional_specialty ?? undefined, country: person.jurisdiction ?? undefined }));
-    const aiAnalysis = await getAIService().analyzeEmail({ priorityContext: { basePriority: 5, unread: (message.metadata as { is_read?: boolean } | null)?.is_read === false, hasOwnerReplies: conversationReplies.length > 0, historicalConversationCount: personConversationCount ?? undefined, relationshipType: personProfile?.relationship_type }, ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content), styleExamples, conversationMessages, contactDirectory });
+    const analyzedMedia = await mediaContextForMessage(supabase, user.id, message.id);
+    const aiAnalysis = await getAIService().analyzeEmail({ priorityContext: { basePriority: 5, unread: (message.metadata as { is_read?: boolean } | null)?.is_read === false, hasOwnerReplies: conversationReplies.length > 0, historicalConversationCount: personConversationCount ?? undefined, relationshipType: personProfile?.relationship_type }, ownerId: user.id, senderName, subject: conversation.title ?? "(No subject)", preview: message.body_text ?? "", currentClassification: message.classification ?? "Information Only", relationshipContext, personaContext, verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content), styleExamples, conversationMessages, contactDirectory, analyzedMedia });
     const analysis = enforceProfessionalRouting(aiAnalysis, [conversation.title, ...conversationMessages.map((item) => item.body)].join("\n"));
     const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
     const validContactIds = new Set(contactDirectory.map((contact) => contact.id));
