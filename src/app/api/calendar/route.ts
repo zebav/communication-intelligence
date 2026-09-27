@@ -34,7 +34,10 @@ export async function GET() {
   ]);
   if(results.some(r=>r.error)) return NextResponse.json({error:"Kalenderns databas är inte tillgänglig ännu. Befintliga mejl och kontakter påverkas inte."},{status:503});
   const jobs=await db.from("calendar_sync_jobs").select("account_id,last_attempt_at,last_success_at,last_error,next_run_at").eq("owner_id",owner);
-  return NextResponse.json({accounts:results[0].data,sources:results[1].data,workspace:results[2].data,holds:results[3].data,syncJobs:jobs.error?null:jobs.data},{headers:{"Cache-Control":"no-store"}});
+  // Transfers are display metadata only. If an older database has not received
+  // the calendar transfer migration yet, the calendar must remain readable.
+  const transfers=await db.from("calendar_commitment_transfers").select("source_id,source_event_id,master_source_id,master_event_id").eq("owner_id",owner);
+  return NextResponse.json({accounts:results[0].data,sources:results[1].data,workspace:results[2].data,holds:results[3].data,syncJobs:jobs.error?null:jobs.data,transfers:transfers.error?[]:transfers.data},{headers:{"Cache-Control":"no-store"}});
  }catch{return NextResponse.json({error:"Logga in med tvåfaktor för att öppna kalendern."},{status:401});}
 }
 export async function POST(request:Request) {

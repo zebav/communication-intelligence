@@ -15,11 +15,17 @@ export function CalendarBoard({events,calendars,date,onDate,timezone,onEdit,onDo
   setDraft({start,end});
  };
  const [hidden,setHidden]=useState<string[]>([]);
+ const initializedSources=useRef(false);
  const source=(event:CalendarEvent)=>calendars.find(c=>c.id===event.calendarId);
  const color=(event:CalendarEvent)=>({borderColor:source(event)?.color,borderLeftWidth:4});
  const [view,setView]=useState<"week"|"month"|"day">("week");
  const [selected,setSelected]=useState<CalendarEvent|null>(null);
  const scroll=useRef<HTMLDivElement>(null);
+ useEffect(()=>{
+  // Master is the decision calendar. Source calendars are available as an
+  // on-demand comparison layer rather than overwhelming the primary view.
+  if(!initializedSources.current&&calendars.length){setHidden(calendars.filter(c=>!c.master).map(c=>c.id));initializedSources.current=true;}
+ },[calendars]);
  useEffect(()=>{if(scroll.current)scroll.current.scrollTop=view==='month'?0:480;},[view]);
  const localDay=(instant:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(instant));
  const time=(instant:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,hour:"2-digit",minute:"2-digit"}).format(new Date(instant));
@@ -38,8 +44,7 @@ export function CalendarBoard({events,calendars,date,onDate,timezone,onEdit,onDo
   {onDone&&<button className="btn primary" onClick={()=>add(date)}>+ Lägg till möte</button>}
   {draft&&onDone&&<dialog ref={dialog} className="calendar-create-dialog" aria-label="Lägg till möte" onClose={()=>setDraft(null)}><button className="btn" onClick={()=>dialog.current?.close()}>Stäng</button><p>Datum och tid är förifyllda. Ledig tid verifieras innan bokning. Om du stänger med en preliminär reservation finns den kvar tills den släpps eller löper ut.</p><CalendarMeetingComposer timezone={timezone} onDone={onDone} initialStart={draft.start} initialEnd={draft.end} expanded/></dialog>}
   <div className="calendar-board-toolbar"><div><h2>{new Date(date+"T12:00:00Z").toLocaleDateString("sv-SE",{month:"long",year:"numeric",timeZone:"UTC"})}</h2><small>{timezone} · Alla valda kalendrar</small></div><div className="calendar-actions"><button className="btn" aria-label="Föregående period" onClick={()=>navigate(-1)}>←</button><button className="btn" onClick={()=>onDate(localDay(new Date().toISOString()))}>Idag</button><button className="btn" aria-label="Nästa period" onClick={()=>navigate(1)}>→</button><label>Datum<input type="date" value={date} onChange={e=>{if(e.target.value)onDate(e.target.value);}}/></label></div><div className="calendar-actions">{([['day','Dag'],['week','Vecka'],['month','Månad']] as const).map(([key,label])=><button className={`btn ${view===key?'primary':''}`} aria-pressed={view===key} key={key} onClick={()=>setView(key)}>{label}</button>)}</div></div>
-  <fieldset className="calendar-source-filters"><legend>Visa kalendrar</legend>{calendars.map(c=><label key={c.id}><input type="checkbox" checked={!hidden.includes(c.id)} onChange={e=>{setHidden(current=>e.target.checked?current.filter(id=>id!==c.id):[...current,c.id]);setSelected(null);}}/><span aria-hidden="true" style={{background:c.color}}/>{c.label}</label>)}</fieldset>
-  <p className="muted">Externa bokningar visas som underlag, inte som godkända masterbokningar. Filtren ändrar endast vyn, inte synkronisering eller konfliktkontroll.</p>
+  {calendars.some(c=>!c.master)&&<details className="calendar-source-filters"><summary>Jämför externa kalendrar ({calendars.filter(c=>!c.master&&!hidden.includes(c.id)).length} visas)</summary><p className="muted">Masterkalendern visas alltid. Externa kalendrar är underlag och visas först när du väljer dem här.</p>{calendars.filter(c=>!c.master).map(c=><label key={c.id}><input type="checkbox" checked={!hidden.includes(c.id)} onChange={e=>{setHidden(current=>e.target.checked?current.filter(id=>id!==c.id):[...current,c.id]);setSelected(null);}}/><span aria-hidden="true" style={{background:c.color}}/>{c.label}</label>)}</details>}
   <div className="calendar-board-scroll" ref={scroll}>
   {view==="month"?<div className="calendar-month">{['mån','tis','ons','tor','fre','lör','sön'].map(d=><strong className="calendar-day-heading" key={d}>{d}</strong>)}{days.map(d=><div className={`calendar-month-day ${d.slice(0,7)!==date.slice(0,7)?'outside':''}`} key={d}><button className="calendar-date-link" onClick={()=>{onDate(d);setView('day');}}>{Number(d.slice(8))}</button>{onDay(d).map(e=><button className="calendar-event-chip" style={color(e)} title={source(e)?.label} key={e.id} onClick={()=>setSelected(e)}>{e.allDay?'Heldag':time(e.start)} · {e.title||'Utan rubrik'}</button>)}</div>)}</div>:
   <div className="calendar-time-grid" style={{gridTemplateColumns:`54px repeat(${days.length}, minmax(110px,1fr))`}}>

@@ -19,7 +19,7 @@ import type {MeetingDetails} from "@/lib/calendar/meeting-details";
 
 type Source={id:string;account_id:string;name:string;is_master:boolean;enabled:boolean;snapshot:CalendarEvent[];reviewed_snapshot:CalendarEvent[]|null;synced_at:string|null;sync_error:string|null};
 type Hold={id:string;title:string;starts_at:string;ends_at:string;status:string;expires_at:string;preparation_minutes:number;recovery_minutes:number;purpose?:"booking"|"move";meeting_details?:MeetingDetails|null};
-type Snapshot={accounts:{id:string;address:string;provider:string}[];sources:Source[];workspace:{timezone:string;provisioning:string}|null;holds:Hold[];syncJobs?:{account_id:string;last_attempt_at:string|null;last_success_at:string|null;last_error:string|null;next_run_at:string}[]|null};
+type Snapshot={accounts:{id:string;address:string;provider:string}[];sources:Source[];workspace:{timezone:string;provisioning:string}|null;holds:Hold[];syncJobs?:{account_id:string;last_attempt_at:string|null;last_success_at:string|null;last_error:string|null;next_run_at:string}[]|null;transfers?:{source_id:string;source_event_id:string;master_source_id:string;master_event_id:string}[]};
 export type CalendarConversation={id:string;title:string;person:string;text:string};
 export function CalendarWorkspace({conversations}:{conversations:CalendarConversation[]}) {
  const [data,setData]=useState<Snapshot|null>(null),[error,setError]=useState(""),[status,setStatus]=useState(""),[busy,setBusy]=useState(false);
@@ -72,7 +72,7 @@ export function CalendarWorkspace({conversations}:{conversations:CalendarConvers
  };
  const day=(value:string)=>new Intl.DateTimeFormat("sv-SE",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(value));
  const master=data?.sources.find(s=>s.is_master);
- const display=calendarDisplay(data?.sources??[],data?.accounts??[]);
+ const display=calendarDisplay(data?.sources??[],data?.accounts??[],data?.transfers??[]);
  const external=data?.sources.filter(s=>!s.is_master&&s.enabled)??[];
  const selectedConversation=conversations.find(c=>c.id===conversationId);
  const eventRows=(master?.snapshot??[]).filter(e=>e.status!=="cancelled").filter(e=>tab==="day"?day(e.start)<=date&&day(e.end)>=date:tab==="week"?day(e.start)>=date&&day(e.start)<new Date(Date.parse(date)+7*86400000).toISOString().slice(0,10):day(e.end)>=date).sort((a,b)=>a.start.localeCompare(b.start));
