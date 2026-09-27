@@ -8,6 +8,11 @@ describe("action discovery", () => {
   it("proposes a reply only from analysis evidence", () => expect(propose(example)).toEqual(["reply"]));
   it.each(["Marketing", "Newsletter", "Spam", "Information Only", "Notification", "Receipt / Invoice"])("does not turn %s priority 10 into an action", classification => expect(propose({ ...example, classification, priority: 10 })).toEqual([]));
   it("does not infer tasks from unread/urgency alone", () => expect(propose({ ...example, analysis: {}, title: "URGENT" })).toEqual([]));
+  it("holds a decision when attached media is still waiting for analysis", () => {
+    const media = { ...example, attachmentCount: 1, mediaState: "pending" as const };
+    expect(propose(media)).toEqual([]);
+    expect(sendCapability({ ...task().plan, evidence: media }, "reply")).toContain("spärrat tills analysen är klar");
+  });
   it("ranks an unread actionable request higher without making unread mail actionable", () => {
     expect(candidateRank({ ...example, unread: true }, "reply")).toBeGreaterThan(candidateRank({ ...example, unread: false }, "reply"));
     expect(propose({ ...example, unread: true, analysis: {}, title: "URGENT" })).toEqual([]);

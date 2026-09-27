@@ -6,6 +6,7 @@ import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-inte
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
+import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
 
 export const maxDuration = 60;
 
@@ -123,6 +124,27 @@ export async function POST(request: NextRequest) {
       if (messageError) throw messageError;
       if (savedMessage) {
         imported += 1;
+        if (event.message.attachmentCount > 0) {
+          try {
+            await enqueueMediaAnalysis(database, {
+              ownerId: connection.owner_id,
+              connectionId: connection.id,
+              provider: instagramConnector.id,
+              source: "instagram",
+              providerMessageId: event.message.externalId,
+              messageId: savedMessage.id,
+              conversationId: conversationResult.data.id,
+              personId: resolved.personId,
+              messageText: event.message.body,
+              attachmentCount: event.message.attachmentCount,
+              mediaTypes: Array.isArray(event.message.providerMetadata.attachment_types)
+                ? event.message.providerMetadata.attachment_types.filter((type): type is string => typeof type === "string")
+                : [],
+            });
+          } catch (mediaError) {
+            console.error("Instagram media queue failed", { messageId: savedMessage.id, reason: mediaError instanceof Error ? mediaError.message : "unknown" });
+          }
+        }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
       }
     } catch (error) {

@@ -5,8 +5,9 @@ import { normalizeUniversalProfile, resolveCommunicationProfile, situationForCla
 import { approvedLearningContext } from "@/lib/learning-feedback";
 import type { Evidence, Plan, Task, TaskStatus } from "./model";
 import type { Source } from "@/lib/domain";
+import { mediaDecisionState } from "@/lib/media/decision-gate";
 
-const fields = "id,conversation_id,source,direction,body_text,sent_at,created_at,classification,importance_score,metadata,identities(external_identifier),conversations(id,title,person_id,connection_id,external_conversation_id,last_user_message_at,last_other_message_at,people(display_name),connections(provider,account_identifier,account_name))";
+const fields = "id,conversation_id,source,direction,body_text,sent_at,created_at,classification,importance_score,attachment_count,metadata,identities(external_identifier),conversations(id,title,person_id,connection_id,external_conversation_id,last_user_message_at,last_other_message_at,people(display_name),connections(provider,account_identifier,account_name))";
 type Row = Record<string, unknown>;
 function object(value: unknown): Row { return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {}; }
 function one(value: unknown): Row { return object(Array.isArray(value) ? value[0] : value); }
@@ -70,6 +71,8 @@ export function evidenceFromRow(value: unknown): Evidence {
     lastUserAt: str(c.last_user_message_at) || null, lastOtherAt: str(c.last_other_message_at) || null,
     classification: str(row.classification), priority: Number(row.importance_score ?? 0), analysis: storedAnalysis(object(row.metadata).ai_analysis),
     unread: object(row.metadata).is_read === false || object(row.metadata).isRead === false,
+    attachmentCount: Number(row.attachment_count ?? 0),
+    mediaState: mediaDecisionState(row.metadata, Number(row.attachment_count ?? 0)),
     recipient: row.source === "email" ? str(identity.external_identifier) : str(c.external_conversation_id).split(":").at(-1) ?? "",
   };
   const versionEvidence = { ...e, analysis: { ...e.analysis, draftResponse: undefined, draftTone: undefined } };

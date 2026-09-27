@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { EmailAnalysis } from "@/lib/ai/service";
 import type { Source } from "@/lib/domain";
+import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState, type MediaDecisionState } from "@/lib/media/decision-gate";
 
 export const kinds = ["reply", "forward", "meeting", "follow_up", "website"] as const;
 export const statuses = ["decision", "ready", "executing", "waiting", "done", "dismissed", "uncertain"] as const;
@@ -15,6 +16,7 @@ export type Evidence = {
   lastUserAt: string | null; lastOtherAt: string | null; classification: string; priority: number;
   /** Read state affects ranking only. It can never create an action by itself. */
   unread?: boolean; analysis: Partial<EmailAnalysis>; recipient: string; version: string;
+  attachmentCount?: number; mediaState?: MediaDecisionState;
 };
 export type PreparedDecision = {
   status: "ready" | "needs_input" | "failed";
@@ -85,6 +87,7 @@ const bulk = new Set(["Marketing", "Newsletter", "Spam", "Notification", "Inform
 export function propose(e: Evidence, now = Date.now()): TaskKind[] {
   // Neither unread status nor urgency words alone authorize a task.
   if (e.direction === "out") return [];
+  if (blocksDecisionUntilMediaReady({ media_analysis_status: e.mediaState }, e.attachmentCount)) return [];
   if (e.lastUserAt && Date.parse(e.lastUserAt) >= Date.parse(e.sentAt)) return [];
   if (e.lastOtherAt && Date.parse(e.lastOtherAt) > Date.parse(e.sentAt)) return [];
   if (bulk.has(e.classification)) return [];
@@ -127,6 +130,9 @@ export function makePlan(e: Evidence, kind: TaskKind): Plan {
   return { evidence: e, draft, originalDraft: draft, reason: e.analysis.forwardingSuggestion?.recommended && kind === "forward" ? e.analysis.forwardingSuggestion.reason : e.analysis.priorityReason ?? e.analysis.summary ?? "Granska originalmeddelandet.", recipientPersonId: kind === "forward" ? null : e.personId, recipient: kind === "forward" ? "" : e.recipient, recipientName: kind === "forward" ? "" : e.personName, followUpAt: null, steps: steps[kind] };
 }
 export function sendCapability(plan: Plan, kind: TaskKind): string | null {
+  if (blocksDecisionUntilMediaReady({ media_analysis_status: plan.evidence.mediaState }, plan.evidence.attachmentCount)) {
+    return `${mediaDecisionLabel(mediaDecisionState({ media_analysis_status: plan.evidence.mediaState }, plan.evidence.attachmentCount))}. Svaret är spärrat tills analysen är klar.`;
+  }
   if (kind === "website") return "Använd Browserbase-granskningen nedan.";
   if (!["reply", "forward", "follow_up", "meeting"].includes(kind)) return "Använd det separata granskningsflödet nedan.";
   if (!plan.draft.trim()) return "Skriv eller generera ett fullständigt svar först.";

@@ -3,6 +3,7 @@ import { normalizeUniversalProfile, resolveCommunicationProfile } from "@/lib/co
 import { getAIService } from "@/lib/ai/service";
 import { relationshipTypes } from "@/lib/relationship-types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 
 export async function analyzeIncomingInstagramMessage(input: { ownerId: string; conversationId: string; messageId: string }) {
   const database = createAdminClient();
@@ -12,6 +13,7 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
     database.from("profiles").select("preferences").eq("id", input.ownerId).maybeSingle(),
   ]);
   if (!conversation || !message || message.direction !== "in") return;
+  if (blocksDecisionUntilMediaReady(message.metadata)) return;
   const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }] = await Promise.all([
     conversation.person_id ? database.from("people").select("display_name,relationship_type,organization,relationship_summary").eq("id", conversation.person_id).eq("owner_id", input.ownerId).maybeSingle() : Promise.resolve({ data: null }),
     database.from("messages").select("direction,body_text").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", "instagram").order("sent_at", { ascending: false }).limit(20),

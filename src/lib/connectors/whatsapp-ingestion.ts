@@ -5,6 +5,7 @@ import { findWhatsAppWebhookConnection } from "@/lib/connectors/whatsapp-webhook
 import type { WhatsAppProviderEvents } from "@/lib/connectors/whatsapp-provider";
 import { analyzeIncomingWhatsAppMessage } from "@/lib/connectors/whatsapp-intelligence";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
+import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
 
 export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
   if (!events.messages.length && !events.statuses.length) {
@@ -125,6 +126,25 @@ export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {
       if (saved.error) throw saved.error;
       if (saved.data) {
         imported += 1;
+        if (event.message.attachmentCount > 0) {
+          try {
+            await enqueueMediaAnalysis(database, {
+              ownerId: connection.owner_id,
+              connectionId: connection.id,
+              provider: String(event.message.providerMetadata.provider ?? "whatsapp-business"),
+              source: "whatsapp",
+              providerMessageId: event.message.externalId,
+              messageId: saved.data.id,
+              conversationId: conversation.data.id,
+              personId: resolved.personId,
+              messageText: event.message.body,
+              attachmentCount: event.message.attachmentCount,
+              mediaTypes: [String(event.message.providerMetadata.whatsapp_message_type ?? "unknown")],
+            });
+          } catch (mediaError) {
+            console.error("WhatsApp media queue failed", { messageId: saved.data.id, reason: mediaError instanceof Error ? mediaError.message : "unknown" });
+          }
+        }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversation.data.id, messageId: saved.data.id });
       }
     } catch (error) {
