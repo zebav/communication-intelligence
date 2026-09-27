@@ -15,6 +15,14 @@ const str = (value: unknown) => typeof value === "string" ? value : "";
 const bool = (value: unknown) => typeof value === "boolean" ? value : undefined;
 const num = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+function storedMediaSummaries(value: unknown) {
+  const media = object(object(value).media_analysis);
+  const values = Array.isArray(media.summaries) ? media.summaries : [];
+  return [...new Set(values.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
+    .slice(0, 4)
+    .map((item) => item.slice(0, 700));
+}
+
 /** Preserve useful historical evidence when a nested legacy object no longer
  * satisfies every field required by the current analysis schema. */
 function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").EmailAnalysis> {
@@ -73,6 +81,7 @@ export function evidenceFromRow(value: unknown): Evidence {
     unread: object(row.metadata).is_read === false || object(row.metadata).isRead === false,
     attachmentCount: Number(row.attachment_count ?? 0),
     mediaState: mediaDecisionState(row.metadata, Number(row.attachment_count ?? 0)),
+    mediaSummaries: storedMediaSummaries(row.metadata),
     recipient: row.source === "email" ? str(identity.external_identifier) : str(c.external_conversation_id).split(":").at(-1) ?? "",
   };
   const versionEvidence = { ...e, analysis: { ...e.analysis, draftResponse: undefined, draftTone: undefined } };

@@ -17,6 +17,8 @@ export type Evidence = {
   /** Read state affects ranking only. It can never create an action by itself. */
   unread?: boolean; analysis: Partial<EmailAnalysis>; recipient: string; version: string;
   attachmentCount?: number; mediaState?: MediaDecisionState;
+  /** Safe, stored findings only. Never raw attachment text, bytes, URLs or tokens. */
+  mediaSummaries?: string[];
 };
 export type PreparedDecision = {
   status: "ready" | "needs_input" | "failed";
