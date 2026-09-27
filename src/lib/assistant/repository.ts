@@ -150,13 +150,16 @@ export async function generateDraft(db: SupabaseClient, owner: string, plan: Pla
     throw new Error("Bilagan behöver analyseras eller granskas innan ett nytt svar kan skapas.");
   }
   const [profile, history, memories, rules, analyzedMedia] = await Promise.all([
-    db.from("profiles").select("preferences").eq("id", owner).single(),
+    // A profile improves the answer but must never prevent a user from
+    // preparing an otherwise valid task. New or migrated users can safely
+    // have no row until they save Personal Context for the first time.
+    db.from("profiles").select("preferences").eq("id", owner).maybeSingle(),
     db.from("messages").select("direction,body_text").eq("owner_id", owner).eq("conversation_id", e.conversationId).order("sent_at", { ascending: false }).limit(12),
     e.personId ? db.from("memories").select("content").eq("owner_id", owner).eq("person_id", e.personId).eq("user_verified", true).limit(12) : Promise.resolve({ data: [], error: null }),
     db.from("learning_signals").select("proposed_rule,person_id").eq("owner_id", owner).eq("source", e.source).eq("status", "approved").limit(100),
     mediaContextForMessage(db, owner, e.messageId),
   ]);
-  if ([profile, history, memories, rules].some(r => r.error)) throw new Error("Profil och relationsunderlag kunde inte läsas. Inget standardiserat ersättningssvar har skapats.");
+  if ([profile, history, memories, rules].some(r => r.error)) throw new Error("Relationsunderlaget kunde inte läsas. Försök igen; inget standardiserat ersättningssvar har skapats.");
   const prefs = object(profile.data?.preferences);
   const context = resolveCommunicationProfile(normalizeUniversalProfile(prefs.universal_communication_profile, prefs.communication_persona), { source: e.source, personId: e.personId, situation: followUp ? "followUp" : situationForClassification(e.classification) });
   const messages = [...(history.data ?? [])].reverse().map(m => ({ direction: m.direction as "in" | "out", body: String(m.body_text ?? "") }));
