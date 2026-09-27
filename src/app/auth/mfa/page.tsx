@@ -10,5 +10,5 @@ export default async function MfaPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  return <main className="auth-page"><section className="auth-card mfa-card"><div className="auth-brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication Intelligence</span></div><MfaGate /><small>MFA is enforced in both the application and database access policies.</small></section></main>;
+  return <main className="auth-page"><section className="auth-card mfa-card"><div className="auth-brand"><span className="brand-mark"><Bolt size={15} /></span><span>Smart Assistent</span></div><MfaGate /><small>MFA is enforced in both the application and database access policies.</small></section></main>;
 }

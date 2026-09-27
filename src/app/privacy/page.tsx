@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | Communication Intelligence",
-  description: "How Communication Intelligence handles personal data and connected communication accounts.",
+  title: "Privacy Policy | Smart Assistent",
+  description: "How Smart Assistent handles personal data and connected communication accounts.",
 };
 
 const updated = "16 September 2026";
@@ -13,7 +13,7 @@ export default function PrivacyPolicyPage() {
     <main className="min-h-screen bg-[#0a0b0d] px-5 py-12 text-zinc-100 sm:px-8">
       <article className="mx-auto max-w-3xl">
         <Link href="/" className="text-sm text-zinc-400 transition hover:text-white">
-          ← Communication Intelligence
+          ← Smart Assistent
         </Link>
 
         <header className="mt-10 border-b border-white/10 pb-8">
@@ -30,7 +30,7 @@ export default function PrivacyPolicyPage() {
           <section>
             <h2 className="text-xl font-semibold text-white">What this service does</h2>
             <p className="mt-3">
-              Communication Intelligence is a private communication assistant. It can connect to
+              Smart Assistent is a private communication assistant. It can connect to
               communication services selected by the user, organize conversations, identify relevant
               follow-ups, and prepare suggested replies. The user remains in control of connections
               and external actions.
@@ -99,7 +99,7 @@ export default function PrivacyPolicyPage() {
             <p className="mt-3">
               Subject to applicable law, users may request access, correction, export, restriction,
               or deletion of their personal data and may withdraw a connected service&apos;s
-              authorization through Communication Intelligence or the provider&apos;s own account
+              authorization through Smart Assistent or the provider&apos;s own account
               settings.
             </p>
           </section>
@@ -116,7 +116,7 @@ export default function PrivacyPolicyPage() {
             <h2 className="text-xl font-semibold text-white">Contact</h2>
             <p className="mt-3">
               Questions or privacy requests can be submitted directly to the operator of
-              Communication Intelligence through the established contact channel used for access to
+              Smart Assistent through the established contact channel used for access to
               this private service.
             </p>
           </section>

@@ -12,7 +12,7 @@ export default async function LoginPage() {
 
   return <main className="auth-page">
     <section className="auth-card">
-      <div className="auth-brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication Intelligence</span></div>
+      <div className="auth-brand"><span className="brand-mark"><Bolt size={15} /></span><span>Smart Assistent</span></div>
       <div className="auth-icon"><ShieldCheck size={22} /></div>
       <span className="eyebrow">Private workspace</span>
       <h1>Welcome back</h1>
