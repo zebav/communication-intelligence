@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createMobileClient } from "@/lib/supabase/mobile";
-import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, type Evidence, type Task } from "@/lib/assistant/model";
+import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, survivesLowerPrioritySender, type Evidence, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
@@ -67,6 +67,12 @@ export async function GET(request: Request) {
     const { data: existing, error: existingError } = page.messages.length ? await db.from("assistant_tasks").select("message_id,kind").eq("owner_id", owner).in("message_id", page.messages.map(m => m.messageId)) : { data: [], error: null };
     if (existingError) throw new Error("Dubblettkontrollen kunde inte slutföras.");
     const keys = new Set((existing ?? []).map(t => `${t.message_id}:${t.kind}`));
+    // A dismissal means the owner does not want this incoming message in the
+    // decision queue again, independent of which possible task type created
+    // the first card. It remains available in Inbox and the audit trail.
+    const dismissedMessageIds = new Set((tasks.data as Task[])
+      .filter(task => task.status === "dismissed")
+      .map(task => task.message_id));
     const ignoredSenders = new Set((relevanceRules.data ?? []).filter(rule => {
       const evidence = rule.evidence && typeof rule.evidence === "object" && !Array.isArray(rule.evidence) ? rule.evidence as Record<string, unknown> : {};
       return evidence.assistant_relevance === "sender_irrelevant" && typeof rule.person_id === "string";
@@ -75,14 +81,15 @@ export async function GET(request: Request) {
       const evidence = rule.evidence && typeof rule.evidence === "object" && !Array.isArray(rule.evidence) ? rule.evidence as Record<string, unknown> : {};
       return evidence.assistant_relevance === "sender_lower_priority" && typeof rule.person_id === "string";
     }).map(rule => `${rule.source}:${rule.person_id}`));
-    const candidates = page.messages.flatMap(e => ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e)
+    const candidates = page.messages.flatMap(e => dismissedMessageIds.has(e.messageId) || ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e)
+      .filter(() => !lowerPrioritySenders.has(`${e.source}:${e.personId}`) || survivesLowerPrioritySender(e))
       .filter(kind => !keys.has(`${e.messageId}:${kind}`))
       .map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind), rank: candidateRank(e, kind) - (lowerPrioritySenders.has(`${e.source}:${e.personId}`) ? 20 : 0) })))
       .sort((a, b) => b.rank - a.rank)
       .map(({ messageId, kind, plan }) => ({ messageId, kind, plan }));
     const candidateMessageIds = new Set(candidates.map(candidate => candidate.messageId));
     const notes = page.messages
-      .filter((e): e is Evidence => !candidateMessageIds.has(e.messageId) && !ignoredSenders.has(`${e.source}:${e.personId}`) && isNoteworthy(e))
+      .filter((e): e is Evidence => !dismissedMessageIds.has(e.messageId) && !candidateMessageIds.has(e.messageId) && !ignoredSenders.has(`${e.source}:${e.personId}`) && (!lowerPrioritySenders.has(`${e.source}:${e.personId}`) || survivesLowerPrioritySender(e)) && isNoteworthy(e))
       .sort((a, b) => b.priority - a.priority || b.sentAt.localeCompare(a.sentAt))
       .slice(0, 50)
       .map(e => ({ messageId: e.messageId, title: e.title, personName: e.personName, source: e.source, account: e.account, priority: e.priority, unread: e.unread, summary: e.analysis.summary || e.analysis.intent || e.body.slice(0, 280) }));

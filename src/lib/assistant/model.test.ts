@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { candidateRank, decisionCard, makePlan, mayTransition, propose, sendCapability, taskBucket, type Evidence, type Task } from "./model";
+import { candidateRank, decisionCard, isNoteworthy, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
@@ -7,6 +7,15 @@ const task = (): Task => ({ id: "t1", message_id: "m1", kind: "reply", status: "
 describe("action discovery", () => {
   it("proposes a reply only from analysis evidence", () => expect(propose(example)).toEqual(["reply"]));
   it.each(["Marketing", "Newsletter", "Spam", "Information Only", "Notification", "Receipt / Invoice"])("does not turn %s priority 10 into an action", classification => expect(propose({ ...example, classification, priority: 10 })).toEqual([]));
+  it("does not let a wrongly classified commercial newsletter enter the notification views", () => {
+    const campaign = { ...example, classification: "Legal", priority: 9.3, title: "🍿 Netflix member benefits", body: "Newsletter – unsubscribe whenever you like", analysis: { requiresReply: true } };
+    expect(propose(campaign)).toEqual([]);
+    expect(isNoteworthy(campaign)).toBe(false);
+  });
+  it("keeps an explicit legal or account-security obligation visible after sender deprioritization", () => {
+    expect(survivesLowerPrioritySender({ ...example, classification: "Legal", priority: 7 })).toBe(true);
+    expect(survivesLowerPrioritySender({ ...example, title: "Kampanj", body: "Nyhetsbrev och erbjudande", classification: "Business", priority: 9 })).toBe(false);
+  });
   it("does not infer tasks from unread/urgency alone", () => expect(propose({ ...example, analysis: {}, title: "URGENT" })).toEqual([]));
   it("holds a decision when attached media is still waiting for analysis", () => {
     const media = { ...example, attachmentCount: 1, mediaState: "pending" as const };

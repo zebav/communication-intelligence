@@ -87,7 +87,11 @@ export function decisionCard(plan: Plan, kind: TaskKind): DecisionCard {
 export const editSchema = z.object({ draft: z.string().trim().max(4000), recipientPersonId: z.string().uuid().nullable(), followUpAt: z.iso.datetime({ offset: true }).nullable() });
 
 const bulk = new Set(["Marketing", "Newsletter", "Spam", "Notification", "Information Only", "Receipt / Invoice"]);
-const promotional = /\b(nyhetsbrev|newsletter|unsubscribe|avregistrera|veckan på|kampanj|erbjudande|offer|rabatt|% off|meny denna vecka|boka bord)\b/i;
+// This gate deliberately considers the source text as well as a stored AI
+// classification. Historical classifications are not authoritative: a
+// commercial newsletter must not become urgent merely because an older model
+// called it Legal or Business.
+const promotional = /\b(nyhetsbrev|newsletter|unsubscribe|avregistrera|veckan på|kampanj|erbjudande|offer|rabatt|% off|meny denna vecka|boka bord|netflix|streaming|member benefits|medlemsförmån|shop now|handla nu|sale|rea)\b/i;
 export function isPromotional(e: Pick<Evidence, "title" | "body" | "classification">) {
   return bulk.has(e.classification) || promotional.test(`${e.title}\n${e.body}`);
 }
@@ -96,6 +100,18 @@ export function isNoteworthy(e: Pick<Evidence, "title" | "body" | "classificatio
   if (e.priority >= 6) return true;
   if (["Financial", "Legal", "Booking / Travel", "Customer", "Business"].includes(e.classification)) return true;
   return /\b(kivra|distrokid|testflight|apple developer|skatteverket|bankid|invoice|faktura|contract|avtal|verification|verifiera|account|konto|utbetalning|royalt|release)\b/i.test(`${e.title}\n${e.body}`);
+}
+
+/** A lower-priority sender may still surface a concrete legal, financial or
+ * account-security obligation. Everything else stays out of the decision
+ * queue; this keeps "prioritera avsändaren lägre" useful without hiding a
+ * genuinely consequential message. */
+export function survivesLowerPrioritySender(e: Pick<Evidence, "title" | "body" | "classification" | "priority" | "analysis">) {
+  if (isPromotional(e)) return false;
+  if (["Legal", "Financial"].includes(e.classification) && e.priority >= 6) return true;
+  const text = `${e.title}\n${e.body}`;
+  return /\b(kivra|bankid|skatteverket|tax|moms|invoice|faktura|contract|avtal|security|säkerhet|verification|verifiera|password|lösenord|utbetalning|royalt)\b/i.test(text)
+    && Boolean(e.analysis.requiresReply || e.analysis.actionSuggestion?.detected || e.analysis.forwardingSuggestion?.recommended);
 }
 export function propose(e: Evidence, now = Date.now()): TaskKind[] {
   // Neither unread status nor urgency words alone authorize a task.
