@@ -42,8 +42,9 @@ V1 har nu en serverstyrd arbetare för e-postbilagor från Google och Microsoft:
 - text, CSV och JSON får ett begränsat textutdrag;
 - JPEG, PNG och WebP analyseras med bildanalys;
 - vanliga ljudformat transkriberas;
-- PDF och Office-filer sparas privat men förblir spärrade tills deras dedikerade
-  dokumentextraktion finns på plats;
+- PDF- och Office-filer analyseras som privata filinmatningar med strikt
+  storleksgräns; större dokument förblir spärrade för en framtida styckad
+  dokumentpipeline;
 - Instagram- och WhatsApp-media ligger kvar i samma säkra kö, men deras
   providerhämtare är nästa steg och får inte markeras som analyserade före dess.
 
