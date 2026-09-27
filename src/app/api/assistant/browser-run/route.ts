@@ -6,6 +6,7 @@ import { changeTask, readTask } from "@/lib/assistant/repository";
 import { browserVariables } from "@/lib/assistant/browser-private-fields";
 import { browserActionRisk, browserAgentResultSchema, ensureBrowserbaseContext, exactBrowserTarget, getBrowserbaseAgent, startBrowserbaseAgent, terminalBrowserbaseRun } from "@/lib/assistant/browserbase-agent";
 import { checkBrowserRequest } from "@/lib/assistant/browser-network";
+import { browserTargetUrl } from "@/lib/assistant/browser-url";
 
 export const maxDuration = 60;
 
@@ -77,8 +78,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Webbuppgiften har ändrats. Granska den senaste versionen först." }, { status: 409 });
     }
     const action = task.plan.evidence.analysis.actionSuggestion;
-    if (!action?.detected || !action.targetUrl?.trim()) return NextResponse.json({ error: "Uppgiften saknar en verifierad webbåtgärd." }, { status: 409 });
-    const target = exactBrowserTarget(action.targetUrl);
+    const recoveredTargetUrl = browserTargetUrl(task.plan);
+    if (!action?.detected || !recoveredTargetUrl) return NextResponse.json({ error: "Webbuppgiften saknar en verifierad HTTPS-adress i originalmeddelandet." }, { status: 409 });
+    const target = exactBrowserTarget(recoveredTargetUrl);
     await checkBrowserRequest({ url: target.url, method: "GET", approvedUrls: [target.url] });
 
     const riskText = [action.task, action.reason, task.plan.evidence.title].filter(Boolean).join(" ");
@@ -173,7 +175,7 @@ export async function GET(request: NextRequest) {
           task = await changeTask(auth.db, auth.owner, task, "uncertain", task.plan, { ...task.result, browserRunId: run.runId, browserError: "invalid_result" });
         } else {
           const result = parsedResult.data;
-          const target = exactBrowserTarget(task.plan.evidence.analysis.actionSuggestion?.targetUrl ?? "");
+          const target = exactBrowserTarget(browserTargetUrl(task.plan));
           let finalHostMatches = false;
           try { finalHostMatches = new URL(result.finalUrl).hostname.toLowerCase() === target.host; } catch { finalHostMatches = false; }
           const missing = safeMissingInformation(result.missingInformation);

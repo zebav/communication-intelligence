@@ -12,6 +12,7 @@ import "./assistant-workspace.css";
 
 export type AssistantSnapshot = {
   tasks: Task[]; candidates: { messageId: string; kind: TaskKind; plan: Plan }[];
+  notes?: { messageId: string; title: string; personName: string; source: string; account: string; priority: number; unread?: boolean; summary: string }[];
   reviewMessages: { id: string; title: string; person: string }[];
   next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; emailWindowDays?: number; tasksLimited: boolean;
   feedback: { category: string }[]; timezone: string | null; executionEnabled: boolean;
@@ -72,7 +73,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
   snapshot: AssistantSnapshot; people: CommunicationPersonOption[]; selected: string; onSelect: (id: string) => void;
   act: Api; busy: boolean; onMore: () => void; onRefresh: () => Promise<void>;
 }) {
-  const [bucket, setBucket] = useState<"decision" | "ready" | "waiting" | "done">("decision"), [query, setQuery] = useState("");
+  const [bucket, setBucket] = useState<"decision" | "ready" | "waiting" | "done">("decision"), [mode, setMode] = useState<"handle" | "note">("handle"), [query, setQuery] = useState("");
   const [manualMessage, setManualMessage] = useState(""), [manualKind, setManualKind] = useState<TaskKind>("reply");
   const [hiddenCandidates, setHiddenCandidates] = useState<Set<string>>(() => new Set());
   const candidateKey = (messageId: string, kind: TaskKind) => `${messageId}:${kind}`;
@@ -81,7 +82,8 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
   const task = snapshot.tasks.find(t => t.id === selected);
   return <>
     {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: systemet kan förbereda förslag men skickar eller bokar inget härifrån utan ett separat godkännande.</p>}
-    <nav className="assistant-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
+    <nav className="assistant-tabs" aria-label="Notisvyer"><button className={`btn ${mode === "handle" ? "primary" : ""}`} aria-pressed={mode === "handle"} onClick={() => setMode("handle")}>Bör hanteras <span>{snapshot.candidates.length + snapshot.tasks.filter(t => ["decision", "ready"].includes(taskBucket(t))).length}</span></button><button className={`btn ${mode === "note" ? "primary" : ""}`} aria-pressed={mode === "note"} onClick={() => setMode("note")}>Bör noteras <span>{snapshot.notes?.length ?? 0}</span></button></nav>
+    {mode === "handle" && <><nav className="assistant-tabs assistant-status-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
     <label className="assistant-search">Sök person, ärende eller konto<input value={query} onChange={e => setQuery(e.target.value)} /></label>
     {snapshot.tasksLimited && <p role="status">De 500 senast uppdaterade uppdragen visas. Detta är inte hela historiken.</p>}
     <div className="assistant-layout"><section aria-label="Uppdrag" className="assistant-list">
@@ -105,7 +107,8 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska nästa 100 äldre meddelanden</button>}
       <details><summary>AI missade ett uppdrag</summary><label>Välj meddelande från hämtat underlag<select value={manualMessage} onChange={e => setManualMessage(e.target.value)}><option value="">Välj meddelande</option>{snapshot.reviewMessages.map(m => <option key={m.id} value={m.id}>{m.person} · {m.title}</option>)}</select></label><label>Vad behöver göras?<select value={manualKind} onChange={e => setManualKind(e.target.value as TaskKind)}>{kinds.map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label><button className="btn" disabled={busy || !manualMessage} onClick={() => act({ action: "start", messageId: manualMessage, kind: manualKind })}>Skapa för granskning</button></details>
     </section>
-    <div className="assistant-notice"><strong>Det systemet lär sig.</strong><p>Regler, svarston, irrelevanta avsändare och bekräftad kontaktkontext samlas under Settings → Learning & Memory. Här visar vi bara beslut som kräver dig nu.</p></div>
+    <div className="assistant-notice"><strong>Det systemet lär sig.</strong><p>Regler, svarston, irrelevanta avsändare och bekräftad kontaktkontext samlas under Settings → Learning & Memory. Här visar vi bara beslut som kräver dig nu.</p></div></>}
+    {mode === "note" && <section className="assistant-proposals" aria-label="Meddelanden att notera"><h2>Bör noteras</h2><p>Viktiga informationsmeddelanden som normalt inte kräver ett svar. De kan alltid öppnas i Inbox om du vill agera.</p><div className="assistant-proposal-grid">{(snapshot.notes ?? []).map(note => <article className="assistant-task assistant-proposal-card" key={note.messageId}><div className="assistant-proposal-person"><strong>{note.personName}</strong><span>{note.source} · {note.account}</span></div><small>Prioritet {note.priority.toFixed(1)}/10{note.unread ? " · Oläst" : ""}</small><h3>{note.title || "Meddelande"}</h3><p className="assistant-proposal-summary">{note.summary}</p></article>)}</div>{(snapshot.notes ?? []).length === 0 && <p className="empty-card">Inga viktiga informationsmeddelanden just nu.</p>}</section>}
   </>;
 }
 function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Task; people: CommunicationPersonOption[]; busy: boolean; act: Api; snapshot: AssistantSnapshot; onRefresh: () => Promise<void> }) {

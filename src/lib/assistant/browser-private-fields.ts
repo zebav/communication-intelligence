@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { Plan, Task } from "@/lib/assistant/model";
 import { listKnowledgeEntries, upsertKnowledgeEntry } from "@/lib/personal-knowledge";
+import { browserTargetUrl } from "./browser-url";
 
 export type BrowserFieldKind = "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other";
 export type BrowserFieldRequirement = {
@@ -20,7 +21,7 @@ function normalizedFieldKey(value: string) {
 }
 
 export function browserActionHost(plan: Plan) {
-  const raw = plan.evidence.analysis.actionSuggestion?.targetUrl?.trim() ?? "";
+  const raw = browserTargetUrl(plan);
   if (!raw) throw new Error("Webbuppgiften saknar en verifierad HTTPS-adress.");
   const url = new URL(raw);
   if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")) throw new Error("Webbuppgiften har en otillåten adress.");

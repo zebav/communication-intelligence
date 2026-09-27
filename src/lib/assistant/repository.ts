@@ -4,6 +4,7 @@ import { emailAnalysisSchema, getAIService } from "@/lib/ai/service";
 import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
 import { approvedLearningContext } from "@/lib/learning-feedback";
 import type { Evidence, Plan, Task, TaskStatus } from "./model";
+import { verifiedHttpsUrl } from "./browser-url";
 import type { Source } from "@/lib/domain";
 import { blocksDecisionUntilMediaReady, mediaDecisionState } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
@@ -32,6 +33,21 @@ function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").Emai
   if (parsed.success) return parsed.data;
 
   const commitment = object(raw.commitment), forwarding = object(raw.forwardingSuggestion), action = object(raw.actionSuggestion), relationship = object(raw.relationshipSuggestion);
+  const actionSuggestion = Object.keys(action).length ? {
+    detected: bool(action.detected) ?? false,
+    type: (["contact_lookup", "web_research", "website_task", "form_completion", "none"].includes(str(action.type)) ? str(action.type) : "none") as "contact_lookup" | "web_research" | "website_task" | "form_completion" | "none",
+    task: str(action.task), reason: str(action.reason), targetUrl: str(action.targetUrl),
+    requiresLogin: bool(action.requiresLogin) ?? false,
+    contactIds: Array.isArray(action.contactIds) ? action.contactIds.filter((id): id is string => typeof id === "string").slice(0, 3) : [],
+    requiredFields: Array.isArray(action.requiredFields) ? action.requiredFields.flatMap((value) => {
+      const field = object(value);
+      const kind = str(field.kind);
+      const sensitivity = str(field.sensitivity);
+      if (!str(field.key) || !str(field.label) || !["text","email","phone","date","username","password","account_number","one_time_code","other"].includes(kind) || !["personal","sensitive","restricted"].includes(sensitivity)) return [];
+      return [{ key: str(field.key), label: str(field.label), kind: kind as "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other", description: str(field.description), sensitivity: sensitivity as "personal" | "sensitive" | "restricted" }];
+    }).slice(0, 12) : [],
+    confidence: num(action.confidence) ?? 0,
+  } : undefined;
   return {
     summary: str(raw.summary) || undefined, intent: str(raw.intent) || undefined,
     priorityReason: str(raw.priorityReason) || undefined, requiresReply: bool(raw.requiresReply),
@@ -48,21 +64,7 @@ function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").Emai
       recipientRole: (["lawyer", "accountant", "advisor", "insurance_contact", "colleague", "business_partner", "other", "none"].includes(str(forwarding.recipientRole)) ? str(forwarding.recipientRole) : "none") as "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "business_partner" | "other" | "none",
       reason: str(forwarding.reason), introduction: str(forwarding.introduction),
     } : undefined,
-    actionSuggestion: Object.keys(action).length ? {
-      detected: bool(action.detected) ?? false,
-      type: (["contact_lookup", "web_research", "website_task", "form_completion", "none"].includes(str(action.type)) ? str(action.type) : "none") as "contact_lookup" | "web_research" | "website_task" | "form_completion" | "none",
-      task: str(action.task), reason: str(action.reason), targetUrl: str(action.targetUrl),
-      requiresLogin: bool(action.requiresLogin) ?? false,
-      contactIds: Array.isArray(action.contactIds) ? action.contactIds.filter((id): id is string => typeof id === "string").slice(0, 3) : [],
-      requiredFields: Array.isArray(action.requiredFields) ? action.requiredFields.flatMap((value) => {
-        const field = object(value);
-        const kind = str(field.kind);
-        const sensitivity = str(field.sensitivity);
-        if (!str(field.key) || !str(field.label) || !["text","email","phone","date","username","password","account_number","one_time_code","other"].includes(kind) || !["personal","sensitive","restricted"].includes(sensitivity)) return [];
-        return [{ key: str(field.key), label: str(field.label), kind: kind as "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other", description: str(field.description), sensitivity: sensitivity as "personal" | "sensitive" | "restricted" }];
-      }).slice(0, 12) : [],
-      confidence: num(action.confidence) ?? 0,
-    } : undefined,
+    actionSuggestion,
     relationshipSuggestion: Object.keys(relationship).length ? {
       type: str(relationship.type) as NonNullable<import("@/lib/ai/service").EmailAnalysis["relationshipSuggestion"]>["type"],
       confidence: num(relationship.confidence) ?? 0, reason: str(relationship.reason),
@@ -85,6 +87,8 @@ export function evidenceFromRow(value: unknown): Evidence {
     mediaSummaries: storedMediaSummaries(row.metadata),
     recipient: row.source === "email" ? str(identity.external_identifier) : str(c.external_conversation_id).split(":").at(-1) ?? "",
   };
+  const recoveredUrl = verifiedHttpsUrl(e.analysis.actionSuggestion?.targetUrl ?? "", e.body, e.title);
+  if (e.analysis.actionSuggestion?.detected && recoveredUrl) e.analysis.actionSuggestion.targetUrl = recoveredUrl;
   const versionEvidence = { ...e, analysis: { ...e.analysis, draftResponse: undefined, draftTone: undefined } };
   return { ...e, version: createHash("sha256").update(JSON.stringify(versionEvidence)).digest("hex") };
 }
@@ -95,22 +99,23 @@ export async function readEvidence(db: SupabaseClient, owner: string, id: string
 }
 export async function readCandidates(db: SupabaseClient, owner: string, before?: string) {
   // Email and messaging channels have independent pages. The 30-day window is
-  // intentional: older unanswered requests remain visible, but bounded reads
-  // keep loading the action inbox fast.
+  // intentional: older unanswered requests remain visible. Two hundred rows
+  // keeps relevant notices such as account, payout and app-release updates
+  // from being crowded out by a handful of recent messages.
   const offset = Math.max(0, Number(before) || 0);
   const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").order("created_at", { ascending: false }).order("id", { ascending: false });
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
   const [email, other] = await Promise.all([
     db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email")
       .gte("sent_at", thirtyDaysAgo).order("importance_score", { ascending: false, nullsFirst: false })
-      .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 99),
-    query().neq("source", "email").gte("sent_at", thirtyDaysAgo).range(offset, offset + 99),
+      .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 199),
+    query().neq("source", "email").gte("sent_at", thirtyDaysAgo).range(offset, offset + 199),
   ]);
   if (email.error || other.error) throw new Error("Underlaget kunde inte hämtas. Försök igen; befintliga uppdrag finns kvar.");
   const rows = [...(email.data ?? []), ...(other.data ?? [])].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   return {
     messages: rows.map(evidenceFromRow),
-    next: email.data?.length === 100 || other.data?.length === 100 ? String(offset + 100) : null,
+    next: email.data?.length === 200 || other.data?.length === 200 ? String(offset + 200) : null,
     scannedBySource: { email: email.data?.length ?? 0, messaging: other.data?.length ?? 0 },
     emailWindowDays: 30,
   };

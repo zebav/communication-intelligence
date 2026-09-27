@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { EmailAnalysis } from "@/lib/ai/service";
 import type { Source } from "@/lib/domain";
 import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState, type MediaDecisionState } from "@/lib/media/decision-gate";
+import { verifiedHttpsUrl } from "./browser-url";
 
 export const kinds = ["reply", "forward", "meeting", "follow_up", "website"] as const;
 export const statuses = ["decision", "ready", "executing", "waiting", "done", "dismissed", "uncertain"] as const;
@@ -81,18 +82,28 @@ export function decisionCard(plan: Plan, kind: TaskKind): DecisionCard {
       ? `Det färdiga svaret med de kontrollerade mötesalternativen skickas en gång till ${plan.recipientName || e.personName}. Ingen tid bokas i kalendern innan motparten har bekräftat ett alternativ.`
       : "Förbered uppdraget först så att kalender, plats och eventuella reseförutsättningar kan kontrolleras innan du tar beslut.")
     : "När du godkänner kör Browserbase den sparade webbuppgiften. Saknade privata uppgifter efterfrågas först och kan sparas krypterat. Betalningar, juridiska signeringar, säkerhetsändringar och destruktiva kontoåtgärder blockeras.";
-  return { summary, whyImportant, proposedAction, approvalOutcome, targetUrl: action?.targetUrl?.trim() || "" };
+  return { summary, whyImportant, proposedAction, approvalOutcome, targetUrl: verifiedHttpsUrl(action?.targetUrl?.trim() || "", e.body, e.title) };
 }
 export const editSchema = z.object({ draft: z.string().trim().max(4000), recipientPersonId: z.string().uuid().nullable(), followUpAt: z.iso.datetime({ offset: true }).nullable() });
 
 const bulk = new Set(["Marketing", "Newsletter", "Spam", "Notification", "Information Only", "Receipt / Invoice"]);
+const promotional = /\b(nyhetsbrev|newsletter|unsubscribe|avregistrera|veckan på|kampanj|erbjudande|offer|rabatt|% off|meny denna vecka|boka bord)\b/i;
+export function isPromotional(e: Pick<Evidence, "title" | "body" | "classification">) {
+  return bulk.has(e.classification) || promotional.test(`${e.title}\n${e.body}`);
+}
+export function isNoteworthy(e: Pick<Evidence, "title" | "body" | "classification" | "priority" | "unread">) {
+  if (isPromotional(e)) return false;
+  if (e.priority >= 6) return true;
+  if (["Financial", "Legal", "Booking / Travel", "Customer", "Business"].includes(e.classification)) return true;
+  return /\b(kivra|distrokid|testflight|apple developer|skatteverket|bankid|invoice|faktura|contract|avtal|verification|verifiera|account|konto|utbetalning|royalt|release)\b/i.test(`${e.title}\n${e.body}`);
+}
 export function propose(e: Evidence, now = Date.now()): TaskKind[] {
   // Neither unread status nor urgency words alone authorize a task.
   if (e.direction === "out") return [];
   if (blocksDecisionUntilMediaReady({ media_analysis_status: e.mediaState }, e.attachmentCount)) return [];
   if (e.lastUserAt && Date.parse(e.lastUserAt) >= Date.parse(e.sentAt)) return [];
   if (e.lastOtherAt && Date.parse(e.lastOtherAt) > Date.parse(e.sentAt)) return [];
-  if (bulk.has(e.classification)) return [];
+  if (isPromotional(e)) return [];
   const a = e.analysis;
   const context = `${a.intent ?? ""} ${a.summary ?? ""} ${e.title} ${e.body}`;
   if (a.forwardingSuggestion?.recommended) return ["forward"];
