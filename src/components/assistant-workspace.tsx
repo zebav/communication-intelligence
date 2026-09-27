@@ -63,7 +63,7 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
       setError(e instanceof Error ? e.message : "Åtgärden misslyckades.");
     } finally { setBusy(false); }
   };
-  return <div className="page assistant-workspace"><header className="assistant-header"><div><p className="eyebrow">Beslut och utförande</p><h1>Handlingsinkorg</h1><p>Välj bara vad du vill hantera. Du får sedan ett tydligt förslag att godkänna.</p></div><button className="btn" disabled={busy} onClick={() => { setError(""); void refresh().catch(e => setError(e.message)); }}>Uppdatera</button></header>
+  return <div className="page assistant-workspace"><header className="assistant-header"><div><p className="eyebrow">Dina beslut</p><h1>Notiscenter</h1><p>Här visas bara sådant som behöver ditt beslut. Godkänn, neka eller be systemet förbereda nästa steg.</p></div><button className="btn" disabled={busy} onClick={() => { setError(""); void refresh().catch(e => setError(e.message)); }}>Uppdatera</button></header>
     {error && <p role="alert" className="assistant-alert">{error}</p>}
     {!snapshot ? <p role="status">{error ? "Senast sparade uppdrag visas när anslutningen är återställd." : "Hämtar uppdrag…"}</p> : <AssistantBoard snapshot={snapshot} people={people} selected={selected} onSelect={setSelected} act={act} busy={busy} onMore={() => setCursor(snapshot.next ?? "0")} onRefresh={refresh} />}
   </div>;
@@ -80,7 +80,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
   const visible = snapshot.tasks.filter(t => taskBucket(t) === bucket && `${t.plan.evidence.personName} ${t.plan.evidence.title} ${t.plan.evidence.account}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const task = snapshot.tasks.find(t => t.id === selected);
   return <>
-    {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: nya direktutskick från handlingsinkorgen är avstängda. Kalenderflödet har sina egna separata godkännanden.</p>}
+    {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: systemet kan förbereda förslag men skickar eller bokar inget härifrån utan ett separat godkännande.</p>}
     <nav className="assistant-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
     <label className="assistant-search">Sök person, ärende eller konto<input value={query} onChange={e => setQuery(e.target.value)} /></label>
     {snapshot.tasksLimited && <p role="status">De 500 senast uppdaterade uppdragen visas. Detta är inte hela historiken.</p>}
@@ -88,7 +88,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {visible.length === 0 && <p className="empty-card">Inga sparade uppdrag i denna vy. Granska förslagen nedan eller lägg till ett missat uppdrag.</p>}
       {visible.map(t => <button key={t.id} className={`assistant-task ${t.id === selected ? "selected" : ""}`} onClick={() => onSelect(t.id)}><span>{kindLabels[t.kind]} · {statusLabels[t.status]}</span><strong>{t.plan.evidence.title || "Konversation"}</strong><span>{t.plan.evidence.personName}</span><small>{t.plan.evidence.source} · {t.plan.evidence.account} · Prioritet {t.plan.evidence.priority.toFixed(1)}/10{t.plan.evidence.unread ? " · Oläst" : ""}</small>{t.plan.evidence.mediaState && t.plan.evidence.mediaState !== "not_applicable" && <small>{mediaDecisionLabel(t.plan.evidence.mediaState)}</small>}{t.plan.followUpAt && <small>Följ upp {new Date(t.plan.followUpAt).toLocaleString("sv-SE")}</small>}</button>)}
     </section><section className="assistant-detail" aria-label="Granska uppdrag">{task ? <TaskDetail key={`${task.id}:${task.revision}`} task={task} people={people} busy={busy} act={act} snapshot={snapshot} onRefresh={onRefresh} /> : <div className="empty-card"><h2>Välj ett uppdrag</h2><p>Här visas original, föreslagna steg, mottagare och ditt redigerbara svar.</p></div>}</section></div>
-    <section className="assistant-proposals"><h2>Nya beslut från konversationer</h2><p>Senaste hämtningen granskade {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post från de senaste ${snapshot.emailWindowDays ?? 7} dagarna och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden föreslås inte. Förslagen är inte godkännanden.</p>
+    <section className="assistant-proposals"><h2>Nya notiser</h2><p>Systemet har granskat {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post från de senaste ${snapshot.emailWindowDays ?? 7} dagarna och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden hålls utanför.</p>
       <div className="assistant-proposal-grid">{visibleCandidates.map(candidate => {
         const card = decisionCard(candidate.plan, candidate.kind);
         const evidence = candidate.plan.evidence;
@@ -105,7 +105,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska nästa 100 äldre meddelanden</button>}
       <details><summary>AI missade ett uppdrag</summary><label>Välj meddelande från hämtat underlag<select value={manualMessage} onChange={e => setManualMessage(e.target.value)}><option value="">Välj meddelande</option>{snapshot.reviewMessages.map(m => <option key={m.id} value={m.id}>{m.person} · {m.title}</option>)}</select></label><label>Vad behöver göras?<select value={manualKind} onChange={e => setManualKind(e.target.value as TaskKind)}>{kinds.map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label><button className="btn" disabled={busy || !manualMessage} onClick={() => act({ action: "start", messageId: manualMessage, kind: manualKind })}>Skapa för granskning</button></details>
     </section>
-    <div className="assistant-notice"><strong>Lärande är separerat från besluten.</strong><p>Regler, svarston, irrelevanta avsändare och bekräftad kontaktkontext granskas under Settings → Learning & Memory. Handlingsinkorgen visar bara det du behöver besluta om nu.</p></div>
+    <div className="assistant-notice"><strong>Det systemet lär sig.</strong><p>Regler, svarston, irrelevanta avsändare och bekräftad kontaktkontext samlas under Settings → Learning & Memory. Här visar vi bara beslut som kräver dig nu.</p></div>
   </>;
 }
 function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Task; people: CommunicationPersonOption[]; busy: boolean; act: Api; snapshot: AssistantSnapshot; onRefresh: () => Promise<void> }) {

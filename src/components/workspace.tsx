@@ -40,7 +40,7 @@ const navigation: { id: View; label: string; icon: typeof Inbox; count?: number 
   { id: "today", label: "Overview", icon: LayoutDashboard },
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "calendar", label: "Kalender", icon: Clock3 },
-  { id: "assistant", label: "Handlingsinkorg", icon: CheckCircle2 },
+  { id: "assistant", label: "Notiscenter", icon: Bell },
   { id: "cases", label: "Analyze a conversation", icon: MessageCircle }, { id: "people", label: "Contacts", icon: Users }, { id: "followups", label: "Follow-ups", icon: Clock3 }, { id: "cleanup", label: "Clean Up", icon: Archive }, { id: "settings", label: "Settings", icon: Settings },
 ];
 const sources: { label: string; source: Source }[] = [
