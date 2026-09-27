@@ -11,7 +11,8 @@ media.
 
 Meddelanden med bilagor använder `media_analysis_status`:
 
-- `pending` och `processing` blockerar förslag och externa svar.
+- `pending`, `processing`, `failed` och `blocked` blockerar förslag och externa
+  svar. Ett misslyckande öppnar alltså aldrig för ett gissat svar.
 - `ready` tillåter ett beslut när den strukturerade analysen finns sparad.
 - `failed` och `blocked` får aldrig beskrivas som analyserade; de kräver
   manuell granskning eller nytt försök.
@@ -21,7 +22,7 @@ Instagram- och WhatsApp-webhooks skapar en idempotent post i
 providerlösenord. Kön innehåller endast den kontext som en serverstyrd,
 provider-specifik arbetare behöver för att hämta media på ett senare steg.
 
-## Mediaarbetare – nästa implementation
+## Mediaarbetare
 
 Varje provider implementerar samma säkra kontrakt:
 
@@ -35,6 +36,21 @@ Varje provider implementerar samma säkra kontrakt:
    källkopplad sammanfattning.
 7. Markera meddelandet `ready` först när analysen är genomförd. Därefter kan
    den vanliga intelligensmotorn skapa ett svarsförslag.
+
+V1 har nu en serverstyrd arbetare för e-postbilagor från Google och Microsoft:
+
+- text, CSV och JSON får ett begränsat textutdrag;
+- JPEG, PNG och WebP analyseras med bildanalys;
+- vanliga ljudformat transkriberas;
+- PDF och Office-filer sparas privat men förblir spärrade tills deras dedikerade
+  dokumentextraktion finns på plats;
+- Instagram- och WhatsApp-media ligger kvar i samma säkra kö, men deras
+  providerhämtare är nästa steg och får inte markeras som analyserade före dess.
+
+Arbetaren är medvetet inte schemalagd med ett tredje Vercel-jobb ännu. Projektet
+har redan två schemalagda jobb och Vercel-planens gräns måste bekräftas innan vi
+lägger till fler. Routen `/api/cron/media-analysis` är därför endast skyddad för
+serveranrop tills vi väljer ett samlat schema.
 
 Råmedia, passuppgifter, signaturer och andra känsliga värden får inte läggas i
 AI-promptar som standard. Endast minsta relevanta, strukturerade utdrag ska

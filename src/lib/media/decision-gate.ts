@@ -13,7 +13,10 @@ export function mediaDecisionState(metadata: unknown, attachmentCount = 0): Medi
 
 export function blocksDecisionUntilMediaReady(metadata: unknown, attachmentCount = 0) {
   const state = mediaDecisionState(metadata, attachmentCount);
-  return state === "pending" || state === "processing";
+  // A reply can only rely on a media-bearing message after every required
+  // analysis step completed. Failed and blocked are deliberately fail-closed:
+  // they require a retry or explicit owner review, never a guessed response.
+  return state === "pending" || state === "processing" || state === "failed" || state === "blocked";
 }
 
 export function mediaDecisionLabel(state: MediaDecisionState) {

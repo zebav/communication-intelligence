@@ -13,6 +13,11 @@ describe("action discovery", () => {
     expect(propose(media)).toEqual([]);
     expect(sendCapability({ ...task().plan, evidence: media }, "reply")).toContain("spärrat tills analysen är klar");
   });
+  it.each(["blocked", "failed"] as const)("fails closed when attached media is %s", (mediaState) => {
+    const media = { ...example, attachmentCount: 1, mediaState };
+    expect(propose(media)).toEqual([]);
+    expect(sendCapability({ ...task().plan, evidence: media }, "reply")).toContain("spärrat tills analysen är klar");
+  });
   it("ranks an unread actionable request higher without making unread mail actionable", () => {
     expect(candidateRank({ ...example, unread: true }, "reply")).toBeGreaterThan(candidateRank({ ...example, unread: false }, "reply"));
     expect(propose({ ...example, unread: true, analysis: {}, title: "URGENT" })).toEqual([]);

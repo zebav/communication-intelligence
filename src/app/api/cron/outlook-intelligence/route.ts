@@ -5,12 +5,13 @@ import { isAuthorizedCron } from "@/lib/cron-auth";
 import { getAIService } from "@/lib/ai/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
+import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type AdminClient = ReturnType<typeof createAdminClient>;
-type Candidate = { id: string; owner_id: string; conversation_id: string; body_text: string | null; classification: string | null; metadata: unknown };
+type Candidate = { id: string; owner_id: string; conversation_id: string; body_text: string | null; classification: string | null; metadata: unknown; attachment_count: number | null };
 
 function metadataObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -77,8 +78,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const { data: pending } = await supabase.from("messages").select("id,owner_id,conversation_id,body_text,classification,metadata").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false }).limit(50);
-  const candidates = (pending ?? []).filter((message) => isRelevantEmail(message.classification ?? "") && !metadataObject(message.metadata).ai_analysis).slice(0, 3) as Candidate[];
+  const { data: pending } = await supabase.from("messages").select("id,owner_id,conversation_id,body_text,classification,metadata,attachment_count").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false }).limit(50);
+  const candidates = (pending ?? []).filter((message) => isRelevantEmail(message.classification ?? "") && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
   const analyzed = (await Promise.allSettled(candidates.map((message) => analyzeCandidate(supabase, message)))).filter((result) => result.status === "fulfilled" && result.value).length;
   return NextResponse.json({ ok: true, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3 });
 }

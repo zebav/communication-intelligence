@@ -12,6 +12,7 @@ import { approvedLearningContext, saveLearningSuggestion, toneRule } from "@/lib
 import { relationshipTypes } from "@/lib/relationship-types";
 import { enforceProfessionalRouting } from "@/lib/action-routing";
 import { bestSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
+import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState } from "@/lib/media/decision-gate";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -142,8 +143,11 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
   const { data: conversation, error: conversationError } = await supabase.from("conversations").select("id,title,person_id").eq("id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle();
-  const { data: message, error: messageError } = await supabase.from("messages").select("id,body_text,classification,metadata").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle();
+  const { data: message, error: messageError } = await supabase.from("messages").select("id,body_text,classification,metadata,attachment_count").eq("id", parsed.data.messageId).eq("conversation_id", parsed.data.conversationId).eq("owner_id", user.id).eq("source", "email").maybeSingle();
   if (conversationError || messageError || !conversation || !message) return { error: "The selected email could not be loaded." };
+  if (blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))) {
+    return { error: `${mediaDecisionLabel(mediaDecisionState(message.metadata, Number(message.attachment_count ?? 0)))}. Analysera eller granska bilagan innan ett svar skapas.` };
+  }
   let senderName = "Unknown sender";
   let relationshipContext = "unknown";
   let personProfile: { display_name: string | null; relationship_type: string | null; organization: string | null; entity_type: string | null; professional_specialty: string | null; jurisdiction: string | null; relationship_summary: string | null } | null = null;
