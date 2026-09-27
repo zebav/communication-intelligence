@@ -30,7 +30,7 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
     if (!r.ok) throw new Error(data.error || "Uppdragen kunde inte hämtas.");
     return data as AssistantSnapshot;
   }, [cursor]);
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Handlingsinkorgen tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [load]);
+  useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Notiscentret tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [load]);
   const refresh = async () => { setSnapshot(await load()); };
   const act: Api = async body => {
     setBusy(true); setError("");
