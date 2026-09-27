@@ -48,7 +48,7 @@ export function MfaGate() {
 
       const { data: enrollment, error: enrollError } = await supabase.auth.mfa.enroll({
         factorType: "totp",
-        friendlyName: "Smart Assistent",
+        friendlyName: "Solvani",
       });
       if (!active) return;
       if (enrollError || !enrollment.totp) {

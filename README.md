@@ -1,4 +1,4 @@
-# Communication Intelligence
+# Solvani
 
 The People workspace is backed by real synchronized contacts. It provides search, verified identities, owner-approved memories, open loops, editable relationship context, and a cross-channel-ready conversation timeline without exposing mock contacts.
 

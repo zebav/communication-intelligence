@@ -1,4 +1,4 @@
-# Communication Intelligence iOS
+# Solvani for iOS
 
 Native iPhone client for the existing private workspace. It uses the existing authenticated `/api/assistant` endpoint; data and service keys are never copied to the app.
 

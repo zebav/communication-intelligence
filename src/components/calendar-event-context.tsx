@@ -29,7 +29,7 @@ export function CalendarEventContext({sourceId,eventId}:{sourceId:string;eventId
   }catch(e){setError(e instanceof Error?e.message:"Uppgifterna kunde inte sparas.");}finally{setBusy(false);}
  };
  return <details className="calendar-panel"><summary>Kontakter och plats för bokningen</summary>
-  <p>Interna kopplingar i Communication Intelligence. Att lägga till en kontakt skickar ingen inbjudan.</p>
+  <p>Interna kopplingar i Solvani. Att lägga till en kontakt skickar ingen inbjudan.</p>
   {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
   <fieldset disabled={!ready||busy}><legend>Kopplade kontakter</legend>
    {people.map(p=><div className="calendar-actions" key={p.id}><Link href={`/contacts/${p.id}`}>{p.display_name}</Link><span>{p.organization}</span><button className="btn" onClick={()=>setPeople(people.filter(x=>x.id!==p.id))}>Ta bort koppling</button></div>)}

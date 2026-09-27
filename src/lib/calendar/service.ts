@@ -86,11 +86,11 @@ export async function createMaster(db:SupabaseClient,owner:string,accountId:stri
   const {data:claim,error}=await db.from("calendar_workspace").update({provisioning:"creating",timezone}).eq("owner_id",owner).eq("provisioning","idle").select("owner_id").maybeSingle();
   if(error||!claim) throw new Error("Masterkalendern finns redan eller ett tidigare försök behöver kontrolleras.");
   try {
-    const response=await fetch("https://www.googleapis.com/calendar/v3/calendars",{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({summary:"Communication Intelligence – Master",timeZone:timezone}),signal:AbortSignal.timeout(15000)});
+    const response=await fetch("https://www.googleapis.com/calendar/v3/calendars",{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({summary:"Solvani – Master",timeZone:timezone}),signal:AbortSignal.timeout(15000)});
     if(!response.ok) throw new Error("Google kunde inte skapa masterkalendern.");
     const calendar=await response.json();
     if(!calendar.id) throw new Error("Google returnerade inget kalender-id.");
-    const {error:save}=await db.from("calendar_sources").insert({owner_id:owner,account_id:accountId,external_id:calendar.id,name:"Communication Intelligence – Master",timezone,is_master:true});
+    const {error:save}=await db.from("calendar_sources").insert({owner_id:owner,account_id:accountId,external_id:calendar.id,name:"Solvani – Master",timezone,is_master:true});
     if(save) throw new Error("Kalendern skapades hos Google men kunde inte registreras. Skapa inte en till.");
     const {error:ready}=await db.from("calendar_workspace").update({provisioning:"ready"}).eq("owner_id",owner);
     if(ready) throw new Error("Masterkalenderns status kunde inte sparas.");
