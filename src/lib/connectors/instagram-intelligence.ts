@@ -4,6 +4,7 @@ import { getAIService } from "@/lib/ai/service";
 import { relationshipTypes } from "@/lib/relationship-types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
+import { mediaContextForMessage } from "@/lib/media/context";
 
 export async function analyzeIncomingInstagramMessage(input: { ownerId: string; conversationId: string; messageId: string }) {
   const database = createAdminClient();
@@ -24,7 +25,8 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const personaContext = resolveCommunicationProfile(universalProfile, { source: "instagram", personId: conversation.person_id, situation: person?.relationship_type === "dating" ? "romantic" : "personal" });
   const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
-  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source: "instagram", senderName: person?.display_name ?? "Instagram contact", subject: conversation.title ?? "Instagram conversation", preview: message.body_text ?? "", currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || "new Instagram contact", personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages });
+  const analyzedMedia = await mediaContextForMessage(database, input.ownerId, message.id);
+  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source: "instagram", senderName: person?.display_name ?? "Instagram contact", subject: conversation.title ?? "Instagram conversation", preview: message.body_text ?? "", currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || "new Instagram contact", personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
   const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
   const now = new Date().toISOString();
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, relationshipSuggestion: analysis.relationshipSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };
