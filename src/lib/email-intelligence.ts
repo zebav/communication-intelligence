@@ -37,11 +37,13 @@ export function emailDashboardSummary(emails: SyncedEmailConversation[]) {
 }
 
 export function emailDashboardExcerpt(email: SyncedEmailConversation, maxLength = 220) {
-  if (email.analysis?.summary.trim()) return email.analysis.summary.trim();
-  const cleaned = email.preview
+  const source = email.analysis?.summary.trim() || email.preview || email.title;
+  const cleaned = source
+    .replace(/[\u00ad\u034f\u200b-\u200f\u2060\ufeff]+/g, "")
     .replace(/<https?:\/\/[^>]+>/gi, "")
     .replace(/\[https?:\/\/[^\]]+\]/gi, "")
     .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\(\s*\)/g, "")
     .replace(/\s+/g, " ")
     .trim();
   if (cleaned.length <= maxLength) return cleaned;
