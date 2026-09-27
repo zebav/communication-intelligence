@@ -6,11 +6,20 @@ import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-inte
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
-import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
-import { downloadEphemeralInstagramMedia, ephemeralInstagramMediaUrls } from "@/lib/connectors/instagram-media";
-import { ingestTrustedMediaAttachments, type MediaJob } from "@/lib/media/email-worker";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 export const maxDuration = 60;
+
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
+}
 
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("hub.mode");
@@ -30,8 +39,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 401 });
   }
   const events = parseInstagramWebhook(rawBody);
-  const transientMediaUrls = ephemeralInstagramMediaUrls(rawBody);
   if (!events.length) return NextResponse.json({ received: true, imported: 0 });
+  let rawPayload: { entry?: Array<{ id?: string; messaging?: Array<{ message?: { mid?: string; attachments?: Array<{ type?: string; payload?: { url?: string } }> } }> }> } = {};
+  try { rawPayload = JSON.parse(rawBody) as typeof rawPayload; } catch {}
+  const mediaByMessage = new Map<string, Array<{ type?: string; url: string }>>();
+  for (const entry of rawPayload.entry ?? []) for (const messaging of entry.messaging ?? []) {
+    const mid = messaging.message?.mid;
+    if (!mid) continue;
+    const refs = (messaging.message?.attachments ?? []).flatMap((attachment) =>
+      typeof attachment.payload?.url === "string" && attachment.payload.url.startsWith("https://") ? [{ type: attachment.type, url: attachment.payload.url }] : []
+    ).slice(0, 10);
+    if (refs.length) mediaByMessage.set(mid, refs);
+  }
 
   const database = createAdminClient();
   const { data: connections, error: connectionError } = await database.from("connections").select("id,owner_id,account_name,account_identifier,token_metadata,encrypted_credentials").eq("provider", instagramConnector.id).eq("status", "connected");
@@ -48,7 +67,6 @@ export async function POST(request: NextRequest) {
   let imported = 0;
   let failed = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
-  const mediaImports: Array<{ job: MediaJob; urls: string[]; fallback: string }> = [];
 
   for (const event of events) {
     try {
@@ -124,37 +142,35 @@ export async function POST(request: NextRequest) {
         attachment_count: event.message.attachmentCount,
         metadata: { ...event.message.providerMetadata, connection_id: connection.id },
         processed_at: null,
-      }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id,metadata").maybeSingle();
+      }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
       if (messageError) throw messageError;
       if (savedMessage) {
         imported += 1;
         if (event.message.attachmentCount > 0) {
-          const urls = transientMediaUrls.get(event.message.externalId) ?? [];
-          if (urls.length) {
-            mediaImports.push({
-              job: { id: savedMessage.id, owner_id: connection.owner_id, connection_id: connection.id, provider: instagramConnector.id, provider_message_id: event.message.externalId, source_message_id: savedMessage.id, source_conversation_id: conversationResult.data.id, source_person_id: resolved.personId, attempts: 0 },
-              urls,
-              fallback: `instagram-${event.message.externalId}`,
-            });
-          } else try {
-            await enqueueMediaAnalysis(database, {
-              ownerId: connection.owner_id,
-              connectionId: connection.id,
-              provider: instagramConnector.id,
+          const refs = mediaByMessage.get(event.message.externalId) ?? [];
+          if (refs.length) {
+            const { error: mediaRefError } = await database.from("vault_media_references").upsert(refs.map((ref) => ({
+              owner_id: connection.owner_id,
+              connection_id: connection.id,
               source: "instagram",
-              providerMessageId: event.message.externalId,
-              messageId: savedMessage.id,
-              conversationId: conversationResult.data.id,
-              personId: resolved.personId,
-              messageText: event.message.body,
-              attachmentCount: event.message.attachmentCount,
-              mediaTypes: Array.isArray(event.message.providerMetadata.attachment_types)
-                ? event.message.providerMetadata.attachment_types.filter((type): type is string => typeof type === "string")
-                : [],
-            });
-          } catch (mediaError) {
-            console.error("Instagram media queue failed", { messageId: savedMessage.id, reason: mediaError instanceof Error ? mediaError.message : "unknown" });
+              provider: instagramConnector.id,
+              provider_message_id: event.message.externalId,
+              media_type: ref.type ?? null,
+              media_reference: ref.url,
+            })), { onConflict: "owner_id,source,provider,provider_message_id,media_reference", ignoreDuplicates: true });
+            if (mediaRefError) throw mediaRefError;
           }
+          await queueVaultIngestion(database, {
+            ownerId: connection.owner_id,
+            connectionId: connection.id,
+            provider: instagramConnector.id,
+            sourceType: "instagram",
+            providerMessageId: event.message.externalId,
+            sourceMessageId: savedMessage.id,
+            sourceConversationId: conversationResult.data.id,
+            sourcePersonId: resolved.personId,
+            messageText: event.message.body,
+          });
         }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
       }
@@ -169,18 +185,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (mediaImports.length || analyses.length) after(async () => {
-    await Promise.allSettled(mediaImports.map(async (item) => {
-      try {
-        const attachments = await downloadEphemeralInstagramMedia(item.urls, item.fallback);
-        await ingestTrustedMediaAttachments(database, item.job, attachments);
-      } catch (error) {
-        const { data: current } = await database.from("messages").select("metadata").eq("id", item.job.source_message_id!).eq("owner_id", item.job.owner_id).maybeSingle();
-        const metadata = current?.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata : {};
-        await database.from("messages").update({ metadata: { ...metadata, media_analysis_status: "failed", media_analysis: { reason: error instanceof Error ? error.message : "instagram_media_worker_failed" } } }).eq("id", item.job.source_message_id!).eq("owner_id", item.job.owner_id);
-      }
-    }));
-    await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item)));
-  });
+  if (analyses.length) after(async () => { await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item))); });
+  const owners = [...new Set((connections ?? []).map((connection) => connection.owner_id))];
+  if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
   return NextResponse.json({ received: true, imported, failed });
 }

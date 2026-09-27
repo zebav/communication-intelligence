@@ -34,7 +34,17 @@ export function extractGmailBody(payload?: GmailPayload, snippet?: string) {
   return body(payload) || snippet?.trim() || "";
 }
 
-/** Counts only Gmail parts represented by an official provider attachment id. */
+
+export function gmailHasAttachments(payload?: GmailPayload): boolean {
+  if (!payload) return false;
+  if (payload.filename?.trim() && (payload.body?.attachmentId || payload.body?.data)) return true;
+  return (payload.parts ?? []).some(gmailHasAttachments);
+}
+
+/**
+ * Counts provider-backed Gmail attachments. Kept alongside gmailHasAttachments
+ * for callers that need an accurate stored attachment count.
+ */
 export function gmailAttachmentCount(payload?: GmailPayload): number {
   if (!payload) return 0;
   const own = payload.body?.attachmentId ? 1 : 0;

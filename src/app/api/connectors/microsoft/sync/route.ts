@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
@@ -11,7 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
 import { responseTimeMinutes } from "@/lib/outcomes";
-import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
+import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 import { z } from "zod";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
@@ -67,6 +67,17 @@ async function getAccessToken(credentials: StoredCredentials, origin: string) {
     expiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
   };
   return { accessToken: tokens.access_token, credentials: next, refreshed: true };
+}
+
+async function triggerVaultProcessing(ownerId: string) {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!base || !secret) return;
+  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
+    signal: AbortSignal.timeout(100_000),
+  }).catch(() => undefined);
 }
 
 export async function POST(request: NextRequest) {
@@ -162,7 +173,7 @@ export async function POST(request: NextRequest) {
       }
 
       const content = extractMicrosoftMessageText(message);
-      const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "in", senderIdentifier: address, senderName: displayName, subject: message.subject, body: content.text, sentAt: message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated, media_analysis_status: message.hasAttachments ? "pending" : "not_applicable" } });
+      const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "in", senderIdentifier: address, senderName: displayName, subject: message.subject, body: content.text, sentAt: message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated } });
       const classification = classifyEmail({ subject: message.subject, preview: content.text, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
       const basePriority = emailPriority(classification, message.importance);
       const { data: history } = await supabase.from("conversations").select("id,last_user_message_at").eq("owner_id", userId).eq("person_id", personId).limit(100);
@@ -201,22 +212,24 @@ export async function POST(request: NextRequest) {
         processed_at: new Date().toISOString(),
       }, { onConflict: "owner_id,source,external_message_id" }).select("id").single();
       if (messageError) throw new Error("message_save_failed");
-      if (savedIncoming?.id && normalized.attachmentCount > 0) {
-        try {
-          await enqueueMediaAnalysis(supabase, {
-            ownerId: userId, connectionId: connection.id, provider: microsoftGraphConnector.id, source: "email",
-            providerMessageId: normalized.externalId, messageId: savedIncoming.id, conversationId: conversationResult.data.id,
-            personId, messageText: normalized.body, attachmentCount: normalized.attachmentCount, mediaTypes: ["email_attachment"],
-          });
-        } catch (mediaError) {
-          console.error("Outlook media queue failed", { messageId: savedIncoming.id, reason: mediaError instanceof Error ? mediaError.message : "unknown" });
-        }
-      }
       const { data: waitingOutcome } = await supabase.from("communication_outcomes").select("id,trigger_message_id").eq("owner_id", userId).eq("conversation_id", conversationResult.data.id).eq("status", "waiting").order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (waitingOutcome && savedIncoming?.id) {
         const { data: trigger } = await supabase.from("messages").select("sent_at").eq("id", waitingOutcome.trigger_message_id).eq("owner_id", userId).maybeSingle();
         const responseMinutes = trigger?.sent_at ? responseTimeMinutes(trigger.sent_at, sentAt) : null;
         if (responseMinutes != null) await supabase.from("communication_outcomes").update({ response_message_id: savedIncoming.id, status: "reply_received", response_time_minutes: responseMinutes, evidence: { provider: microsoftGraphConnector.id, detection: "later_incoming_message" }, updated_at: new Date().toISOString() }).eq("id", waitingOutcome.id).eq("owner_id", userId);
+      }
+      if (message.hasAttachments && savedIncoming?.id) {
+        await queueVaultIngestion(supabase, {
+          ownerId:userId,
+          connectionId:connection.id,
+          provider:microsoftGraphConnector.id,
+          sourceType:"email",
+          providerMessageId:message.id,
+          sourceMessageId:savedIncoming.id,
+          sourceConversationId:conversationResult.data.id,
+          sourcePersonId:personId,
+          messageText:content.text,
+        });
       }
       imported += 1;
       }

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { savePersonIntelligence } from "@/app/people/actions";
 import { relationshipLabels, relationshipTypes } from "@/lib/relationship-types";
+import { ContactAvatar } from "./contact-avatar";
 
 type EditableContact = {
   id: string;
@@ -24,6 +25,7 @@ export function ContactProfileEditor({ person }: { person: EditableContact }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [values, setValues] = useState({
     name: person.display_name ?? "",
     organization: person.organization ?? "",
@@ -36,6 +38,19 @@ export function ContactProfileEditor({ person }: { person: EditableContact }) {
     manualPriority: Number(person.manual_priority ?? person.overall_priority ?? 5) || 5,
   });
   const update = <K extends keyof typeof values>(field: K, value: (typeof values)[K]) => setValues((current) => ({ ...current, [field]: value }));
+  const uploadPhoto = async (file?: File) => {
+    if (!file) return;
+    setPhotoBusy(true); setMessage("");
+    try {
+      const form = new FormData(); form.set("file", file); form.set("sourceType", "manual");
+      const response = await fetch(`/api/vault/person-avatar/${encodeURIComponent(person.id)}`, { method: "POST", body: form });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Bilden kunde inte sparas.");
+      setMessage("Contact photo saved securely.");
+      router.refresh();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Bilden kunde inte sparas."); }
+    finally { setPhotoBusy(false); }
+  };
   const save = () => startTransition(async () => {
     setMessage("");
     const result = await savePersonIntelligence({ personId: person.id, ...values });
@@ -47,7 +62,7 @@ export function ContactProfileEditor({ person }: { person: EditableContact }) {
     }
   });
 
-  if (!editing) return <div className="contact-edit-actions"><button className="btn primary" type="button" onClick={() => setEditing(true)}>Edit contact</button>{message && <span className="positive">{message}</span>}</div>;
+  if (!editing) return <div className="contact-edit-actions"><ContactAvatar personId={person.id} name={person.display_name ?? "Contact"} size={42} /><label className="btn">Photo<input hidden type="file" accept="image/*" disabled={photoBusy} onChange={(event) => void uploadPhoto(event.target.files?.[0])} /></label><button className="btn primary" type="button" onClick={() => setEditing(true)}>Edit contact</button>{message && <span className={message.includes("could not") ? "negative" : "positive"}>{message}</span>}</div>;
   return <section className="card contact-profile-editor">
     <div className="contact-editor-heading"><div><div className="intel-label">Edit contact</div><p>Correct or add information used by the AI when prioritizing and drafting replies.</p></div><button className="btn" type="button" onClick={() => setEditing(false)}>Cancel</button></div>
     <div className="contact-editor-grid">
