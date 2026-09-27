@@ -5,7 +5,8 @@ import { normalizeUniversalProfile, resolveCommunicationProfile, situationForCla
 import { approvedLearningContext } from "@/lib/learning-feedback";
 import type { Evidence, Plan, Task, TaskStatus } from "./model";
 import type { Source } from "@/lib/domain";
-import { mediaDecisionState } from "@/lib/media/decision-gate";
+import { blocksDecisionUntilMediaReady, mediaDecisionState } from "@/lib/media/decision-gate";
+import { mediaContextForMessage } from "@/lib/media/context";
 
 const fields = "id,conversation_id,source,direction,body_text,sent_at,created_at,classification,importance_score,attachment_count,metadata,identities(external_identifier),conversations(id,title,person_id,connection_id,external_conversation_id,last_user_message_at,last_other_message_at,people(display_name),connections(provider,account_identifier,account_name))";
 type Row = Record<string, unknown>;
@@ -145,16 +146,20 @@ export async function verifiedRecipient(db: SupabaseClient, owner: string, perso
 }
 export async function generateDraft(db: SupabaseClient, owner: string, plan: Plan, followUp: boolean, additionalContext = "") {
   const e = plan.evidence;
-  const [profile, history, memories, rules] = await Promise.all([
+  if (blocksDecisionUntilMediaReady({ media_analysis_status: e.mediaState }, e.attachmentCount)) {
+    throw new Error("Bilagan behöver analyseras eller granskas innan ett nytt svar kan skapas.");
+  }
+  const [profile, history, memories, rules, analyzedMedia] = await Promise.all([
     db.from("profiles").select("preferences").eq("id", owner).single(),
     db.from("messages").select("direction,body_text").eq("owner_id", owner).eq("conversation_id", e.conversationId).order("sent_at", { ascending: false }).limit(12),
     e.personId ? db.from("memories").select("content").eq("owner_id", owner).eq("person_id", e.personId).eq("user_verified", true).limit(12) : Promise.resolve({ data: [], error: null }),
     db.from("learning_signals").select("proposed_rule,person_id").eq("owner_id", owner).eq("source", e.source).eq("status", "approved").limit(100),
+    mediaContextForMessage(db, owner, e.messageId),
   ]);
   if ([profile, history, memories, rules].some(r => r.error)) throw new Error("Profil och relationsunderlag kunde inte läsas. Inget standardiserat ersättningssvar har skapats.");
   const prefs = object(profile.data?.preferences);
   const context = resolveCommunicationProfile(normalizeUniversalProfile(prefs.universal_communication_profile, prefs.communication_persona), { source: e.source, personId: e.personId, situation: followUp ? "followUp" : situationForClassification(e.classification) });
   const messages = [...(history.data ?? [])].reverse().map(m => ({ direction: m.direction as "in" | "out", body: String(m.body_text ?? "") }));
-  const analysis = await getAIService().analyzeEmail({ ownerId: owner, source: e.source, senderName: e.personName, subject: e.title, preview: (followUp ? `Prepare a polite follow-up draft, without claiming any new facts or promises. Original message:\n${e.body}` : e.body) + (additionalContext ? `\n\nVerified preparation context from the owner-approved planning step:\n${additionalContext}` : ""), currentClassification: e.classification || "Business", personaContext: context + "\n" + approvedLearningContext((rules.data ?? []).filter(r => !r.person_id || r.person_id === e.personId)), verifiedPersonMemories: (memories.data ?? []).map(m => String(m.content)), conversationMessages: messages, styleExamples: messages.filter(m => m.direction === "out").map(m => m.body).slice(-6) });
+  const analysis = await getAIService().analyzeEmail({ ownerId: owner, source: e.source, senderName: e.personName, subject: e.title, preview: (followUp ? `Prepare a polite follow-up draft, without claiming any new facts or promises. Original message:\n${e.body}` : e.body) + (additionalContext ? `\n\nVerified preparation context from the owner-approved planning step:\n${additionalContext}` : ""), currentClassification: e.classification || "Business", personaContext: context + "\n" + approvedLearningContext((rules.data ?? []).filter(r => !r.person_id || r.person_id === e.personId)), verifiedPersonMemories: (memories.data ?? []).map(m => String(m.content)), conversationMessages: messages, styleExamples: messages.filter(m => m.direction === "out").map(m => m.body).slice(-6), analyzedMedia });
   return analysis.draftResponse;
 }
