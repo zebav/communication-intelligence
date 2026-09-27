@@ -99,7 +99,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
           <h3>{evidence.title || "Konversation"}</h3>
           <p className="assistant-proposal-summary">{card.summary}</p>
           <div className="assistant-proposal-action"><span>Föreslaget</span><p>{card.proposedAction}</p></div>
-          <div className="assistant-buttons"><button className="btn primary" disabled={busy} onClick={() => act({ action: "start", messageId: candidate.messageId, kind: candidate.kind })}>Förbered uppdrag</button><button className="btn" disabled={busy} onClick={() => { setHiddenCandidates((current) => new Set(current).add(key)); void act({ action: "dismiss_candidate", messageId: candidate.messageId, kind: candidate.kind }); }}>Inte relevant</button></div>
+          <div className="assistant-buttons"><button className="btn primary" disabled={busy} onClick={() => act({ action: "start", messageId: candidate.messageId, kind: candidate.kind })}>Förbered uppdrag</button><button className="btn" disabled={busy} onClick={() => { setHiddenCandidates((current) => new Set(current).add(key)); void act({ action: "dismiss_candidate", messageId: candidate.messageId, kind: candidate.kind }); }}>Inte relevant</button><button className="btn" disabled={busy} onClick={() => { setHiddenCandidates((current) => new Set(current).add(key)); void act({ action: "dismiss_candidate", messageId: candidate.messageId, kind: candidate.kind, scope: "sender" }); }}>Prioritera avsändaren lägre</button></div>
         </article>;
       })}</div>
       {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska nästa 100 äldre meddelanden</button>}
