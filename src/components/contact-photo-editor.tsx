@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 
-export function ContactPhotoEditor({ personId, name }: { personId: string; name: string }) {
+export function ContactPhotoEditor({ personId, name, compact = false }: { personId: string; name: string; compact?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [version, setVersion] = useState(0);
   const [hasPhoto, setHasPhoto] = useState(true);
@@ -20,9 +20,10 @@ export function ContactPhotoEditor({ personId, name }: { personId: string; name:
     } catch (error) { setMessage(error instanceof Error ? error.message : "Kontaktbilden kunde inte sparas."); }
     finally { setBusy(false); if (input.current) input.current.value = ""; }
   };
-  return <section className="contact-photo-editor" aria-label="Kontaktbild">
+  return <section className={`contact-photo-editor${compact ? " compact" : ""}`} aria-label="Kontaktbild">
     <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); }} />
     <button className="contact-photo-frame contact-photo-trigger" type="button" disabled={busy} onClick={() => input.current?.click()} aria-label={hasPhoto ? `Byt bild på ${name}` : `Lägg till bild på ${name}`} title={hasPhoto ? "Byt bild" : "Lägg till bild"}>{hasPhoto ? <img src={`/api/contacts/${personId}/photo?v=${version}`} alt={`Bild på ${name}`} onError={() => setHasPhoto(false)} /> : <span>{initials}</span>}</button>
-    <div><strong>Kontaktbild</strong><p>Tryck på bilden för att {hasPhoto ? "byta" : "lägga till"}. Endast du kan se den.</p><button className="btn" type="button" disabled={busy} onClick={() => input.current?.click()}>{busy ? "Sparar…" : hasPhoto ? "Byt bild" : "Lägg till bild"}</button>{message && <small className={message.includes("sparad") ? "positive" : "negative"}>{message}</small>}</div>
+    {!compact && <div><strong>Kontaktbild</strong><p>Tryck på bilden för att {hasPhoto ? "byta" : "lägga till"}. Endast du kan se den.</p><button className="btn" type="button" disabled={busy} onClick={() => input.current?.click()}>{busy ? "Sparar…" : hasPhoto ? "Byt bild" : "Lägg till bild"}</button>{message && <small className={message.includes("sparad") ? "positive" : "negative"}>{message}</small>}</div>}
+    {compact && message && <small className={message.includes("sparad") ? "positive" : "negative"}>{message}</small>}
   </section>;
 }

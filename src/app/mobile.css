@@ -59,7 +59,7 @@
   .people-search { min-height: 46px; font-size: 16px; }
   .person-row { grid-template-columns: 36px minmax(0, 1fr) auto; padding: 11px 10px; min-height: 58px; }
   .person-detail { padding: 14px 12px; }
-  .person-detail-head { grid-template-columns: 42px minmax(0, 1fr) !important; }
+  .person-detail-head { grid-template-columns: 62px minmax(0, 1fr) !important; }
   .person-detail-head > small { grid-column: 2; }
   .person-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 7px; }
   .person-detail-grid { grid-template-columns: 1fr !important; gap: 12px; }
