@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Communication Intelligence",
+    "slug": "communication-intelligence",
+    "scheme": "communication-intelligence",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.victoriny.communicationintelligence" },
+    "plugins": ["expo-router", "expo-local-authentication", "expo-notifications"],
+    "extra": { "apiUrl": "https://communication-intelligence-8tkiagqpn-ci20.vercel.app" }
+  }
+}

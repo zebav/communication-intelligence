@@ -15,8 +15,9 @@ export async function POST(request: NextRequest) {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return NextResponse.json({ error: "Two-factor authentication is required." }, { status: 403 });
   const form = await request.formData();
-  const image = form.get("image");
-  const consent = form.get("consent");
+  const fields = form as unknown as { get(name: string): FormDataEntryValue | null };
+  const image = fields.get("image");
+  const consent = fields.get("consent");
   if (!(image instanceof File) || consent !== "yes") return NextResponse.json({ error: "Select an image and approve text extraction." }, { status: 400 });
   if (!allowedTypes.has(image.type)) return NextResponse.json({ error: "This phone image format is not supported. Choose a screenshot saved as PNG or JPEG." }, { status: 400 });
   if (image.size > 12_000_000) return NextResponse.json({ error: "The screenshot is larger than 12 MB. Crop it or choose a smaller image." }, { status: 400 });

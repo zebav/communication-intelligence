@@ -43,7 +43,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pe
   try {
     const { db, owner, personId } = await session((await context.params).personId);
     const form = await request.formData();
-    const image = form.get("image");
+    const image = (form as unknown as { get(name: string): FormDataEntryValue | null }).get("image");
     if (!(image instanceof File) || !allowedMimeTypes.has(image.type)) throw new Error("Välj en JPEG, PNG, WebP eller HEIC-bild.");
     if (!image.size || image.size > maxBytes) throw new Error("Bilden måste vara mindre än 10 MB.");
     const bytes = Buffer.from(await image.arrayBuffer());

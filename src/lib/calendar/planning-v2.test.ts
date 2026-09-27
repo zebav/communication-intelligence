@@ -38,19 +38,19 @@ describe("commitment reconciliation",()=>{
 });
 describe("Google Maps adapter",()=>{
  it("uses field masks, fixed hosts and returns only required place data",async()=>{
-  const transport=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({places:[{id:"p",displayName:{text:"Plats"},formattedAddress:"Adress",googleMapsUri:"https://maps.google.com/?q=p"}]})));
+  const transport:any=vi.fn().mockResolvedValue(new Response(JSON.stringify({places:[{id:"p",displayName:{text:"Plats"},formattedAddress:"Adress",googleMapsUri:"https://maps.google.com/?q=p"}]})));
   expect(await new GooglePlacesRoutes("synthetic",transport).search("Stockholm")).toEqual([{id:"p",name:"Plats",address:"Adress",mapsUrl:"https://maps.google.com/?q=p"}]);
   expect(transport.mock.calls[0][0]).toBe("https://places.googleapis.com/v1/places:searchText");
   expect(transport.mock.calls[0][1]?.headers).toHaveProperty("X-Goog-FieldMask");
  });
  it("rounds travel up and requests future traffic for driving",async()=>{
-  const transport=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({routes:[{duration:"61s",distanceMeters:1200}]})));
+  const transport:any=vi.fn().mockResolvedValue(new Response(JSON.stringify({routes:[{duration:"61s",distanceMeters:1200}]})));
   const input={originPlaceId:"a",destinationPlaceId:"b",departureTime:new Date(Date.now()+86400000).toISOString(),mode:"DRIVE" as const};
   expect((await new GooglePlacesRoutes("test",transport).estimate(input)).minutes).toBe(2);
   expect(JSON.parse(transport.mock.calls[0][1]?.body as string)).toMatchObject({routingPreference:"TRAFFIC_AWARE",departureTime:input.departureTime});
  });
  it("never converts unavailable route into zero",async()=>{
-  const transport=vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({routes:[]})));
+  const transport:any=vi.fn().mockResolvedValue(new Response(JSON.stringify({routes:[]})));
   await expect(new GooglePlacesRoutes("test",transport).estimate({originPlaceId:"a",destinationPlaceId:"b",departureTime:new Date(Date.now()+86400000).toISOString(),mode:"WALK"})).rejects.toThrow();
  });
 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createMobileClient } from "@/lib/supabase/mobile";
 import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, type Evidence, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
@@ -26,8 +27,10 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reconcile"), ...base }),
   z.object({ action: z.literal("feedback"), id: z.string().uuid(), category: z.enum(["wrong_recipient", "not_relevant", "missed_task", "draft_edited", "useful"]), note: z.string().trim().min(3).max(1000) }),
 ]);
-async function session() {
-  const db = await createClient();
+async function session(request?: Request) {
+  const authorization = request?.headers.get("authorization") ?? "";
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+  const db = token ? createMobileClient(token) : await createClient();
   const { data: { user }, error } = await db.auth.getUser();
   if (error || !user) throw new Error("Logga in igen.");
   const { data, error: aalError } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
@@ -37,7 +40,7 @@ async function session() {
 const json = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { "Cache-Control": "no-store" } });
 export async function GET(request: Request) {
   try {
-    const { db, owner } = await session();
+    const { db, owner } = await session(request);
     const cursor = z.coerce.number().int().min(0).max(100000).parse(new URL(request.url).searchParams.get("cursor") ?? 0);
     const [page, tasks, feedback, calendar, relevanceRules] = await Promise.all([
       readCandidates(db, owner, String(cursor)),
@@ -87,11 +90,12 @@ export async function GET(request: Request) {
   } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
 }
 export async function POST(request: NextRequest) {
-  if (request.headers.get("origin") !== request.nextUrl.origin) return json({ error: "Ogiltigt ursprung." }, 403);
+  const native = /^Bearer\s+.+/i.test(request.headers.get("authorization") ?? "") && request.headers.get("x-client") === "ios";
+  if (!native && request.headers.get("origin") !== request.nextUrl.origin) return json({ error: "Ogiltigt ursprung." }, 403);
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return json({ error: "Kontrollera uppgifterna." }, 400);
   try {
-    const { db, owner } = await session(), a = parsed.data;
+    const { db, owner } = await session(request), a = parsed.data;
     if (a.action === "dismiss_candidate") {
       const e = await readEvidence(db, owner, a.messageId);
       if (e.direction !== "in") throw new Error("Endast inkommande meddelanden kan sorteras bort.");
