@@ -1,4 +1,4 @@
-export type GmailPayload = { mimeType?: string; headers?: Array<{ name?: string; value?: string }>; body?: { data?: string }; parts?: GmailPayload[] };
+export type GmailPayload = { mimeType?: string; filename?: string; headers?: Array<{ name?: string; value?: string }>; body?: { data?: string; attachmentId?: string; size?: number }; parts?: GmailPayload[] };
 
 function decode(data?: string) {
   if (!data) return "";
@@ -32,4 +32,11 @@ export function gmailDisplayName(value?: string) {
 
 export function extractGmailBody(payload?: GmailPayload, snippet?: string) {
   return body(payload) || snippet?.trim() || "";
+}
+
+/** Counts only Gmail parts represented by an official provider attachment id. */
+export function gmailAttachmentCount(payload?: GmailPayload): number {
+  if (!payload) return 0;
+  const own = payload.body?.attachmentId ? 1 : 0;
+  return own + (payload.parts ?? []).reduce((count, part) => count + gmailAttachmentCount(part), 0);
 }

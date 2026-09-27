@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractGmailBody, gmailAddress, gmailDisplayName, gmailHeader } from "./gmail-message";
+import { extractGmailBody, gmailAddress, gmailAttachmentCount, gmailDisplayName, gmailHeader } from "./gmail-message";
 
 const encoded = (value: string) => Buffer.from(value).toString("base64url");
 
@@ -13,5 +13,9 @@ describe("Gmail message normalization", () => {
   it("extracts the address and display name", () => {
     expect(gmailAddress('Jane Doe <jane@example.com>')).toBe("jane@example.com");
     expect(gmailDisplayName('"Jane Doe" <jane@example.com>')).toBe("Jane Doe");
+  });
+
+  it("counts official attachment parts without treating the message body as media", () => {
+    expect(gmailAttachmentCount({ parts: [{ mimeType: "text/plain", body: { data: encoded("hello") } }, { filename: "contract.pdf", body: { attachmentId: "attachment-1" } }] })).toBe(1);
   });
 });

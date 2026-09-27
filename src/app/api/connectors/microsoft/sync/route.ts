@@ -11,6 +11,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { senderRelevance } from "@/lib/sender-intelligence";
 import { responseTimeMinutes } from "@/lib/outcomes";
+import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
 import { z } from "zod";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest) {
       }
 
       const content = extractMicrosoftMessageText(message);
-      const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "in", senderIdentifier: address, senderName: displayName, subject: message.subject, body: content.text, sentAt: message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated } });
+      const normalized = normalizeCommunicationMessage(microsoftGraphConnector, { externalId: message.id, externalConversationId: message.conversationId, direction: "in", senderIdentifier: address, senderName: displayName, subject: message.subject, body: content.text, sentAt: message.receivedDateTime ?? message.sentDateTime ?? new Date().toISOString(), attachmentCount: message.hasAttachments ? 1 : 0, metadata: { internet_message_id: message.internetMessageId, is_read: message.isRead ?? false, content_source: content.source, full_content: content.fullContent, body_truncated: content.truncated, media_analysis_status: message.hasAttachments ? "pending" : "not_applicable" } });
       const classification = classifyEmail({ subject: message.subject, preview: content.text, sender: address, importance: message.importance, inferenceClassification: message.inferenceClassification });
       const basePriority = emailPriority(classification, message.importance);
       const { data: history } = await supabase.from("conversations").select("id,last_user_message_at").eq("owner_id", userId).eq("person_id", personId).limit(100);
@@ -200,6 +201,17 @@ export async function POST(request: NextRequest) {
         processed_at: new Date().toISOString(),
       }, { onConflict: "owner_id,source,external_message_id" }).select("id").single();
       if (messageError) throw new Error("message_save_failed");
+      if (savedIncoming?.id && normalized.attachmentCount > 0) {
+        try {
+          await enqueueMediaAnalysis(supabase, {
+            ownerId: userId, connectionId: connection.id, provider: microsoftGraphConnector.id, source: "email",
+            providerMessageId: normalized.externalId, messageId: savedIncoming.id, conversationId: conversationResult.data.id,
+            personId, messageText: normalized.body, attachmentCount: normalized.attachmentCount, mediaTypes: ["email_attachment"],
+          });
+        } catch (mediaError) {
+          console.error("Outlook media queue failed", { messageId: savedIncoming.id, reason: mediaError instanceof Error ? mediaError.message : "unknown" });
+        }
+      }
       const { data: waitingOutcome } = await supabase.from("communication_outcomes").select("id,trigger_message_id").eq("owner_id", userId).eq("conversation_id", conversationResult.data.id).eq("status", "waiting").order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (waitingOutcome && savedIncoming?.id) {
         const { data: trigger } = await supabase.from("messages").select("sent_at").eq("id", waitingOutcome.trigger_message_id).eq("owner_id", userId).maybeSingle();

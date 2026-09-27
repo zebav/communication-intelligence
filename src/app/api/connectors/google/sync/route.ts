@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
-import { extractGmailBody, gmailAddress, gmailDisplayName, gmailHeader, type GmailPayload } from "@/lib/connectors/gmail-message";
+import { extractGmailBody, gmailAddress, gmailAttachmentCount, gmailDisplayName, gmailHeader, type GmailPayload } from "@/lib/connectors/gmail-message";
 import { googleGmailConnector } from "@/lib/connectors/google-gmail";
 import { googleConfig } from "@/lib/connectors/google-oauth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { senderRelevance } from "@/lib/sender-intelligence";
+import { enqueueMediaAnalysis } from "@/lib/media/vault-queue";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
@@ -84,6 +85,7 @@ export async function POST(request: NextRequest) {
       if (!address) continue;
       const displayName = gmailDisplayName(from) || address; const subject = gmailHeader(message.payload, "Subject") || "(No subject)";
       const content = extractGmailBody(message.payload, message.snippet); const sentAt = message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString();
+      const attachmentCount = gmailAttachmentCount(message.payload);
       const { data: identity } = await supabase.from("identities").select("id,person_id").eq("owner_id", userId).eq("source", "email").eq("external_identifier", address).maybeSingle();
       let personId = identity?.person_id; let identityId = identity?.id;
       if (!personId) {
@@ -102,8 +104,20 @@ export async function POST(request: NextRequest) {
       const conversationValues = { owner_id: userId, person_id: personId, connection_id: connection.id, source: "email", external_conversation_id: externalConversationId, title: subject, conversation_type: "email", priority_score: priority, last_message_at: sentAt, last_other_message_at: sentAt, summary: content.slice(0, 300), recommended_action: { action: recommendedEmailAction(classification), reason: `Initial rule-based classification: ${classification}`, relevance_reasons: relevance.reasons, unread }, updated_at: new Date().toISOString() };
       const conversation = existingConversation?.id ? await supabase.from("conversations").update(conversationValues).eq("id", existingConversation.id).select("id").single() : await supabase.from("conversations").insert(conversationValues).select("id").single();
       if (conversation.error || !conversation.data) throw new Error("conversation_save_failed");
-      const { error: messageError } = await supabase.from("messages").insert({ owner_id: userId, conversation_id: conversation.data.id, external_message_id: externalMessageId, direction: "in", sender_identity_id: identityId, source: "email", body_text: content, sent_at: sentAt, classification, importance_score: priority, metadata: { provider: googleGmailConnector.id, account: connection.account_identifier, gmail_labels: message.labelIds ?? [], is_read: !unread }, processed_at: new Date().toISOString() });
-      if (messageError) throw new Error("message_save_failed"); imported += 1;
+      const { data: savedMessage, error: messageError } = await supabase.from("messages").insert({ owner_id: userId, conversation_id: conversation.data.id, external_message_id: externalMessageId, direction: "in", sender_identity_id: identityId, source: "email", body_text: content, sent_at: sentAt, classification, importance_score: priority, attachment_count: attachmentCount, metadata: { provider: googleGmailConnector.id, account: connection.account_identifier, gmail_labels: message.labelIds ?? [], is_read: !unread, media_analysis_status: attachmentCount > 0 ? "pending" : "not_applicable" }, processed_at: new Date().toISOString() }).select("id").single();
+      if (messageError || !savedMessage) throw new Error("message_save_failed");
+      if (attachmentCount > 0) {
+        try {
+          await enqueueMediaAnalysis(supabase, {
+            ownerId: userId, connectionId: connection.id, provider: googleGmailConnector.id, source: "email",
+            providerMessageId: externalMessageId, messageId: savedMessage.id, conversationId: conversation.data.id,
+            personId, messageText: content, attachmentCount, mediaTypes: ["email_attachment"],
+          });
+        } catch (mediaError) {
+          console.error("Gmail media queue failed", { messageId: savedMessage.id, reason: mediaError instanceof Error ? mediaError.message : "unknown" });
+        }
+      }
+      imported += 1;
     }
 
     const syncedAt = new Date().toISOString();
