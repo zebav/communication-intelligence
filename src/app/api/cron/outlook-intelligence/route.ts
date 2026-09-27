@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
+import { processPendingEmailMediaJobs } from "@/lib/media/email-worker";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -68,6 +69,10 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const supabase = createAdminClient();
+  // Hobby plans allow two scheduled jobs. Process one queued attachment before
+  // the normal Outlook import rather than registering a third cron endpoint.
+  // A single bounded job protects the 60-second function budget.
+  const media = await processPendingEmailMediaJobs(supabase, 1).catch(() => ({ scanned: 0, processed: 0, failed: 1 }));
   const { data: connections, error } = await supabase.from("connections").select("owner_id").eq("provider", "microsoft-graph").eq("status", "connected").limit(10);
   if (error) return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });
 
@@ -84,5 +89,5 @@ export async function GET(request: NextRequest) {
   const { data: pending } = await supabase.from("messages").select("id,owner_id,conversation_id,body_text,classification,metadata,attachment_count").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false }).limit(50);
   const candidates = (pending ?? []).filter((message) => isRelevantEmail(message.classification ?? "") && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
   const analyzed = (await Promise.allSettled(candidates.map((message) => analyzeCandidate(supabase, message)))).filter((result) => result.status === "fulfilled" && result.value).length;
-  return NextResponse.json({ ok: true, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3 });
+  return NextResponse.json({ ok: true, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3, media });
 }

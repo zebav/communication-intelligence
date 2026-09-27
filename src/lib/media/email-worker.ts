@@ -151,3 +151,30 @@ export async function processEmailMediaJob(database: SupabaseClient, job: MediaJ
     throw error;
   }
 }
+
+/**
+ * Processes a deliberately small number of queued email attachments.
+ *
+ * This is shared by the protected manual endpoint and the existing Outlook
+ * intelligence cron. Vercel Hobby permits only two cron jobs for this
+ * project, so keeping the dispatcher here avoids adding a third schedule
+ * that would make the deployment invalid.
+ */
+export async function processPendingEmailMediaJobs(database: SupabaseClient, limit = 1) {
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 3));
+  const { data: jobs, error } = await database.from("vault_ingestion_jobs")
+    .select("id,owner_id,connection_id,provider,provider_message_id,source_message_id,source_conversation_id,source_person_id,attempts,metadata")
+    .eq("state", "pending")
+    .in("provider", ["microsoft-graph", "gmail"])
+    .order("created_at", { ascending: true })
+    .limit(boundedLimit);
+
+  if (error) throw new Error("media_queue_unavailable");
+
+  const results = await Promise.allSettled((jobs ?? []).map((job) => processEmailMediaJob(database, job)));
+  return {
+    scanned: jobs?.length ?? 0,
+    processed: results.filter((result) => result.status === "fulfilled" && result.value.processed).length,
+    failed: results.filter((result) => result.status === "rejected").length,
+  };
+}
