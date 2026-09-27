@@ -99,7 +99,10 @@ export async function POST(request: NextRequest) {
         if (error || !data) throw new Error("Den sparade korrigeringen kunde inte läsas.");
         task = data;
       }
-      const note = "Detta ärende är inte relevant. Sänk avsändarens framtida prioritet utan att blockera personen.";
+      const lowerSenderPriority = a.scope === "sender";
+      const note = lowerSenderPriority
+        ? "Detta ärende är inte relevant. Sänk avsändarens framtida prioritet utan att blockera personen."
+        : "Detta enskilda ärende är inte relevant.";
       const { error: feedbackError } = await db.from("assistant_task_feedback").insert({
         owner_id: owner, task_id: task.id, category: "not_relevant", note,
       });
@@ -109,7 +112,7 @@ export async function POST(request: NextRequest) {
         category: e.classification || "Unknown", score: 1, reason: note,
       }, { onConflict: "owner_id,message_id" });
       if (priorityError) throw new Error("Meddelandet sorterades bort men prioritetskorrigeringen kunde inte sparas.");
-      if (e.personId) {
+      if (lowerSenderPriority && e.personId) {
         const { data: existingRule } = await db.from("learning_signals").select("id").eq("owner_id", owner)
           .eq("person_id", e.personId).eq("source", e.source).eq("signal_type", "category_corrected")
           .eq("status", "approved").contains("evidence", { assistant_relevance: "sender_lower_priority" }).limit(1).maybeSingle();
