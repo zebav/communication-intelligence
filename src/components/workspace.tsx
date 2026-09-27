@@ -10,6 +10,7 @@ import { ContactMergePicker } from "@/components/contact-merge-picker";
 import { ContactAddressBookSync } from "@/components/contact-address-book-sync";
 import { PersonalKnowledgeVault } from "@/components/personal-knowledge-vault";
 import { PriorityFeedback } from "@/components/priority-feedback";
+import { AccountPlan } from "@/components/account-plan";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -80,7 +81,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   useEffect(() => { if (backgroundPaused || !microsoftConnections.length || automaticSyncStarted.current) return; const due = microsoftConnections.filter((connection) => !connection.lastSyncAt || Date.now() - new Date(connection.lastSyncAt).getTime() >= 5 * 60 * 1000); if (!due.length) return; automaticSyncStarted.current = true; void Promise.all(due.map((connection) => fetch(`/api/connectors/microsoft/sync?connectionId=${connection.id}`, { method: "POST", headers: { "x-sync-trigger": "automatic" } }))).then(() => router.refresh()).catch(() => undefined); }, [backgroundPaused, microsoftConnections, router]);
   return <div className="workspace">
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Communication<br />Intelligence</span></div>
+      <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Solvani</span></div>
       <button className="command-button" onClick={() => setCommandOpen(true)}><Search size={13} /> Search or command <kbd>⌘K</kbd></button>
       <div className="nav-label">Workspace</div>
       {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
@@ -579,13 +580,14 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
   })}</div></div>;
 }
 function SettingsView({ persona, people, learningSignals, followUps, outcomes, calendarHistory, connections, onSaved }: { persona: UniversalCommunicationProfile; people: CommunicationPersonOption[]; learningSignals: LearningSignal[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; connections: ChannelConnection[]; onSaved: (profile: UniversalCommunicationProfile) => void }) {
-  const [tab, setTab] = useState<"context" | "intelligence" | "outcomes" | "connections" | "security">("context");
+  const [tab, setTab] = useState<"context" | "intelligence" | "outcomes" | "connections" | "account" | "security">("context");
   return <div className="page"><PageHeader eyebrow="Private workspace" title="Settings" subtitle="Din personliga kontext, dina AI-regler och dina anslutna källor finns samlade här." />
-    <div className="toolbar" aria-label="Inställningar"><button className={`btn ${tab === "context" ? "primary" : ""}`} onClick={() => setTab("context")}>Personal Context</button><button className={`btn ${tab === "intelligence" ? "primary" : ""}`} onClick={() => setTab("intelligence")}>Learning & Memory</button><button className={`btn ${tab === "outcomes" ? "primary" : ""}`} onClick={() => setTab("outcomes")}>Outcomes</button><button className={`btn ${tab === "connections" ? "primary" : ""}`} onClick={() => setTab("connections")}>Connections</button><button className={`btn ${tab === "security" ? "primary" : ""}`} onClick={() => setTab("security")}>Security</button></div>
+    <div className="toolbar" aria-label="Inställningar"><button className={`btn ${tab === "context" ? "primary" : ""}`} onClick={() => setTab("context")}>Personal Context</button><button className={`btn ${tab === "intelligence" ? "primary" : ""}`} onClick={() => setTab("intelligence")}>Learning & Memory</button><button className={`btn ${tab === "outcomes" ? "primary" : ""}`} onClick={() => setTab("outcomes")}>Outcomes</button><button className={`btn ${tab === "connections" ? "primary" : ""}`} onClick={() => setTab("connections")}>Connections</button><button className={`btn ${tab === "account" ? "primary" : ""}`} onClick={() => setTab("account")}>Plan & usage</button><button className={`btn ${tab === "security" ? "primary" : ""}`} onClick={() => setTab("security")}>Security</button></div>
     {tab === "context" && <><div className="section-title"><CircleUserRound size={14} /> Your shared foundation</div><p className="subtitle">Din befintliga kommunikationsprofil är kvar som enda källa för hur AI skriver och agerar. Personliga uppgifter ligger säkert i Personal Context nedan — utan en parallell profil.</p><PersonaForm initial={persona} people={people} onSaved={onSaved} /><PersonalKnowledgeVault /></>}
     {tab === "intelligence" && <Intelligence items={learningSignals} people={people} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} />}
     {tab === "outcomes" && <Outcomes items={outcomes} />}
     {tab === "connections" && <Connections connections={connections} />}
+    {tab === "account" && <AccountPlan />}
     {tab === "security" && <div className="cards"><div className="card"><CircleUserRound size={17} /><h3>Account & security</h3><p>Supabase Auth architecture with manual provisioning and mandatory TOTP MFA.</p><span className="pill">MFA required</span></div><div className="card"><Sparkles size={17} /><h3>AI & privacy</h3><p>Only the relevant channel, situation and person profile is sent for the active message.</p><span className="pill">Minimal context</span></div><div className="card"><CheckCircle2 size={17} /><h3>Profile control</h3><p>AI can use your profile but cannot change it or turn an inference into a saved fact.</p><span className="pill">Owner verified</span></div></div>}
   </div>;
 }
