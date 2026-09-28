@@ -70,16 +70,17 @@ export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const supabase = createAdminClient();
   // Hobby plans allow two scheduled jobs. Process one queued attachment before
-  // the normal Outlook import rather than registering a third cron endpoint.
+  // the normal email import rather than registering a third cron endpoint.
   // A single bounded job protects the 60-second function budget.
   const media = await processPendingEmailMediaJobs(supabase, 1).catch(() => ({ scanned: 0, processed: 0, failed: 1 }));
-  const { data: connections, error } = await supabase.from("connections").select("owner_id").eq("provider", "microsoft-graph").eq("status", "connected").limit(10);
+  const { data: connections, error } = await supabase.from("connections").select("owner_id,id,provider").in("provider", ["microsoft-graph", "gmail"]).eq("status", "connected").limit(10);
   if (error) return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });
 
   const syncResults = [];
   for (const connection of connections ?? []) {
     try {
-      const response = await fetch(new URL("/api/connectors/microsoft/sync", request.url), { method: "POST", headers: { authorization: request.headers.get("authorization")!, "x-owner-id": connection.owner_id, "x-sync-trigger": "background" }, signal: AbortSignal.timeout(45_000) });
+      const path = connection.provider === "gmail" ? "/api/connectors/google/sync" : "/api/connectors/microsoft/sync";
+      const response = await fetch(new URL(`${path}?connectionId=${encodeURIComponent(connection.id)}`, request.url), { method: "POST", headers: { authorization: request.headers.get("authorization")!, "x-owner-id": connection.owner_id, "x-sync-trigger": "background" }, signal: AbortSignal.timeout(45_000) });
       syncResults.push({ ownerId: connection.owner_id, ok: response.ok });
     } catch {
       syncResults.push({ ownerId: connection.owner_id, ok: false });

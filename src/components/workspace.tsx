@@ -19,7 +19,7 @@ import { DataIngestionStatus } from "@/components/data-ingestion-status";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, Bell, Bolt, CheckCircle2, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
+import { Archive, Bell, Bolt, CheckCircle2, ChevronDown, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MessageCircle, MoreHorizontal, Search, Send, Settings, Sparkles, Target, Users, WandSparkles } from "lucide-react";
 import { actionLabels, type CalendarLearningEvent, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type Conversation, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type Source, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
 import { conversations } from "@/lib/mock-data";
 import { signOut } from "@/app/auth/actions";
@@ -61,9 +61,25 @@ const sources: { label: string; source: Source }[] = [
 ];
 const EMAIL_CATEGORIES = ["Relevant", "Filtered out", "All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
+function connectionBelongsToSource(connection: ChannelConnection, source: Source) {
+  if (connection.source === source) return true;
+  if (source === "email") return connection.provider === "gmail" || connection.provider === "microsoft-graph";
+  if (source === "instagram") return connection.provider === "instagram";
+  if (source === "whatsapp") return connection.provider === "whatsapp" || connection.provider === "ycloud";
+  return false;
+}
+
+function sourceConnectionStatus(source: Source, connections: ChannelConnection[]) {
+  const matching = connections.filter((connection) => connectionBelongsToSource(connection, source));
+  const connected = matching.filter((connection) => connection.status === "connected");
+  if (matching.some((connection) => connection.healthStatus === "degraded" || connection.healthStatus === "error")) return "Åtgärd behövs";
+  if (connected.length === 0) return "Inte ansluten";
+  return connected.length === 1 ? "Ansluten" : `${connected.length} anslutna`;
+}
+
 export function Workspace({ userEmail, communicationCases, connections, syncedEmails, emailLoadFailed = false, backgroundPaused = false, followUps, outcomes, calendarHistory, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; emailLoadFailed?: boolean; backgroundPaused?: boolean; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
   const router = useRouter();
-  const microsoftConnections = connections.filter((item) => item.provider === "microsoft-graph");
+  const emailConnections = connections.filter((item) => item.provider === "microsoft-graph" || item.provider === "gmail");
   const automaticSyncStarted = useRef(false);
   const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>("today");
@@ -80,18 +96,20 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
     return () => window.clearTimeout(timer);
   }, []);
   const [selectedSource, setSelectedSource] = useState<Source | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [activePersona, setActivePersona] = useState(persona);
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
-  useEffect(() => { if (backgroundPaused || !microsoftConnections.length || automaticSyncStarted.current) return; const due = microsoftConnections.filter((connection) => !connection.lastSyncAt || Date.now() - new Date(connection.lastSyncAt).getTime() >= 5 * 60 * 1000); if (!due.length) return; automaticSyncStarted.current = true; void Promise.all(due.map((connection) => fetch(`/api/connectors/microsoft/sync?connectionId=${connection.id}`, { method: "POST", headers: { "x-sync-trigger": "automatic" } }))).then(() => router.refresh()).catch(() => undefined); }, [backgroundPaused, microsoftConnections, router]);
+  useEffect(() => { if (backgroundPaused || !emailConnections.length || automaticSyncStarted.current) return; const due = emailConnections.filter((connection) => !connection.lastSyncAt || Date.now() - new Date(connection.lastSyncAt).getTime() >= 5 * 60 * 1000); if (!due.length) return; automaticSyncStarted.current = true; void Promise.all(due.map((connection) => { const providerPath = connection.provider === "gmail" ? "google" : "microsoft"; return fetch(`/api/connectors/${providerPath}/sync?connectionId=${connection.id}`, { method: "POST", headers: { "x-sync-trigger": "automatic" } }); })).then(() => router.refresh()).catch(() => undefined); }, [backgroundPaused, emailConnections, router]);
   return <div className="workspace">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Solvani<br />Smart Assistant</span></div>
       <button className="command-button" onClick={() => setCommandOpen(true)}><Search size={13} /> Search or command <kbd>⌘K</kbd></button>
       <div className="nav-label">Workspace</div>
-      {navigation.map((item) => <button key={item.id} className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={15} />{item.label}{item.id === "inbox" && summary.unread > 0 && <span className="count">{summary.unread}</span>}</button>)}
-      <div className="nav-label">Sources</div>
-      {sources.map((item) => <button key={item.source} className={`nav-button ${selectedSource === item.source ? "active" : ""}`} onClick={() => { setSelectedSource(item.source); setView(item.source === "email" ? "inbox" : "cases"); }}><MessageCircle size={14} />{item.label}{item.source === "email" && summary.total > 0 && <span className="count">{summary.total}</span>}</button>)}
+      {navigation.map((item) => item.id === "inbox" ? <div className="inbox-nav-group" key={item.id}>
+        <div className="inbox-nav-row"><button className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={15} />{item.label}{summary.unread > 0 && <span className="count">{summary.unread}</span>}</button><button className="source-toggle" type="button" aria-label="Visa inkorgskällor" aria-expanded={sourcesOpen} onClick={() => setSourcesOpen((open) => !open)}><ChevronDown size={14} /></button></div>
+        {sourcesOpen && <div className="source-submenu" aria-label="Inkorgskällor">{sources.map((source) => { const caseCount = source.source === "email" ? summary.total : communicationCases.filter((item) => item.source === source.source).length; return <button key={source.source} className={`source-nav-button ${selectedSource === source.source ? "active" : ""}`} onClick={() => { setSelectedSource(source.source); setView(source.source === "email" ? "inbox" : "cases"); }}><MessageCircle size={13} /><span>{source.label}</span><small>{sourceConnectionStatus(source.source, connections)}</small>{caseCount > 0 && <span className="count">{caseCount}</span>}</button>; })}<DataIngestionStatus compact /></div>}
+      </div> : <button key={item.id} className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onClick={() => { setSelectedSource(null); setView(item.id); }}><item.icon size={15} />{item.label}</button>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
 <main className="main">{view === "assistant" && <AssistantWorkspace people={profilePeople} />}{view === "calendar" && <CalendarWorkspace conversations={[...syncedEmails.map(e=>({id:e.id,title:e.title,person:e.personName,text:e.threadMessages.map(m=>m.body).join("\n\n")})),...communicationCases.map(c=>({id:c.id,title:c.title,person:c.personName,text:c.message}))].filter((c,i,all)=>all.findIndex(x=>x.id===c.id)===i)} />}{emailLoadFailed && <div className="empty-card" role="alert"><strong>Mejlen kunde inte hämtas</strong><p>Inkorgen kunde inte läsas just nu. Detta betyder inte att den är tom eller att du behöver importera mejlen igen.</p><button className="btn" onClick={() => router.refresh()}>Försök hämta mejlen igen</button></div>}{view === "today" && !emailLoadFailed && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} channelCases={communicationCases} onOpenInbox={() => { setSelectedSource("email"); setView("inbox"); }} onOpenSource={(source) => { setSelectedSource(source); setView("cases"); }} />}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} />}{view === "inbox" && <div className="toolbar" aria-label="Inkorgsvyer"><button className={`btn ${inboxTab === "received" ? "primary" : ""}`} onClick={() => setInboxTab("received")}>Inkorg</button><button className={`btn ${inboxTab === "sent" ? "primary" : ""}`} onClick={() => { setInboxTab("sent"); setSentVisited(true); }}>Skickade meddelanden</button></div>}{view === "inbox" && inboxTab === "received" && !emailLoadFailed && <InboxView syncedEmails={syncedEmails} people={profilePeople} onOpenAssistant={() => { setSelectedSource(null); setView("assistant"); }} />}{sentVisited && <div hidden={view !== "inbox" || inboxTab !== "sent"}><SentMessages accounts={connections.map(c => ({ id: c.id, name: c.accountIdentifier || c.accountName || "Konto" }))} /></div>}{view === "people" && <><div className="toolbar"><button className={`btn ${contactTab === "directory" ? "primary" : ""}`} onClick={() => setContactTab("directory")}>Kontakter</button><button className={`btn ${contactTab === "duplicates" ? "primary" : ""}`} onClick={() => setContactTab("duplicates")}>Sammanför kontakter</button></div>{contactTab === "directory" ? <div className="page"><ContactAddressBookSync connections={connections} /><People items={people} /></div> : <div className="page"><ContactDuplicates /></div>}</>}{view === "followups" && <FollowUps items={followUps} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} people={profilePeople} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} learningSignals={learningSignals} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} connections={connections} onSaved={setActivePersona} />}</main>
