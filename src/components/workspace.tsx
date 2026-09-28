@@ -41,7 +41,7 @@ import { PersonLink } from "@/components/person-link";
 import { WhatsAppConnectButton } from "@/components/whatsapp-connect-button";
 import { communicationPeriods, isWithinCommunicationPeriod, type CommunicationPeriod } from "@/lib/communication-period";
 
-type View = "today" | "cases" | "inbox" | "people" | "followups" | "cleanup" | "intelligence" | "connections" | "settings" | "calendar" | "assistant";
+export type View = "today" | "cases" | "inbox" | "people" | "followups" | "cleanup" | "intelligence" | "connections" | "settings" | "calendar" | "assistant";
 const navigation: { id: View; label: string; icon: typeof Inbox; count?: number }[] = [
   { id: "today", label: "Overview", icon: LayoutDashboard },
   { id: "inbox", label: "Inbox", icon: Inbox },
@@ -77,19 +77,19 @@ function sourceConnectionStatus(source: Source, connections: ChannelConnection[]
   return connected.length === 1 ? "Ansluten" : `${connected.length} anslutna`;
 }
 
-export function Workspace({ userEmail, communicationCases, connections, syncedEmails, emailLoadFailed = false, backgroundPaused = false, followUps, outcomes, calendarHistory, people, learningSignals, persona, profilePeople }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; emailLoadFailed?: boolean; backgroundPaused?: boolean; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[] }) {
+export function Workspace({ userEmail, communicationCases, connections, syncedEmails, emailLoadFailed = false, backgroundPaused = false, followUps, outcomes, calendarHistory, people, learningSignals, persona, profilePeople, initialView = "today" }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; emailLoadFailed?: boolean; backgroundPaused?: boolean; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[]; initialView?: View }) {
   const router = useRouter();
   const emailConnections = connections.filter((item) => item.provider === "microsoft-graph" || item.provider === "gmail");
   const automaticSyncStarted = useRef(false);
   const summary = emailDashboardSummary(syncedEmails);
-  const [view, setView] = useState<View>("today");
+  const [view, setView] = useState<View>(initialView);
   const [inboxTab, setInboxTab] = useState("received");
   const [contactTab, setContactTab] = useState("directory");
   const [sentVisited, setSentVisited] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const requested = new URLSearchParams(window.location.search).get("view");
-      if (requested === "calendar" || requested === "assistant") setView(requested);
+      if (requested === "today" || requested === "cases" || requested === "inbox" || requested === "people" || requested === "followups" || requested === "cleanup" || requested === "intelligence" || requested === "connections" || requested === "settings" || requested === "calendar" || requested === "assistant") setView(requested);
       if (requested === "sent") { setView("inbox"); setInboxTab("sent"); setSentVisited(true); }
       if (requested === "duplicates") { setView("people"); setContactTab("duplicates"); }
     }, 0);
