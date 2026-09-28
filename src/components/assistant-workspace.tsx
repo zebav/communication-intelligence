@@ -156,6 +156,7 @@ function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Ta
     <details><summary>Avsluta eller lämna feedback</summary><label>Din bedömning<textarea maxLength={1000} value={note} onChange={v => setNote(v.target.value)} /></label><label>Kvalitetsomdöme<select value={feedback} onChange={v => setFeedback(v.target.value)}><option value="useful">Användbart</option><option value="wrong_recipient">Fel mottagare</option><option value="not_relevant">Inte relevant</option><option value="missed_task">Missat uppdrag</option><option value="draft_edited">Utkastet behövde ändras</option></select></label><button className="btn" disabled={busy || note.trim().length < 3} onClick={() => run("feedback", { category: feedback, note })}>Spara omdöme</button>
       {!["done", "dismissed"].includes(task.status) && <button className="btn" disabled={busy || note.trim().length < 5} onClick={() => run("complete", { note })}>Jag bekräftar att uppdraget är hanterat</button>}
       {["decision", "ready", "waiting"].includes(task.status) && <button className="btn" disabled={busy} onClick={() => run("dismiss")}>Avstå från uppdraget</button>}
+      {task.status === "uncertain" && <button className="btn" disabled={busy} onClick={() => run("dismiss")}>Dölj från Notiscenter</button>}
     </details><PriorityFeedback messageId={e.messageId} initialScore={e.priority || 5} />
   </>;
 }

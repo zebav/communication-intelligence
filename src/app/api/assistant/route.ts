@@ -187,7 +187,17 @@ export async function POST(request: NextRequest) {
       if (error) throw new Error("Bokningens resultat kunde inte läsas. Boka inte igen.");
       return json({ task: hold ? await changeTask(db, owner, task, "done", task.plan, { holdId: hold.id, eventId: hold.external_event_id, confirmedBooking: true }) : task });
     }
-    if (a.action === "dismiss") return json({ task: await changeTask(db, owner, task, "dismissed") });
+    if (a.action === "dismiss") {
+      // An uncertain task may have reached an external provider, so it cannot
+      // truthfully be marked "dismissed". Archive it as owner-handled instead:
+      // it leaves the decision queue, preserves the audit trail and never
+      // retries the external action.
+      const status = task.status === "uncertain" ? "done" : "dismissed";
+      const result = task.status === "uncertain"
+        ? { ...task.result, archivedByOwnerAt: new Date().toISOString(), archivedByOwner: true }
+        : task.result;
+      return json({ task: await changeTask(db, owner, task, status, task.plan, result) });
+    }
     if (a.action === "complete") {
       return json({ task: await changeTask(db, owner, task, "done", task.plan, { ...task.result, manuallyConfirmed: true, note: a.note }) });
     }

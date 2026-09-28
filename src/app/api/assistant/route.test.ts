@@ -58,6 +58,14 @@ describe("assistant API boundary", () => {
     expect((await POST(request({ action: "execute", id, revision: 1, approved: true }))).status).toBe(409);
     expect(mocks.send).not.toHaveBeenCalled();
   });
+  it("archives an uncertain task without attempting another external action", async () => {
+    mocks.readTask.mockResolvedValue({ ...task, status: "uncertain" });
+    const result = await POST(request({ action: "dismiss", id, revision: 2 }));
+    expect(result.status).toBe(200);
+    expect(mocks.changeTask.mock.calls[0][3]).toBe("done");
+    expect(mocks.changeTask.mock.calls[0][5]).toMatchObject({ archivedByOwner: true });
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
   it("blocks replies after the owner has answered elsewhere", async () => {
     const changed = { ...evidence, lastUserAt: "2026-09-17T10:00:00Z" };
     mocks.readTask.mockResolvedValue({ ...task, plan: { ...task.plan, evidence: changed } }); mocks.readEvidence.mockResolvedValue(changed);
