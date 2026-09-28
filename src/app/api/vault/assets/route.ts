@@ -21,7 +21,7 @@ export async function GET(request:NextRequest){
   const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true});
   return error?NextResponse.json({error:"Bilagorna kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});
  }
- const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(500);
+ const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(500);
  return error?NextResponse.json({error:"Valvet kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});
 }
 export async function POST(request:NextRequest){
@@ -33,10 +33,12 @@ export async function POST(request:NextRequest){
  if(!sourceTypeParsed.success)return NextResponse.json({error:"Ogiltig källa."},{status:400});
  const kindParsed=z.enum(["document","person_image","image","other"]).optional().safeParse(String(form.get("forceKind")||"")||undefined);
  if(!kindParsed.success)return NextResponse.json({error:"Ogiltig filtyp."},{status:400});
+ const originParsed=z.enum(["google_drive","onedrive","device"]).optional().safeParse(String(form.get("externalOrigin")||"")||undefined);
+ if(!originParsed.success)return NextResponse.json({error:"Ogiltigt filursprung."},{status:400});
  try{
   const asset=await storeVaultFile({ownerId:session.user.id,bytes:new Uint8Array(await file.arrayBuffer()),filename:file.name,mimeType:file.type||"application/octet-stream",sourceType:sourceTypeParsed.data,
    sourceMessageId:String(form.get("sourceMessageId")||"")||null,sourceConversationId:String(form.get("sourceConversationId")||"")||null,sourcePersonId:String(form.get("sourcePersonId")||"")||null,
-   messageText:String(form.get("messageText")||""),forceKind:kindParsed.data,forceSave:String(form.get("forceSave")||"")==="true"});
+   messageText:String(form.get("messageText")||""),forceKind:kindParsed.data,forceSave:String(form.get("forceSave")||"")==="true",provenance:{externalOrigin:originParsed.data}});
   return NextResponse.json({asset});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Filen kunde inte sparas."},{status:409});}
 }

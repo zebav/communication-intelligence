@@ -17,6 +17,8 @@ export async function storeVaultFile(input:{
   ownerId:string; bytes:Uint8Array; filename:string; mimeType:string; sourceType:"email"|"whatsapp"|"instagram"|"chatgpt_upload"|"google_photos"|"manual"|"other";
   sourceMessageId?:string|null; sourceConversationId?:string|null; sourcePersonId?:string|null; sourceAttachmentId?:string|null;
   messageText?:string; extractedText?:string; forceKind?:"document"|"person_image"|"image"|"other"; forceSave?:boolean;
+  /** User-selected provenance only. Never place OAuth credentials or share links here. */
+  provenance?: { externalOrigin?: "google_drive"|"onedrive"|"device" };
 }) {
   if (!allowed.has(input.mimeType)) throw new Error("Filtypen stöds inte i det säkra valvet.");
   if (!input.bytes.length || input.bytes.length > 100*1024*1024) throw new Error("Filen är tom eller för stor.");
@@ -40,7 +42,10 @@ export async function storeVaultFile(input:{
     retention_reason:decision.reason,importance_score:decision.importance,reusable:decision.reusable,
     source_type:input.sourceType,source_attachment_id:input.sourceAttachmentId??null,source_message_id:input.sourceMessageId??null,
     source_conversation_id:input.sourceConversationId??null,source_person_id:input.sourcePersonId??null,
-    ai_decision:decision,metadata:{extracted_text_available:Boolean(input.extractedText)}
+    ai_decision:decision,metadata:{
+      extracted_text_available:Boolean(input.extractedText),
+      ...(input.provenance?.externalOrigin ? { external_origin: input.provenance.externalOrigin } : {}),
+    }
   }).select("*").single();
   if(error){await db.storage.from("secure-vault").remove([path]);throw error;}
   return data;

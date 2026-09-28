@@ -39,7 +39,8 @@ Detta är den viktigaste fasen och kräver inga nya partnerkonton.
 
 Koppla in som **owner-selected read-only import**, inte som full diskåtkomst.
 
-- Starta med dokument som användaren väljer med Google Picker eller OneDrive/SharePoint file picker.
+- Steg 1 är klart: dokumentvalvet kan importera en fil som ägaren väljer från Drive, OneDrive eller sin enhet och bevarar dess angivna ursprung utan att ändra originalet.
+- Nästa steg är dokument som användaren väljer med Google Picker eller OneDrive/SharePoint file picker.
 - Spara en privat kopia eller begränsad metadata i valvet, med ursprungslänk och åtkomsttid.
 - Analysera dokument i samma pipeline som e-postbilagor.
 - Skriv aldrig tillbaka till Drive/OneDrive i V1.
