@@ -40,7 +40,7 @@ async function resultRedirect(request: NextRequest, result: "connected" | "denie
 }
 
 async function documentsResultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
-  return NextResponse.redirect(new URL(`/?documents=${result}`, request.url));
+  return NextResponse.redirect(new URL(`/?view=settings&settings=documents&documents=${result}`, request.url));
 }
 
 async function finishOneDriveConsent(request: NextRequest) {

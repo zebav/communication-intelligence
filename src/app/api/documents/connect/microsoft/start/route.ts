@@ -21,5 +21,5 @@ export async function GET(request: NextRequest) {
     jar.set("microsoft_oauth_state", attempt.state, options);
     jar.set("microsoft_oauth_verifier", attempt.verifier, options);
     return NextResponse.redirect(authorizationUrl(config, attempt.state, attempt.challenge, microsoftOneDriveScopes));
-  } catch { return NextResponse.redirect(new URL("/?documents=configuration", request.url)); }
+  } catch { return NextResponse.redirect(new URL("/?view=settings&settings=documents&documents=configuration", request.url)); }
 }
