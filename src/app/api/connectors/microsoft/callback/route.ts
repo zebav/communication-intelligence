@@ -6,6 +6,7 @@ import { encryptCredential } from "@/lib/connectors/credential-crypto";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
+import { isPermittedAppOrigin, permittedAppOrigin } from "@/lib/app-origin";
 
 type TokenResponse = { access_token: string; refresh_token?: string; expires_in: number; scope?: string; token_type: string };
 type MicrosoftProfile = { id: string; displayName?: string; mail?: string; userPrincipalName?: string };
@@ -15,8 +16,7 @@ function stateReturnOrigin(state: string | null) {
   const encoded = state.split(".")[1];
   if (!encoded) return null;
   try {
-    const url = new URL(Buffer.from(encoded, "base64url").toString("utf8"));
-    return url.protocol === "https:" && /^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname) ? url.origin : null;
+    return permittedAppOrigin(Buffer.from(encoded, "base64url").toString("utf8"));
   } catch { return null; }
 }
 
@@ -32,7 +32,7 @@ async function resultRedirect(request: NextRequest, result: "connected" | "denie
   cookieStore.delete({ name: "microsoft_oauth_return_to", path: "/api/connectors/microsoft" });
   try {
     const url = new URL(target ?? request.nextUrl.origin);
-    if (url.protocol !== "https:" || !/^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname)) throw new Error("invalid return target");
+    if (!isPermittedAppOrigin(url.origin)) throw new Error("invalid return target");
     url.pathname = "/"; url.search = `?microsoft=${result}`; url.hash = "";
     return NextResponse.redirect(url);
   } catch { return NextResponse.redirect(new URL(`/?microsoft=${result}`, request.url)); }

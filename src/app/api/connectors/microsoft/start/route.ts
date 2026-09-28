@@ -2,13 +2,10 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { authorizationUrl, createOAuthAttempt, microsoftConfig, MICROSOFT_OAUTH_COOKIE_PATH } from "@/lib/connectors/microsoft-oauth";
+import { permittedAppOrigin } from "@/lib/app-origin";
 
 function permittedReturnOrigin(value: string | null) {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && /^communication-intelligence(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(url.hostname) ? url.origin : null;
-  } catch { return null; }
+  return permittedAppOrigin(value);
 }
 
 export async function GET(request: NextRequest) {
