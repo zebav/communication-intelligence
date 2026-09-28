@@ -50,7 +50,11 @@ export default async function Home() {
   // Recent message context is loaded below as one bounded payload instead.
   const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule)";
   const overviewCutoff = recentWindowStartIso(31);
-  const initialLoadSignal = AbortSignal.timeout(8_000);
+  // Each request needs its own cancellation signal. Reusing one shared signal
+  // means that one slow optional query aborts every other workspace query at
+  // the same instant, leaving a freshly reloaded workspace with no renderable
+  // snapshot even though most data was retrieved successfully.
+  const workspaceQuerySignal = () => AbortSignal.timeout(12_000);
   const [
     { data: profileRows, error: profileError },
     { data: personRows, error: personError },
@@ -64,17 +68,17 @@ export default async function Home() {
     { data: connectionRows, error: connectionError },
     { data: calendarHistoryRows, error: calendarHistoryError },
   ] = await Promise.all([
-    supabase.rpc("get_universal_communication_profile").abortSignal(initialLoadSignal),
-    supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(400).abortSignal(initialLoadSignal),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(60).abortSignal(initialLoadSignal),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(60).abortSignal(initialLoadSignal),
-    supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(600).abortSignal(initialLoadSignal),
-    supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(120).abortSignal(initialLoadSignal),
-    supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(100).abortSignal(initialLoadSignal),
-    supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,evidence,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(100).abortSignal(initialLoadSignal),
-    supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100).abortSignal(initialLoadSignal),
-    supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(initialLoadSignal),
-    supabase.from("calendar_holds").select("id,title,starts_at,ends_at,status").eq("owner_id", user.id).eq("status", "confirmed").order("starts_at", { ascending: false }).limit(50).abortSignal(initialLoadSignal),
+    supabase.rpc("get_universal_communication_profile").abortSignal(workspaceQuerySignal()),
+    supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(400).abortSignal(workspaceQuerySignal()),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(60).abortSignal(workspaceQuerySignal()),
+    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(60).abortSignal(workspaceQuerySignal()),
+    supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(600).abortSignal(workspaceQuerySignal()),
+    supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(120).abortSignal(workspaceQuerySignal()),
+    supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(100).abortSignal(workspaceQuerySignal()),
+    supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,evidence,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(100).abortSignal(workspaceQuerySignal()),
+    supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(100).abortSignal(workspaceQuerySignal()),
+    supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(workspaceQuerySignal()),
+    supabase.from("calendar_holds").select("id,title,starts_at,ends_at,status").eq("owner_id", user.id).eq("status", "confirmed").order("starts_at", { ascending: false }).limit(50).abortSignal(workspaceQuerySignal()),
   ]);
   const conversationRows = [...(emailRows ?? []), ...(channelRows ?? [])];
   const conversationIds = conversationRows.map((row) => row.id);

@@ -19,14 +19,14 @@ describe("workspace refresh protection", () => {
     expect(screen.getByTestId("workspace").textContent).toBe("recovered");
     expect(screen.queryByRole("alert")).toBeNull();
   });
-  it("does not present a failed first load as an empty workspace", () => {
+  it("keeps a safe partial workspace visible after a failed first load", () => {
     render(<WorkspaceSnapshot data={data("empty")} failedSections={["Kontakter"]} />);
-    expect(screen.queryByTestId("workspace")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("kunde inte hämtas");
+    expect(screen.getByTestId("workspace").textContent).toBe("empty paused");
+    expect(screen.getByRole("alert").textContent).toContain("ingenting har tagits bort");
   });
-  it("clears retained data when the authenticated owner changes", () => {
+  it("uses the new owner snapshot when the authenticated owner changes", () => {
     const { rerender } = render(<WorkspaceSnapshot key="owner-a" data={data("private-a")} failedSections={[]} />);
     rerender(<WorkspaceSnapshot key="owner-b" data={data("empty")} failedSections={["Kontakter"]} />);
-    expect(screen.queryByTestId("workspace")).toBeNull();
+    expect(screen.getByTestId("workspace").textContent).toBe("empty paused");
   });
 });
