@@ -47,6 +47,17 @@ Koppla in som **owner-selected read-only import**, inte som full diskåtkomst.
 
 **Behörighetsprincip:** Google rekommenderar smala per-fil-scope när möjligt; Microsoft ska använda delegerade, minst privilegierade behörigheter snarare än app-only bred åtkomst. [Google Drive OAuth scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Microsoft Graph permissions](https://learn.microsoft.com/en-us/graph/permissions-overview)
 
+### OAuth-konfiguration för valda molnfiler
+
+Den säkra anslutningsgrunden är implementerad med separata `google-drive` och `microsoft-onedrive`-anslutningar i `connections`. E-posttoken återanvänds inte och skrivbehörighet begärs aldrig.
+
+1. I Google Cloud: aktivera **Google Drive API** och lägg till `https://www.googleapis.com/auth/drive.file` i samtyckesskärmen. Samma stabila callback används som Gmail: `https://www.solvani.app/api/connectors/google/callback`.
+2. I Microsoft Entra: lägg till den delegerade Microsoft Graph-behörigheten **Files.Read**. Samma stabila callback används som Outlook: `https://www.solvani.app/api/connectors/microsoft/callback`.
+3. Samma serverhemligheter används som de befintliga Google-/Microsoft-anslutningarna: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY` och stabila redirect-URL:er. Inga nya hemligheter eller klientexponerade nycklar behövs.
+4. I Solvani öppnar ägaren Settings → Documents & Media och väljer **Anslut Google Drive** eller **Anslut OneDrive**. Token lagras krypterad och kan bara läsas efter inloggning med MFA.
+
+Efter OAuth-acceptans är nästa kodsteg en provider-specifik filväljare: Google Picker med `drive.file` respektive OneDrive picker med `Files.Read`. Ingen bakgrundsindexering av hela diskar ska införas.
+
 **Agentnytta:** avtal, offerter, presentationsunderlag och svar med faktakontroll.
 
 ### 3. Färdigställ kalender, Maps och väder som en planeringstjänst

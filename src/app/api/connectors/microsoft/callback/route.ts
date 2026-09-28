@@ -2,11 +2,12 @@ import { timingSafeEqual } from "node:crypto";
 import { finishCalendarConsent } from "@/lib/calendar/oauth";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
-import { encryptCredential } from "@/lib/connectors/credential-crypto";
+import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { createClient } from "@/lib/supabase/server";
 import { isPermittedAppOrigin, permittedAppOrigin } from "@/lib/app-origin";
+import { documentCloudCapabilities, microsoftOneDriveScopes } from "@/lib/documents/cloud-connections";
 
 type TokenResponse = { access_token: string; refresh_token?: string; expires_in: number; scope?: string; token_type: string };
 type MicrosoftProfile = { id: string; displayName?: string; mail?: string; userPrincipalName?: string };
@@ -38,8 +39,45 @@ async function resultRedirect(request: NextRequest, result: "connected" | "denie
   } catch { return NextResponse.redirect(new URL(`/?microsoft=${result}`, request.url)); }
 }
 
+async function documentsResultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
+  return NextResponse.redirect(new URL(`/?documents=${result}`, request.url));
+}
+
+async function finishOneDriveConsent(request: NextRequest) {
+  if (request.nextUrl.searchParams.get("error")) return documentsResultRedirect(request, "denied");
+  const code = request.nextUrl.searchParams.get("code"); const state = request.nextUrl.searchParams.get("state"); const jar = await cookies();
+  const expectedState = jar.get("microsoft_oauth_state")?.value; const verifier = jar.get("microsoft_oauth_verifier")?.value;
+  jar.delete("microsoft_oauth_state"); jar.delete("microsoft_oauth_verifier"); jar.delete("microsoft_oauth_purpose");
+  if (!code || !state || !expectedState || !verifier || !sameState(state, expectedState)) return documentsResultRedirect(request, "invalid");
+  const db = await createClient(); const { data: { user } } = await db.auth.getUser();
+  if (!user) return NextResponse.redirect(new URL("/login", request.url));
+  const { data: assurance } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return NextResponse.redirect(new URL("/auth/mfa", request.url));
+  try {
+    const config = microsoftConfig(request.nextUrl.origin);
+    const tokenResponse = await fetch(`https://login.microsoftonline.com/${config.tenant}/oauth2/v2.0/token`, { method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:config.clientId,client_secret:config.clientSecret,grant_type:"authorization_code",code,redirect_uri:config.redirectUri,code_verifier:verifier,scope:microsoftOneDriveScopes.join(" ")}),signal:AbortSignal.timeout(15_000) });
+    if (!tokenResponse.ok) return documentsResultRedirect(request, "failed");
+    const tokens = await tokenResponse.json() as TokenResponse; if (!tokens.access_token) return documentsResultRedirect(request, "failed");
+    const profileResponse = await fetch("https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName", {headers:{authorization:`Bearer ${tokens.access_token}`},signal:AbortSignal.timeout(15_000)});
+    if (!profileResponse.ok) return documentsResultRedirect(request, "failed");
+    const profile = await profileResponse.json() as MicrosoftProfile; const key = process.env.CREDENTIAL_ENCRYPTION_KEY;
+    if (!key || !profile.id) return documentsResultRedirect(request, "failed");
+    const accountIdentifier = profile.mail ?? profile.userPrincipalName ?? profile.id;
+    const { data: existing } = await db.from("connections").select("id,encrypted_credentials").eq("owner_id",user.id).eq("provider","microsoft-onedrive").eq("account_identifier",accountIdentifier).maybeSingle();
+    let refreshToken=tokens.refresh_token;
+    if (!refreshToken && existing?.encrypted_credentials) refreshToken = decryptCredential<{refreshToken?:string}>(existing.encrypted_credentials,key).refreshToken;
+    if (!refreshToken) return documentsResultRedirect(request,"failed");
+    const expiresAt=new Date(Date.now()+tokens.expires_in*1000).toISOString();
+    const credentials=encryptCredential({accessToken:tokens.access_token,refreshToken,tokenType:tokens.token_type,scope:tokens.scope,expiresAt},key);
+    const values={owner_id:user.id,provider:"microsoft-onedrive",source:"manual",account_name:profile.displayName??accountIdentifier,account_identifier:accountIdentifier,status:"connected",health_status:"healthy",capabilities:documentCloudCapabilities,scopes:[...microsoftOneDriveScopes],encrypted_credentials:credentials,token_metadata:{microsoft_profile_id:profile.id,expires_at:expiresAt,purpose:"selected_files"},updated_at:new Date().toISOString()};
+    const result=existing?.id?await db.from("connections").update(values).eq("id",existing.id):await db.from("connections").insert(values);
+    return result.error?documentsResultRedirect(request,"failed"):documentsResultRedirect(request,"connected");
+  } catch { return documentsResultRedirect(request,"failed"); }
+}
+
 export async function GET(request: NextRequest) {
   if ((await cookies()).get("microsoft_oauth_purpose")?.value === "calendar") return finishCalendarConsent(request, "microsoft");
+  if ((await cookies()).get("microsoft_oauth_purpose")?.value === "onedrive") return finishOneDriveConsent(request);
   if (request.nextUrl.searchParams.get("error")) return await resultRedirect(request, "denied");
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");

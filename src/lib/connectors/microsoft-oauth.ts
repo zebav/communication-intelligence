@@ -36,14 +36,14 @@ export function createOAuthAttempt(returnTo?: string | null) {
   return { state, verifier, challenge };
 }
 
-export function authorizationUrl(config: ReturnType<typeof microsoftConfig>, state: string, challenge: string) {
+export function authorizationUrl(config: ReturnType<typeof microsoftConfig>, state: string, challenge: string, scopes: readonly string[] = microsoftGraphConnector.scopes) {
   const url = new URL(`https://login.microsoftonline.com/${config.tenant}/oauth2/v2.0/authorize`);
   url.search = new URLSearchParams({
     client_id: config.clientId,
     response_type: "code",
     redirect_uri: config.redirectUri,
     response_mode: "query",
-    scope: microsoftGraphConnector.scopes.join(" "),
+    scope: scopes.join(" "),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
