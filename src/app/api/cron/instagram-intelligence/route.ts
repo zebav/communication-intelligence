@@ -3,6 +3,8 @@ import { isAuthorizedCron } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 import { instagramConnector } from "@/lib/connectors/instagram";
+import { processPendingEmailMediaJobs } from "@/lib/media/email-worker";
+import { readDataIngestionHealth } from "@/lib/data-ingestion-health";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -14,6 +16,7 @@ function metadataObject(value: unknown) {
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const database = createAdminClient();
+  const media = await processPendingEmailMediaJobs(database, 5).catch(() => ({ processed: 0, saved: 0, failed: 1 }));
   const { data: pending, error } = await database.from("messages").select("id,owner_id,conversation_id,metadata").eq("source", "instagram").eq("direction", "in").is("processed_at", null).order("sent_at", { ascending: true }).limit(10);
   if (error) return NextResponse.json({ error: "Pending Instagram messages could not be loaded." }, { status: 500 });
   const candidates = (pending ?? []).filter((message) => !metadataObject(message.metadata).ai_analysis).slice(0, 3);
@@ -22,5 +25,7 @@ export async function GET(request: NextRequest) {
   const failed = results.length - analyzed;
   if (failed) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).eq("provider", instagramConnector.id).eq("status", "connected");
   else if (analyzed) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("provider", instagramConnector.id).eq("status", "connected");
-  return NextResponse.json({ ok: true, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3 });
+  const health = await readDataIngestionHealth(database).catch(() => null);
+  if (health?.affectedConnectionIds.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", health.affectedConnectionIds);
+  return NextResponse.json({ ok: true, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, media, health });
 }

@@ -33,7 +33,7 @@ export default async function Home() {
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (!assurance || assurance.currentLevel !== "aal2") redirect("/auth/mfa");
 
-  const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,metadata)";
+  const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule),messages(id,body_text,sent_at,direction,classification,importance_score,attachment_count,metadata)";
   const overviewCutoff = recentWindowStartIso(31);
   const initialLoadSignal = AbortSignal.timeout(8_000);
   const [
@@ -103,7 +103,7 @@ export default async function Home() {
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
     const whatsappIdentities = (identityRows ?? []).filter((identity) => row.source === "whatsapp" && identity.source === "whatsapp" && identity.person_id === person?.id);
     const whatsappRecipient = whatsappIdentities.length === 1 ? whatsappIdentities[0].external_identifier : undefined;
-    return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at })).filter((item) => item.body) };
+    return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at, attachmentCount: Number(item.attachment_count ?? 0) })).filter((item) => item.body) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
     const messageFingerprint = normalizedConversationText(item.message);
@@ -128,7 +128,7 @@ export default async function Home() {
       : {};
     const analysis = metadata.ai_analysis && typeof metadata.ai_analysis.draftResponse === "string" ? metadata.ai_analysis : undefined;
     const deepAnalysis = metadata.deep_analysis && typeof metadata.deep_analysis.overview === "string" ? { ...metadata.deep_analysis, sources: deduplicateStoredSources(metadata.deep_analysis.sources) } : undefined;
-    const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at })).filter((message) => message.body);
+    const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at, attachmentCount: Number(message.attachment_count ?? 0) })).filter((message) => message.body);
     return {
       id: row.id,
       personId: person?.id ?? "",

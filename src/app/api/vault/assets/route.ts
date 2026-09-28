@@ -10,10 +10,16 @@ async function auth(){
 }
 export async function GET(request:NextRequest){
  const session=await auth(); if(!session)return NextResponse.json({error:"MFA krävs."},{status:403});
- const assetId=request.nextUrl.searchParams.get("assetId");
+  const assetId=request.nextUrl.searchParams.get("assetId");
  if(assetId){
   const parsed=z.string().uuid().safeParse(assetId); if(!parsed.success)return NextResponse.json({error:"Ogiltigt dokument."},{status:400});
   try{return NextResponse.json(await signedVaultUrl(session.user.id,parsed.data));}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Dokumentet kunde inte öppnas."},{status:404});}
+  }
+ const messageId=request.nextUrl.searchParams.get("messageId");
+ if(messageId){
+  const parsed=z.string().uuid().safeParse(messageId); if(!parsed.success)return NextResponse.json({error:"Ogiltigt meddelande."},{status:400});
+  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true});
+  return error?NextResponse.json({error:"Bilagorna kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});
  }
  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(500);
  return error?NextResponse.json({error:"Valvet kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});

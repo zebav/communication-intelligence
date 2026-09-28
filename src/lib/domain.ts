@@ -18,7 +18,7 @@ export interface CommunicationCase {
   createdAt: string;
   priorityScore?: number;
   recommendedAction?: string;
-  threadMessages?: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
+  threadMessages?: { id: string; direction: "in" | "out"; body: string; sentAt: string; attachmentCount?: number }[];
   conversationType?: string;
   analysis?: { summary?: string; intent?: string; priorityReason?: string; requiresReply?: boolean; draftResponse?: string; draftTone?: string };
 }
@@ -56,7 +56,7 @@ export interface SyncedEmailConversation {
   handlingRule?: "normal" | "always_priority" | "low_priority";
   relevanceReasons?: string[];
   memories?: PersonMemory[];
-  threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string }[];
+  threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string; attachmentCount?: number }[];
   analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; relationshipSuggestion?: { type: string; confidence: number; reason: string }; forwardingSuggestion?: { recommended: boolean; recipientRole: "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "business_partner" | "other" | "none"; reason: string; introduction: string }; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number }; actionSuggestion?: { detected: boolean; type: "contact_lookup" | "web_research" | "website_task" | "form_completion" | "none"; task: string; reason: string; targetUrl: string; requiresLogin: boolean; contactIds: string[]; requiredFields: { key: string; label: string; kind: "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other"; description: string; sensitivity: "personal" | "sensitive" | "restricted" }[]; confidence: number; status?: "proposed" | "started" | "completed" } };
   deepAnalysis?: DeepAnalysis;
 }
