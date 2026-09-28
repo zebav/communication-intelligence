@@ -12,6 +12,17 @@ describe("action discovery", () => {
     expect(propose(campaign)).toEqual([]);
     expect(isNoteworthy(campaign)).toBe(false);
   });
+  it.each(["Kivra: du har ett nytt viktigt brev", "DistroKid: royalty payout available", "TestFlight: action required for your build"])("keeps a critical service notice in 'Bör noteras': %s", (title) => {
+    expect(isNoteworthy({ ...example, title, classification: "Newsletter", priority: 2 })).toBe(true);
+  });
+  it("does not create an unusable web task without a verified HTTPS address", () => {
+    const missingLink = { ...example, analysis: { requiresReply: true, actionSuggestion: { detected: true, type: "website_task" as const, task: "Complete registration", reason: "A form is needed", targetUrl: "", requiresLogin: true, contactIds: [], requiredFields: [], confidence: 0.9 } } };
+    expect(propose(missingLink)).toEqual(["reply"]);
+  });
+  it("keeps disposable test messages out of both notification views", () => {
+    expect(propose({ ...example, body: "Test 5" })).toEqual([]);
+    expect(isNoteworthy({ ...example, body: "Testing." })).toBe(false);
+  });
   it("keeps an explicit legal or account-security obligation visible after sender deprioritization", () => {
     expect(survivesLowerPrioritySender({ ...example, classification: "Legal", priority: 7 })).toBe(true);
     expect(survivesLowerPrioritySender({ ...example, title: "Kampanj", body: "Nyhetsbrev och erbjudande", classification: "Business", priority: 9 })).toBe(false);

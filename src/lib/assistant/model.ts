@@ -130,14 +130,25 @@ const bulk = new Set(["Marketing", "Newsletter", "Spam", "Notification", "Inform
 // commercial newsletter must not become urgent merely because an older model
 // called it Legal or Business.
 const promotional = /\b(nyhetsbrev|newsletter|unsubscribe|avregistrera|veckan på|kampanj|erbjudande|offer|rabatt|% off|meny denna vecka|boka bord|netflix|streaming|member benefits|medlemsförmån|shop now|handla nu|sale|rea)\b/i;
+// Some senders use newsletter-like mail for account, release and payout
+// notices. They are not reply tasks by default, but must not disappear into
+// marketing merely because their delivery format includes an unsubscribe link.
+const criticalService = /\b(kivra|distrokid|testflight|app store connect|apple developer|bankid|skatteverket|verksamt|bolagsverket|microsoft 365|google workspace|cloudflare|domain renewal|renewal notice|utbetalning|payout|royalt(?:y|ies)|tax|moms|invoice overdue|förfallen faktura)\b/i;
+const disposableTestMessage = /^\s*(?:test|testing)(?:\s*\d+)?[.!?\s]*$/i;
+export function isCriticalServiceNotice(e: Pick<Evidence, "title" | "body">) {
+  return criticalService.test(`${e.title}\n${e.body}`);
+}
 export function isPromotional(e: Pick<Evidence, "title" | "body" | "classification">) {
+  if (isCriticalServiceNotice(e)) return false;
   return bulk.has(e.classification) || promotional.test(`${e.title}\n${e.body}`);
 }
 export function isNoteworthy(e: Pick<Evidence, "title" | "body" | "classification" | "priority" | "unread">) {
+  if (disposableTestMessage.test(e.body)) return false;
+  if (isCriticalServiceNotice(e)) return true;
   if (isPromotional(e)) return false;
   if (e.priority >= 6) return true;
   if (["Financial", "Legal", "Booking / Travel", "Customer", "Business"].includes(e.classification)) return true;
-  return /\b(kivra|distrokid|testflight|apple developer|skatteverket|bankid|invoice|faktura|contract|avtal|verification|verifiera|account|konto|utbetalning|royalt|release)\b/i.test(`${e.title}\n${e.body}`);
+  return /\b(invoice|faktura|contract|avtal|verification|verifiera|account|konto|release)\b/i.test(`${e.title}\n${e.body}`);
 }
 
 /** A lower-priority sender may still surface a concrete legal, financial or
@@ -157,13 +168,19 @@ export function propose(e: Evidence, now = Date.now()): TaskKind[] {
   if (blocksDecisionUntilMediaReady({ media_analysis_status: e.mediaState }, e.attachmentCount)) return [];
   if (e.lastUserAt && Date.parse(e.lastUserAt) >= Date.parse(e.sentAt)) return [];
   if (e.lastOtherAt && Date.parse(e.lastOtherAt) > Date.parse(e.sentAt)) return [];
+  if (disposableTestMessage.test(e.body)) return [];
   if (isPromotional(e)) return [];
   const a = e.analysis;
   const context = `${a.intent ?? ""} ${a.summary ?? ""} ${e.title} ${e.body}`;
   if (a.forwardingSuggestion?.recommended) return ["forward"];
   if (/(book|reserve|reservation|boka|bokning|reservera)/i.test(context) && /(hotel|hotell|restaurant|restaurang|table|bord|room|rum)/i.test(context)) return ["website"];
   if (a.requiresReply && /\b(möte|middag|lunch|fika|padel|meeting|dinner|coffee|träffas|ses|appointment)\b/i.test(context)) return ["meeting"];
-  if (a.actionSuggestion?.detected) return ["website"];
+  if (a.actionSuggestion?.detected) {
+    // Do not create a Browserbase task that cannot be opened safely. If a
+    // sender supplied no verified HTTPS destination, retain a normal reply
+    // task only when the stored analysis says a response is required.
+    return verifiedHttpsUrl(a.actionSuggestion.targetUrl ?? "", e.body, e.title) ? ["website"] : a.requiresReply ? ["reply"] : [];
+  }
   if (a.commitment?.detected && a.commitment.owner === "sender") {
     return a.commitment.dueAt && Date.parse(a.commitment.dueAt) < now ? ["follow_up"] : [];
   }
@@ -180,6 +197,7 @@ export function candidateRank(e: Evidence, kind: TaskKind, now = Date.now()) {
   if (e.unread) score += 12;
   if (a.forwardingSuggestion?.recommended) score += 25;
   if (a.actionSuggestion?.detected || kind === "website") score += 18;
+  if (isCriticalServiceNotice(e)) score += 22;
   if (kind === "meeting") score += 15;
   if (a.commitment?.detected) score += 10;
   const ageDays = Math.max(0, (now - Date.parse(e.sentAt)) / 86_400_000);

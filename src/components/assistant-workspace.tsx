@@ -75,9 +75,10 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
 }) {
   const [bucket, setBucket] = useState<"decision" | "ready" | "waiting" | "done">("decision"), [mode, setMode] = useState<"handle" | "note">("handle"), [query, setQuery] = useState("");
   const [manualMessage, setManualMessage] = useState(""), [manualKind, setManualKind] = useState<TaskKind>("reply");
-  const [hiddenCandidates, setHiddenCandidates] = useState<Set<string>>(() => new Set());
+  const [hiddenCandidates, setHiddenCandidates] = useState<Set<string>>(() => new Set()), [showAllCandidates, setShowAllCandidates] = useState(false);
   const candidateKey = (messageId: string, kind: TaskKind) => `${messageId}:${kind}`;
   const visibleCandidates = snapshot.candidates.filter((candidate) => !hiddenCandidates.has(candidateKey(candidate.messageId, candidate.kind)));
+  const displayedCandidates = showAllCandidates ? visibleCandidates : visibleCandidates.slice(0, 6);
   const visible = snapshot.tasks.filter(t => taskBucket(t) === bucket && `${t.plan.evidence.personName} ${t.plan.evidence.title} ${t.plan.evidence.account}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const task = snapshot.tasks.find(t => t.id === selected);
   return <>
@@ -91,7 +92,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {visible.map(t => <button key={t.id} className={`assistant-task ${t.id === selected ? "selected" : ""}`} onClick={() => onSelect(t.id)}><span>{kindLabels[t.kind]} · {statusLabels[t.status]}</span><strong>{t.plan.evidence.title || "Konversation"}</strong><span>{t.plan.evidence.personName}</span><small>{t.plan.evidence.source} · {t.plan.evidence.account} · Prioritet {t.plan.evidence.priority.toFixed(1)}/10{t.plan.evidence.unread ? " · Oläst" : ""}</small>{t.plan.evidence.mediaState && t.plan.evidence.mediaState !== "not_applicable" && <small>{mediaDecisionLabel(t.plan.evidence.mediaState)}</small>}{t.plan.followUpAt && <small>Följ upp {new Date(t.plan.followUpAt).toLocaleString("sv-SE")}</small>}</button>)}
     </section><section className="assistant-detail" aria-label="Granska uppdrag">{task ? <TaskDetail key={`${task.id}:${task.revision}`} task={task} people={people} busy={busy} act={act} snapshot={snapshot} onRefresh={onRefresh} /> : <div className="empty-card"><h2>Välj ett uppdrag</h2><p>Här visas original, föreslagna steg, mottagare och ditt redigerbara svar.</p></div>}</section></div>
     <section className="assistant-proposals"><h2>Nya notiser</h2><p>Systemet har granskat {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post från de senaste ${snapshot.emailWindowDays ?? 7} dagarna och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden hålls utanför.</p>
-      <div className="assistant-proposal-grid">{visibleCandidates.map(candidate => {
+      <div className="assistant-proposal-grid">{displayedCandidates.map(candidate => {
         const card = decisionCard(candidate.plan, candidate.kind);
         const evidence = candidate.plan.evidence;
         const key = candidateKey(candidate.messageId, candidate.kind);
@@ -104,7 +105,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
           <div className="assistant-buttons"><button className="btn primary" disabled={busy} onClick={() => act({ action: "start", messageId: candidate.messageId, kind: candidate.kind })}>Förbered uppdrag</button><button className="btn" disabled={busy} onClick={() => { setHiddenCandidates((current) => new Set(current).add(key)); void act({ action: "dismiss_candidate", messageId: candidate.messageId, kind: candidate.kind }); }}>Inte relevant</button><button className="btn" disabled={busy} onClick={() => { setHiddenCandidates((current) => new Set(current).add(key)); void act({ action: "dismiss_candidate", messageId: candidate.messageId, kind: candidate.kind, scope: "sender" }); }}>Prioritera avsändaren lägre</button></div>
         </article>;
       })}</div>
-      {snapshot.next && <button className="btn" disabled={busy} onClick={onMore}>Granska fler meddelanden</button>}
+      <div className="assistant-buttons">{visibleCandidates.length > displayedCandidates.length && <button className="btn" disabled={busy} onClick={() => setShowAllCandidates(true)}>Visa {visibleCandidates.length - displayedCandidates.length} fler förslag</button>}{snapshot.next && <button className="btn" disabled={busy} onClick={() => { setShowAllCandidates(false); onMore(); }}>Granska ytterligare meddelanden</button>}</div>
       <details><summary>AI missade ett uppdrag</summary><label>Välj meddelande från hämtat underlag<select value={manualMessage} onChange={e => setManualMessage(e.target.value)}><option value="">Välj meddelande</option>{snapshot.reviewMessages.map(m => <option key={m.id} value={m.id}>{m.person} · {m.title}</option>)}</select></label><label>Vad behöver göras?<select value={manualKind} onChange={e => setManualKind(e.target.value as TaskKind)}>{kinds.map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label><button className="btn" disabled={busy || !manualMessage} onClick={() => act({ action: "start", messageId: manualMessage, kind: manualKind })}>Skapa för granskning</button></details>
     </section>
     <div className="assistant-notice"><strong>Det systemet lär sig.</strong><p>Regler, svarston, irrelevanta avsändare och bekräftad kontaktkontext samlas under Settings → Learning & Memory. Här visar vi bara beslut som kräver dig nu.</p></div></>}
