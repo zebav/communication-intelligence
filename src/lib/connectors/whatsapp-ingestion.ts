@@ -8,14 +8,23 @@ import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution
 import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 
 async function triggerVaultProcessing(ownerId: string) {
-  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const fallback = process.env.VERCEL_URL?.trim();
+  const base = configured || (fallback ? `https://${fallback}` : "");
   const secret = process.env.CRON_SECRET?.trim();
-  if (!base || !secret) return;
-  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
+  if (!base || !secret) {
+    console.error("WhatsApp vault processing is unavailable", { configuredOrigin: Boolean(base), cronSecret: Boolean(secret) });
+    return;
+  }
+  const response = await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
     method: "POST",
     headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
     signal: AbortSignal.timeout(100_000),
-  }).catch(() => undefined);
+  }).catch((error) => {
+    console.error("WhatsApp vault processing request failed", { reason: error instanceof Error ? error.message : "unknown" });
+    return null;
+  });
+  if (response && !response.ok) console.error("WhatsApp vault processing was rejected", { status: response.status });
 }
 
 export async function ingestWhatsAppEvents(events: WhatsAppProviderEvents) {

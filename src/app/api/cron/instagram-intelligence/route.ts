@@ -16,6 +16,14 @@ function metadataObject(value: unknown) {
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const database = createAdminClient();
+  // Hobby has only two daily cron slots. Reuse the existing protected
+  // maintenance run to recover all media types (including WhatsApp) that
+  // could not finish in a webhook's background window.
+  const recovery = await fetch(`${request.nextUrl.origin}/api/cron/vault-ingestion`, {
+    headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ""}` },
+    signal: AbortSignal.timeout(50_000),
+  }).then(async (response) => ({ ok: response.ok, body: await response.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, body: { error: "vault_recovery_failed" } }));
   const media = await processPendingEmailMediaJobs(database, 5).catch(() => ({ processed: 0, saved: 0, failed: 1 }));
   const { data: pending, error } = await database.from("messages").select("id,owner_id,conversation_id,metadata").eq("source", "instagram").eq("direction", "in").is("processed_at", null).order("sent_at", { ascending: true }).limit(10);
   if (error) return NextResponse.json({ error: "Pending Instagram messages could not be loaded." }, { status: 500 });
@@ -27,5 +35,5 @@ export async function GET(request: NextRequest) {
   else if (analyzed) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("provider", instagramConnector.id).eq("status", "connected");
   const health = await readDataIngestionHealth(database).catch(() => null);
   if (health?.affectedConnectionIds.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", health.affectedConnectionIds);
-  return NextResponse.json({ ok: true, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, media, health });
+  return NextResponse.json({ ok: true, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, media, recovery, health });
 }

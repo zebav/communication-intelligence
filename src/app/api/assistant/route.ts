@@ -86,9 +86,22 @@ export async function GET(request: Request) {
       .sort((a, b) => b.rank - a.rank)
       .map(({ messageId, kind, plan }) => ({ messageId, kind, plan }));
     const candidateMessageIds = new Set(candidates.map(candidate => candidate.messageId));
+    // An information thread can contain several imported copies of the same
+    // notice. The notification centre should show the latest useful message,
+    // not make the owner read the same thread repeatedly. We deliberately use
+    // the conversation as the primary key, with a conservative fallback for
+    // imports that have no stable conversation id.
+    const seenNotes = new Set<string>();
     const notes = page.messages
       .filter((e): e is Evidence => !dismissedMessageIds.has(e.messageId) && !candidateMessageIds.has(e.messageId) && !ignoredSenders.has(`${e.source}:${e.personId}`) && (!lowerPrioritySenders.has(`${e.source}:${e.personId}`) || survivesLowerPrioritySender(e)) && isNoteworthy(e))
       .sort((a, b) => b.priority - a.priority || b.sentAt.localeCompare(a.sentAt))
+      .filter((e) => {
+        const fallbackTitle = `${e.source}:${e.personId ?? e.personName}:${e.title.trim().toLocaleLowerCase()}`;
+        const key = e.conversationId || fallbackTitle;
+        if (seenNotes.has(key)) return false;
+        seenNotes.add(key);
+        return true;
+      })
       .slice(0, 20)
       .map(e => ({ messageId: e.messageId, title: e.title, personName: e.personName, source: e.source, account: e.account, priority: e.priority, unread: e.unread, summary: e.analysis.summary || e.analysis.intent || e.body.slice(0, 280) }));
     return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
@@ -150,6 +163,26 @@ export async function POST(request: NextRequest) {
           });
           if (learningError) throw new Error("Meddelandet sorterades bort men avsändarens prioritetsregel kunde inte sparas.");
         }
+      } else {
+        // A message-level correction is still a valuable learning signal. It
+        // must not silently turn into a global sender block, so it is stored
+        // as a suggested, auditable rule scoped to this original message.
+        const { error: learningError } = await db.from("learning_signals").insert({
+          owner_id: owner,
+          person_id: e.personId,
+          conversation_id: e.conversationId,
+          source: e.source,
+          signal_type: "category_corrected",
+          observation: `Du markerade “${e.title || "ett meddelande"}” från ${e.personName} som inte relevant i Notiscenter.`,
+          proposed_rule: "Visa inte detta specifika ärende som ett handlingsförslag igen.",
+          evidence: { assistant_relevance: "message_irrelevant", message_id: e.messageId },
+          confidence: 1,
+          status: "suggested",
+        });
+        // The database uses an expression index for the person-null case,
+        // which PostgreSQL cannot name in an ON CONFLICT column list. A repeat
+        // click is therefore a harmless duplicate rather than an error.
+        if (learningError && learningError.code !== "23505") throw new Error("Meddelandet sorterades bort men lärandespåret kunde inte sparas.");
       }
       return json({ saved: true });
     }

@@ -14,10 +14,13 @@ export async function GET(request:NextRequest){
  const results=[];
  for(const ownerId of unique){
   try{
+   // Keep the recovery bounded inside the runtime budget. The processor takes
+   // a larger batch, while the live webhook still triggers it immediately for
+   // newly received WhatsApp media.
    const response=await fetch(`${origin}/api/vault/process-ingestion`,{
-    method:"POST",
-    headers:{authorization:`Bearer ${process.env.CRON_SECRET??""}`,"x-owner-id":ownerId},
-    signal:AbortSignal.timeout(120_000),
+     method:"POST",
+     headers:{authorization:`Bearer ${process.env.CRON_SECRET??""}`,"x-owner-id":ownerId},
+     signal:AbortSignal.timeout(50_000),
    });
    const body=await response.json().catch(()=>({}));
    results.push({ownerId,status:response.status,...body});

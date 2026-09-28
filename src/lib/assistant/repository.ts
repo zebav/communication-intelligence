@@ -102,15 +102,20 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
   // hundreds of rich messages (including full email bodies) made the decision
   // screen slow even before a person could act on the first card. Older items
   // remain available through the cursor and are still ranked by priority.
-  const pageSize = 40;
+  // A month was too short for a real decision queue: important account,
+  // legal and payout notices can remain unanswered for longer than that.
+  // Keep the payload bounded, but give the ranking model a useful recovery
+  // window for older, still-open messages.
+  const pageSize = 60;
   const offset = Math.max(0, Number(before) || 0);
   const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in");
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+  const recoveryWindowDays = 90;
+  const recoveryWindowStart = new Date(Date.now() - recoveryWindowDays * 86400000).toISOString();
   const [email, other] = await Promise.all([
     db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email")
-      .gte("sent_at", thirtyDaysAgo).order("importance_score", { ascending: false, nullsFirst: false })
+      .gte("sent_at", recoveryWindowStart).order("importance_score", { ascending: false, nullsFirst: false })
       .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
-    query().neq("source", "email").gte("sent_at", thirtyDaysAgo)
+    query().neq("source", "email").gte("sent_at", recoveryWindowStart)
       .order("importance_score", { ascending: false, nullsFirst: false })
       .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
   ]);
@@ -122,7 +127,7 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
     messages: rows.map(evidenceFromRow).map((evidence) => ({ ...evidence, body: evidence.body.slice(0, 1_200) })),
     next: email.data?.length === pageSize || other.data?.length === pageSize ? String(offset + pageSize) : null,
     scannedBySource: { email: email.data?.length ?? 0, messaging: other.data?.length ?? 0 },
-    emailWindowDays: 30,
+    emailWindowDays: recoveryWindowDays,
   };
 }
 export async function readTask(db: SupabaseClient, owner: string, id: string): Promise<Task> {

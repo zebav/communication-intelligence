@@ -95,7 +95,7 @@ async function metaWhatsAppMedia(token:string,mediaId:string,metadata:Record<str
 export async function POST(request:NextRequest){
  const actor=await owner(request); if(!actor)return NextResponse.json({error:"MFA eller giltig bakgrundsauktorisering krävs."},{status:403});
  const db=createAdminClient(); const key=process.env.CREDENTIAL_ENCRYPTION_KEY; if(!key)return NextResponse.json({error:"Krypteringsnyckel saknas."},{status:503});
- const {data:jobs,error}=await db.from("vault_ingestion_jobs").select("*").eq("owner_id",actor.id).eq("state","pending").order("created_at").limit(5);
+ const {data:jobs,error}=await db.from("vault_ingestion_jobs").select("*").eq("owner_id",actor.id).eq("state","pending").order("created_at").limit(10);
  if(error)return NextResponse.json({error:"Ingest-kön kunde inte läsas."},{status:500});
  let processed=0,saved=0,skipped=0,failed=0;
  for(const job of jobs??[]){
@@ -129,5 +129,5 @@ export async function POST(request:NextRequest){
    await db.from("vault_ingestion_jobs").update({state:"done",last_error_code:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
   }catch(e){failed++;await db.from("vault_ingestion_jobs").update({state:"failed",last_error_code:e instanceof Error?e.message.slice(0,120):"unknown",updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);}
  }
- return NextResponse.json({processed,saved,skipped,failed,more:(jobs??[]).length===5});
+ return NextResponse.json({processed,saved,skipped,failed,more:(jobs??[]).length===10});
 }
