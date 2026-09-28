@@ -5,6 +5,7 @@ import { decideVaultRetention } from "./document-retention";
 
 const allowed = new Set([
   "application/pdf","image/jpeg","image/png","image/webp","image/heic","image/heif","text/plain","text/csv","application/json",
+  "audio/mpeg","audio/mp4","audio/m4a","audio/wav","audio/x-wav","audio/ogg","audio/webm",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",

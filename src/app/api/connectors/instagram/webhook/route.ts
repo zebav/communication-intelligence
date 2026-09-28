@@ -6,19 +6,26 @@ import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-inte
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
-import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
+import { downloadEphemeralInstagramMedia } from "@/lib/connectors/instagram-media";
+import { ingestTrustedMediaAttachments, type MediaJob } from "@/lib/media/email-worker";
 
 export const maxDuration = 60;
 
-async function triggerVaultProcessing(ownerId: string) {
-  const base = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!base || !secret) return;
-  await fetch(`${base.replace(/\/$/, "")}/api/vault/process-ingestion`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${secret}`, "x-owner-id": ownerId },
-    signal: AbortSignal.timeout(100_000),
-  }).catch(() => undefined);
+type InstagramMediaJob = { job: MediaJob; urls: string[] };
+
+async function ingestInstagramMedia(database: ReturnType<typeof createAdminClient>, item: InstagramMediaJob) {
+  try {
+    // Meta URLs are intentionally held only in this signed webhook request.
+    // They are downloaded from Meta's allowlisted hosts, then replaced by a
+    // private Vault asset. No temporary URL or token is stored in Supabase.
+    const attachments = await downloadEphemeralInstagramMedia(item.urls, "instagram-media");
+    await ingestTrustedMediaAttachments(database, item.job, attachments);
+  } catch (error) {
+    const { data } = await database.from("messages").select("metadata").eq("id", item.job.source_message_id).eq("owner_id", item.job.owner_id).maybeSingle();
+    const metadata = data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata) ? data.metadata as Record<string, unknown> : {};
+    await database.from("messages").update({ metadata: { ...metadata, media_analysis_status: "failed", media_analysis: { reason: error instanceof Error ? error.message.slice(0, 120) : "instagram_media_ingestion_failed" } } }).eq("id", item.job.source_message_id).eq("owner_id", item.job.owner_id);
+    throw error;
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -67,6 +74,8 @@ export async function POST(request: NextRequest) {
   let imported = 0;
   let failed = 0;
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
+  const mediaJobs: InstagramMediaJob[] = [];
+  const deliveredConnectionIds = new Set<string>();
 
   for (const event of events) {
     try {
@@ -146,31 +155,20 @@ export async function POST(request: NextRequest) {
       if (messageError) throw messageError;
       if (savedMessage) {
         imported += 1;
+        deliveredConnectionIds.add(connection.id);
         if (event.message.attachmentCount > 0) {
-          const refs = mediaByMessage.get(event.message.externalId) ?? [];
-          if (refs.length) {
-            const { error: mediaRefError } = await database.from("vault_media_references").upsert(refs.map((ref) => ({
-              owner_id: connection.owner_id,
-              connection_id: connection.id,
-              source: "instagram",
-              provider: instagramConnector.id,
-              provider_message_id: event.message.externalId,
-              media_type: ref.type ?? null,
-              media_reference: ref.url,
-            })), { onConflict: "owner_id,source,provider,provider_message_id,media_reference", ignoreDuplicates: true });
-            if (mediaRefError) throw mediaRefError;
+          const urls = (mediaByMessage.get(event.message.externalId) ?? []).map((ref) => ref.url);
+          if (urls.length) mediaJobs.push({ job: { id: `instagram:${savedMessage.id}`, owner_id: connection.owner_id, connection_id: connection.id, provider: instagramConnector.id, provider_message_id: event.message.externalId, source_message_id: savedMessage.id, source_conversation_id: conversationResult.data.id, source_person_id: resolved.personId, source_type: "instagram", attempts: 0 }, urls });
+          else {
+            await database.from("messages").update({
+              metadata: {
+                ...event.message.providerMetadata,
+                connection_id: connection.id,
+                media_analysis_status: "failed",
+                media_analysis: { reason: "instagram_attachment_url_missing" },
+              },
+            }).eq("id", savedMessage.id).eq("owner_id", connection.owner_id);
           }
-          await queueVaultIngestion(database, {
-            ownerId: connection.owner_id,
-            connectionId: connection.id,
-            provider: instagramConnector.id,
-            sourceType: "instagram",
-            providerMessageId: event.message.externalId,
-            sourceMessageId: savedMessage.id,
-            sourceConversationId: conversationResult.data.id,
-            sourcePersonId: resolved.personId,
-            messageText: event.message.body,
-          });
         }
         if (event.message.direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversationResult.data.id, messageId: savedMessage.id });
       }
@@ -185,8 +183,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (analyses.length) after(async () => { await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item))); });
-  const owners = [...new Set((connections ?? []).map((connection) => connection.owner_id))];
-  if (owners.length) after(async () => { await Promise.allSettled(owners.map(triggerVaultProcessing)); });
+  if (deliveredConnectionIds.size) {
+    await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .in("id", [...deliveredConnectionIds]).eq("provider", instagramConnector.id);
+  }
+
+  if (analyses.length || mediaJobs.length) after(async () => {
+    await Promise.allSettled(mediaJobs.map((item) => ingestInstagramMedia(database, item)));
+    // Media analysis completes before message analysis, so the AI can use the
+    // saved attachment findings in the same first response suggestion.
+    await Promise.allSettled(analyses.map((item) => analyzeIncomingInstagramMessage(item)));
+  });
   return NextResponse.json({ received: true, imported, failed });
 }

@@ -8,7 +8,7 @@ import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { analyzeStoredMedia } from "@/lib/media/analysis";
 
 type Credentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
-export type MediaJob = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; metadata?: unknown };
+export type MediaJob = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; source_type?: "email" | "instagram" | "whatsapp"; metadata?: unknown };
 export type MediaAttachment = { filename: string; mimeType: string; bytes: Buffer };
 const maxBytes = 100 * 1024 * 1024;
 const textMimeTypes = new Set(["text/plain", "text/csv", "application/json"]);
@@ -121,7 +121,7 @@ async function storeAttachment(database: SupabaseClient, job: MediaJob, attachme
   const analyzed = text
     ? { state: "ready" as const, summary: text.slice(0, 1000), decision: { analysis_state: "ready", type: "text", extracted_text: text } }
     : await analyzeStoredMedia({ ownerId: job.owner_id, mimeType: attachment.mimeType, filename: attachment.filename, bytes: attachment.bytes });
-  const { data: asset, error } = await database.from("vault_assets").insert({ owner_id: job.owner_id, asset_kind: attachment.mimeType.startsWith("image/") ? "image" : attachment.mimeType.startsWith("audio/") ? "audio" : "document", title: attachment.filename, filename: attachment.filename, mime_type: attachment.mimeType, size_bytes: attachment.bytes.length, storage_path: path, sha256, source_type: "email", source_message_id: job.source_message_id, source_conversation_id: job.source_conversation_id, source_person_id: job.source_person_id, sensitivity: "personal", retention_status: "candidate", summary: analyzed.summary, retention_reason: "Imported attachment", ai_decision: analyzed.decision, metadata: { provider: job.provider } }).select("id").single();
+  const { data: asset, error } = await database.from("vault_assets").insert({ owner_id: job.owner_id, asset_kind: attachment.mimeType.startsWith("image/") ? "image" : attachment.mimeType.startsWith("audio/") ? "audio" : "document", title: attachment.filename, filename: attachment.filename, mime_type: attachment.mimeType, size_bytes: attachment.bytes.length, storage_path: path, sha256, source_type: job.source_type ?? "email", source_message_id: job.source_message_id, source_conversation_id: job.source_conversation_id, source_person_id: job.source_person_id, sensitivity: "personal", retention_status: "saved", summary: analyzed.summary, retention_reason: "Imported attachment", ai_decision: analyzed.decision, metadata: { provider: job.provider } }).select("id").single();
   if (error || !asset) throw new Error("vault_asset_save_failed");
   if (job.source_message_id) await database.from("attachments").insert({ owner_id: job.owner_id, message_id: job.source_message_id, filename: attachment.filename, mime_type: attachment.mimeType, size_bytes: attachment.bytes.length, storage_reference: `secure-vault/${path}`, metadata: { vault_asset_id: asset.id, sha256 } });
   return { state: analyzed.state, assetId: String(asset.id), summary: analyzed.summary };

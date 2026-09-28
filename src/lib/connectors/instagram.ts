@@ -15,7 +15,7 @@ export const instagramConnector: ConnectorDefinition = {
     validateConnection: true,
     fullSync: false,
     incrementalSync: false,
-    pushNotifications: false,
+    pushNotifications: true,
     createDraft: false,
     sendWithApproval: true,
     archive: false,

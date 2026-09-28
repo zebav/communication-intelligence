@@ -7,7 +7,9 @@ import {microsoftGraphConnector} from "@/lib/connectors/microsoft-graph";
 import {createAdminClient} from "@/lib/supabase/admin";
 import {createClient} from "@/lib/supabase/server";
 import {isAuthorizedCron} from "@/lib/cron-auth";
-import {storeVaultFile} from "@/lib/vault/vault-service";
+import {ingestTrustedMediaAttachments, type MediaJob} from "@/lib/media/email-worker";
+import {instagramConnector} from "@/lib/connectors/instagram";
+import {downloadEphemeralInstagramMedia} from "@/lib/connectors/instagram-media";
 import {z} from "zod";
 
 export const maxDuration=120;
@@ -104,10 +106,11 @@ export async function POST(request:NextRequest){
    const original=decryptCredential<Credentials>(conn.encrypted_credentials,key); let creds:Credentials=original; let files:Attachment[]=[]; let sourceType:"email"|"whatsapp"|"instagram"="email";
    if(conn.provider===microsoftGraphConnector.id){creds=await refreshMicrosoft(original,request.nextUrl.origin);files=await microsoftAttachments(creds.accessToken,job.provider_message_id);}
    else if(conn.provider===googleGmailConnector.id){creds=await refreshGoogle(original,request.nextUrl.origin);files=await gmailAttachments(creds.accessToken,job.provider_message_id);}
-   else if(conn.provider==="instagram"){
+   else if(conn.provider===instagramConnector.id){
      sourceType="instagram";
      const {data:refs}=await db.from("vault_media_references").select("media_reference").eq("owner_id",actor.id).eq("connection_id",conn.id).eq("source","instagram").eq("provider_message_id",job.provider_message_id);
-     for(const ref of refs??[])if(typeof ref.media_reference==="string"&&ref.media_reference.startsWith("https://"))files.push(...await fetchExternalMedia(ref.media_reference));
+     const urls=(refs??[]).flatMap(ref=>typeof ref.media_reference==="string"?[ref.media_reference]:[]);
+     if(urls.length) files.push(...(await downloadEphemeralInstagramMedia(urls, "instagram-media")).map((item) => ({ name: item.filename, mime: item.mimeType, bytes: new Uint8Array(item.bytes) })));
    }
    else if(conn.provider==="whatsapp-business"){
      sourceType="whatsapp";
@@ -121,9 +124,8 @@ export async function POST(request:NextRequest){
    }
    else throw new Error("unsupported_provider");
    if(creds.accessToken!==original.accessToken)await db.from("connections").update({encrypted_credentials:encryptCredential(creds,key),updated_at:new Date().toISOString()}).eq("id",conn.id).eq("owner_id",actor.id);
-   for(const file of files){
-    try{const result=await storeVaultFile({ownerId:actor.id,bytes:file.bytes,filename:file.name,mimeType:file.mime,sourceType,sourceMessageId:job.source_message_id,sourceConversationId:job.source_conversation_id,sourcePersonId:job.source_person_id,messageText:job.message_text});if("skipped" in result)skipped++;else saved++;}catch{skipped++;}
-   }
+   const outcome=await ingestTrustedMediaAttachments(db,{...job,source_type:sourceType,attempts:Number(job.attempts??0)} as MediaJob,files.map(file=>({filename:file.name,mimeType:file.mime,bytes:Buffer.from(file.bytes)})));
+   saved+=outcome.assetCount;
    await db.from("vault_ingestion_jobs").update({state:"done",last_error_code:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
   }catch(e){failed++;await db.from("vault_ingestion_jobs").update({state:"failed",last_error_code:e instanceof Error?e.message.slice(0,120):"unknown",updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);}
  }
