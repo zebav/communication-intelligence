@@ -8,6 +8,7 @@ import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
 import { chooseAdvisorConversation } from "@/lib/assistant/follow-up";
 import { sendApprovedGmailReply } from "@/lib/assistant/gmail-reply";
+import { readDataIngestionHealth } from "@/lib/data-ingestion-health";
 import { sendOutlookFollowUp } from "@/lib/assistant/outlook-follow-up";
 import { POST as outlookReply } from "@/app/api/connectors/microsoft/reply/route";
 import { POST as outlookForward } from "@/app/api/connectors/microsoft/forward/route";
@@ -42,12 +43,15 @@ export async function GET(request: Request) {
   try {
     const { db, owner } = await session(request);
     const cursor = z.coerce.number().int().min(0).max(100000).parse(new URL(request.url).searchParams.get("cursor") ?? 0);
-    const [page, tasks, feedback, calendar, relevanceRules] = await Promise.all([
+    const [page, tasks, feedback, calendar, relevanceRules, ingestion, suggestedLearning, awaitingAnalysis] = await Promise.all([
       readCandidates(db, owner, String(cursor)),
       db.from("assistant_tasks").select("*").eq("owner_id", owner).order("updated_at", { ascending: false }).limit(120),
       db.from("assistant_task_feedback").select("category").eq("owner_id", owner).order("created_at", { ascending: false }).limit(250),
       db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle(),
       db.from("learning_signals").select("person_id,source,evidence").eq("owner_id", owner).eq("signal_type", "category_corrected").eq("status", "approved").limit(250),
+      readDataIngestionHealth(db, owner).catch(() => null),
+      db.from("learning_signals").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("status", "suggested"),
+      db.from("messages").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("direction", "in").is("processed_at", null),
     ]);
     if (tasks.error || feedback.error || relevanceRules.error) throw new Error("Notiscentrets databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
     // Saved tasks retain their complete, auditable original. Candidate rows are
@@ -104,7 +108,14 @@ export async function GET(request: Request) {
       })
       .slice(0, 20)
       .map(e => ({ messageId: e.messageId, title: e.title, personName: e.personName, source: e.source, account: e.account, priority: e.priority, unread: e.unread, summary: e.analysis.summary || e.analysis.intent || e.body.slice(0, 280) }));
-    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness() });
+    const operations = {
+      pendingMedia: ingestion?.pendingMedia ?? 0,
+      failedMedia: ingestion?.failedMedia ?? 0,
+      staleConnections: ingestion?.connections.filter(connection => connection.needsAttention).length ?? 0,
+      awaitingAnalysis: awaitingAnalysis.error ? 0 : awaitingAnalysis.count ?? 0,
+      learningSuggestions: suggestedLearning.error ? 0 : suggestedLearning.count ?? 0,
+    };
+    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations });
   } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
 }
 export async function POST(request: NextRequest) {

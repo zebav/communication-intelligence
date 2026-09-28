@@ -17,6 +17,7 @@ export type AssistantSnapshot = {
   next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; emailWindowDays?: number; tasksLimited: boolean;
   feedback: { category: string }[]; timezone: string | null; executionEnabled: boolean;
   browserReadiness?: BrowserReadiness;
+  operations?: { pendingMedia: number; failedMedia: number; staleConnections: number; awaitingAnalysis: number; learningSuggestions: number };
 };
 type Api = (body: Record<string, unknown>) => Promise<void>;
 export function AssistantWorkspace({ people }: { people: CommunicationPersonOption[] }) {
@@ -81,8 +82,11 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
   const displayedCandidates = showAllCandidates ? visibleCandidates : visibleCandidates.slice(0, 6);
   const visible = snapshot.tasks.filter(t => taskBucket(t) === bucket && `${t.plan.evidence.personName} ${t.plan.evidence.title} ${t.plan.evidence.account}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const task = snapshot.tasks.find(t => t.id === selected);
+  const operations = snapshot.operations;
+  const operationalIssues = (operations?.pendingMedia ?? 0) + (operations?.failedMedia ?? 0) + (operations?.staleConnections ?? 0) + (operations?.awaitingAnalysis ?? 0);
   return <>
     {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: systemet kan förbereda förslag men skickar eller bokar inget härifrån utan ett separat godkännande.</p>}
+    {operations && <section className={`assistant-operations ${operationalIssues ? "needs-attention" : ""}`} aria-label="Systemkontroll"><div><p className="eyebrow">Systemkontroll</p><h2>{operationalIssues ? "Systemet har några saker att färdigställa" : "All datainhämtning är i normal drift"}</h2><p>{operations.awaitingAnalysis ? `${operations.awaitingAnalysis} nya meddelanden väntar på analys. ` : ""}{operations.pendingMedia ? `${operations.pendingMedia} bilagor väntar på analys. ` : ""}{operations.failedMedia ? `${operations.failedMedia} bilagor behöver ett nytt försök. ` : ""}{operations.staleConnections ? `${operations.staleConnections} anslutningar behöver synk eller kontroll. ` : ""}{!operationalIssues ? "Nya meddelanden sorteras och förbereds automatiskt." : "Du hittar återställning och anslutningsstatus under Settings → Connections."}</p></div><div className="assistant-operation-stats"><span><strong>{operations.learningSuggestions}</strong> lärandeförslag</span><span><strong>{snapshot.candidates.length}</strong> nya beslut</span><span><strong>{snapshot.notes?.length ?? 0}</strong> att notera</span></div></section>}
     <nav className="assistant-tabs" aria-label="Notisvyer"><button className={`btn ${mode === "handle" ? "primary" : ""}`} aria-pressed={mode === "handle"} onClick={() => setMode("handle")}>Bör hanteras <span>{snapshot.candidates.length + snapshot.tasks.filter(t => ["decision", "ready"].includes(taskBucket(t))).length}</span></button><button className={`btn ${mode === "note" ? "primary" : ""}`} aria-pressed={mode === "note"} onClick={() => setMode("note")}>Bör noteras <span>{snapshot.notes?.length ?? 0}</span></button></nav>
     {mode === "handle" && <><nav className="assistant-tabs assistant-status-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
     <label className="assistant-search">Sök person, ärende eller konto<input value={query} onChange={e => setQuery(e.target.value)} /></label>
