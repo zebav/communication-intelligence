@@ -98,24 +98,29 @@ export async function readEvidence(db: SupabaseClient, owner: string, id: string
   return evidenceFromRow(data);
 }
 export async function readCandidates(db: SupabaseClient, owner: string, before?: string) {
-  // Email and messaging channels have independent pages. The 30-day window is
-  // intentional: older unanswered requests remain visible. Two hundred rows
-  // keeps relevant notices such as account, payout and app-release updates
-  // from being crowded out by a handful of recent messages.
+  // The first notification-centre response is intentionally bounded. Loading
+  // hundreds of rich messages (including full email bodies) made the decision
+  // screen slow even before a person could act on the first card. Older items
+  // remain available through the cursor and are still ranked by priority.
+  const pageSize = 40;
   const offset = Math.max(0, Number(before) || 0);
-  const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").order("created_at", { ascending: false }).order("id", { ascending: false });
+  const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in");
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
   const [email, other] = await Promise.all([
     db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email")
       .gte("sent_at", thirtyDaysAgo).order("importance_score", { ascending: false, nullsFirst: false })
-      .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 199),
-    query().neq("source", "email").gte("sent_at", thirtyDaysAgo).range(offset, offset + 199),
+      .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
+    query().neq("source", "email").gte("sent_at", thirtyDaysAgo)
+      .order("importance_score", { ascending: false, nullsFirst: false })
+      .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
   ]);
   if (email.error || other.error) throw new Error("Underlaget kunde inte hämtas. Försök igen; befintliga uppdrag finns kvar.");
   const rows = [...(email.data ?? []), ...(other.data ?? [])].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   return {
-    messages: rows.map(evidenceFromRow),
-    next: email.data?.length === 200 || other.data?.length === 200 ? String(offset + 200) : null,
+    // Full originals are fetched again from the database when the owner opens
+    // or prepares a task. The queue only needs a safe, readable excerpt.
+    messages: rows.map(evidenceFromRow).map((evidence) => ({ ...evidence, body: evidence.body.slice(0, 1_200) })),
+    next: email.data?.length === pageSize || other.data?.length === pageSize ? String(offset + pageSize) : null,
     scannedBySource: { email: email.data?.length ?? 0, messaging: other.data?.length ?? 0 },
     emailWindowDays: 30,
   };
