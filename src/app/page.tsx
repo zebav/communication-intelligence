@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { WorkspaceSnapshot } from "@/components/workspace-snapshot";
 import type { View } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
-import { normalizeUniversalProfile } from "@/lib/communication-profile";
+import { defaultUniversalProfile, normalizeUniversalProfile } from "@/lib/communication-profile";
 import { recentWindowStartIso } from "@/lib/recent-window";
 import type { CalendarLearningEvent, ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
@@ -67,19 +67,7 @@ export default async function Home({ searchParams }: HomeProps) {
   // renders the successful segments and clearly marks any that missed this
   // deadline instead of leaving the user on an indefinite loading screen.
   const workspaceQuerySignal = () => AbortSignal.timeout(6_000);
-  const [
-    { data: profileRows, error: profileError },
-    { data: personRows, error: personError },
-    { data: emailRows, error: emailError },
-    { data: channelRows, error: channelError },
-    { data: identityRows, error: identityError },
-    { data: memoryRows, error: memoryError },
-    { data: commitmentRows, error: commitmentError },
-    { data: learningRows, error: learningError },
-    { data: outcomeRows, error: outcomeError },
-    { data: connectionRows, error: connectionError },
-    { data: calendarHistoryRows, error: calendarHistoryError },
-  ] = await Promise.all([
+  const workspaceQueries = Promise.all([
     supabase.rpc("get_universal_communication_profile").abortSignal(workspaceQuerySignal()),
     supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(400).abortSignal(workspaceQuerySignal()),
     supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(45).abortSignal(workspaceQuerySignal()),
@@ -92,6 +80,30 @@ export default async function Home({ searchParams }: HomeProps) {
     supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(workspaceQuerySignal()),
     supabase.from("calendar_holds").select("id,title,starts_at,ends_at,status").eq("owner_id", user.id).eq("status", "confirmed").order("starts_at", { ascending: false }).limit(50).abortSignal(workspaceQuerySignal()),
   ]);
+  const workspaceLoad = await Promise.race([
+    workspaceQueries.then((result) => ({ kind: "loaded" as const, result })),
+    new Promise<{ kind: "timed-out" }>((resolve) => setTimeout(() => resolve({ kind: "timed-out" }), 6_500)),
+  ]);
+  if (workspaceLoad.kind === "timed-out") {
+    console.error("workspace_load_timed_out");
+    return <WorkspaceSnapshot key={user.id} failedSections={["Arbetsytans data"]} data={{
+      userEmail: user.email ?? "Private owner", communicationCases: [], connections: [], syncedEmails: [], followUps: [], people: [], learningSignals: [], outcomes: [], calendarHistory: [],
+      persona: defaultUniversalProfile, profilePeople: [], initialView,
+    }} />;
+  }
+  const [
+    { data: profileRows, error: profileError },
+    { data: personRows, error: personError },
+    { data: emailRows, error: emailError },
+    { data: channelRows, error: channelError },
+    { data: identityRows, error: identityError },
+    { data: memoryRows, error: memoryError },
+    { data: commitmentRows, error: commitmentError },
+    { data: learningRows, error: learningError },
+    { data: outcomeRows, error: outcomeError },
+    { data: connectionRows, error: connectionError },
+    { data: calendarHistoryRows, error: calendarHistoryError },
+  ] = workspaceLoad.result;
   const conversationRows = [...(emailRows ?? []), ...(channelRows ?? [])];
   const conversationIds = conversationRows.map((row) => row.id);
   const { data: messageRows, error: messageError } = conversationIds.length
