@@ -29,6 +29,18 @@
 .assistant-steps { padding-left:24px; margin:20px 0; }
 .assistant-approval { padding:16px; margin:16px 0; border:1px solid #34d399; border-radius:12px; }
 .assistant-approval label { display:flex; align-items:flex-start; }
+.approval-brief { margin:18px 0; padding:16px; border:1px solid #2f8f74; border-radius:14px; background:#10231f; }
+.approval-brief-needs_review { border-color:#475569; background:#111c29; }
+.approval-brief-blocked { border-color:#e8a44e; background:#241d14; }
+.approval-brief-heading { display:flex; align-items:start; justify-content:space-between; gap:12px; }
+.approval-brief-heading > div > span,.approval-brief-grid span { display:block; font-size:.72rem; letter-spacing:.05em; text-transform:uppercase; color:#aab8c9; }
+.approval-brief h3 { margin:4px 0 0; font-size:1.05rem; }
+.approval-state { flex:none; padding:4px 8px; border:1px solid currentColor; border-radius:999px; font-size:.78rem; }
+.approval-brief-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:16px; }
+.approval-brief-grid > div { min-width:0; }
+.approval-brief-grid p { margin:5px 0 0; overflow-wrap:anywhere; }
+.approval-brief-guard { margin:16px 0 0; padding-top:12px; border-top:1px solid rgba(148,163,184,.35); color:#d4dfeb; }
+.decision-card-details { margin:14px 0 0; }
 .assistant-proposals { margin-top:40px; }
 .assistant-proposal-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:14px; }
 .assistant-quality { padding:20px; background:#101923; border-radius:14px; }
@@ -36,7 +48,7 @@
 .assistant-browser-status dt { font-weight:600; margin-top:14px; }
 .assistant-browser-status dd { margin:6px 0 0; line-height:1.6; overflow-wrap:anywhere; }
 .assistant-browser-result { white-space:pre-wrap; overflow-wrap:anywhere; max-height:320px; overflow:auto; font:inherit; line-height:1.6; padding:12px; background:#080f19; border-radius:8px; }
-@media(max-width:900px) { .assistant-header { align-items:stretch; flex-direction:column; } .assistant-header .btn { width:100%; } .assistant-layout { grid-template-columns:1fr; } .assistant-list { max-height:360px; } .assistant-detail { padding:16px; } }
+@media(max-width:900px) { .assistant-header { align-items:stretch; flex-direction:column; } .assistant-header .btn { width:100%; } .assistant-layout { grid-template-columns:1fr; } .assistant-list { max-height:360px; } .assistant-detail { padding:16px; } .approval-brief-grid { grid-template-columns:1fr; } }
 
 .decision-card { display:grid; gap:12px; margin:20px 0; }
 .decision-card-section { padding:16px; border:1px solid #334155; border-radius:12px; background:#0b1420; }

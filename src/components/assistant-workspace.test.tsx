@@ -104,11 +104,12 @@ describe("assistant review interface", () => {
     expect(act).toHaveBeenCalledWith({ action: "execute", id: "task", revision: 2, approved: true });
   });
 
-  it("shows a decision summary and exact approval outcome before action", () => {
+  it("shows a compact approval contract before action", () => {
     mount();
-    expect(screen.getByText("Sammanfattning")).toBeTruthy();
-    expect(screen.getByText("Varför detta är viktigt")).toBeTruthy();
-    expect(screen.getAllByText("Detta händer när du godkänner").length).toBeGreaterThan(0);
+    expect(screen.getByText("Approval-to-Execution")).toBeTruthy();
+    expect(screen.getByText("Det systemet gör")).toBeTruthy();
+    expect(screen.getByText("Mål")).toBeTruthy();
+    expect(screen.getByText(/Mottagare, konto och senaste konversationsläge/)).toBeTruthy();
   });
 
   it("edits revoke approval until saved and reviewed", () => {

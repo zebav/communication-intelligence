@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { candidateRank, decisionCard, isNoteworthy, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, type Evidence, type Task } from "./model";
+import { approvalBrief, candidateRank, decisionCard, isNoteworthy, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
@@ -61,6 +61,12 @@ describe("action discovery", () => {
     expect(card.summary).toBe("Kort sammanfattning");
     expect(card.whyImportant).toBe("Behöver svar idag");
     expect(card.approvalOutcome).toContain("skickas en gång");
+  });
+  it("builds an exact approval brief from the saved plan", () => {
+    const brief = approvalBrief(makePlan(example, "reply"), "reply", "ready");
+    expect(brief.state).toBe("ready");
+    expect(brief.destination).toContain(example.recipient);
+    expect(brief.guard).toContain("Mottagare");
   });
   it("turns a prepared meeting into a send-ready decision instead of a planning placeholder", () => {
     const plan = {

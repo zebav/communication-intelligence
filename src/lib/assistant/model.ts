@@ -56,6 +56,44 @@ export type DecisionCard = {
   targetUrl: string;
 };
 
+/** A compact, deterministic contract shown at the decision point. It is
+ * derived only from the stored plan: the owner never approves a fresh model
+ * interpretation that differs from what the executor will use. */
+export type ApprovalBrief = {
+  state: "ready" | "needs_review" | "blocked";
+  action: string;
+  destination: string;
+  guard: string;
+};
+
+export function approvalBrief(plan: Plan, kind: TaskKind, status: TaskStatus): ApprovalBrief {
+  const e = plan.evidence;
+  const blocked = sendCapability(plan, kind);
+  const targetUrl = kind === "website" ? decisionCard(plan, kind).targetUrl : "";
+  const destination = kind === "website"
+    ? (targetUrl ? new URL(targetUrl).hostname : "Ingen verifierad webbplats")
+    : plan.recipient
+      ? `${plan.recipientName || e.personName} · ${plan.recipient}`
+      : "Välj en verifierad mottagare";
+  const action = kind === "website"
+    ? "Öppna och granska den godkända webbuppgiften"
+    : kind === "meeting"
+      ? "Skicka det sparade svaret med kontrollerade mötesalternativ"
+      : kind === "forward"
+        ? "Vidarebefordra originalet med den sparade introduktionen"
+        : "Skicka det sparade svaret en gång";
+  if (blocked) return { state: "blocked", action, destination, guard: blocked };
+  if (status !== "ready") return { state: "needs_review", action, destination, guard: "Granska och spara planen innan något kan genomföras." };
+  return {
+    state: "ready",
+    action,
+    destination,
+    guard: kind === "website"
+      ? "Webbuppgiften är avgränsad till den godkända HTTPS-adressen. Känsliga, juridiska, betalnings- och destruktiva steg stoppas."
+      : "Mottagare, konto och senaste konversationsläge kontrolleras precis före utskick. Åtgärden skickas aldrig om automatiskt.",
+  };
+}
+
 export function decisionCard(plan: Plan, kind: TaskKind): DecisionCard {
   const e = plan.evidence;
   const action = e.analysis.actionSuggestion;

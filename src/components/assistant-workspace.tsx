@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { decisionCard, kinds, kindLabels, sendCapability, statusLabels, taskBucket, type Task, type Plan, type TaskKind } from "@/lib/assistant/model";
+import { approvalBrief, decisionCard, kinds, kindLabels, sendCapability, statusLabels, taskBucket, type Task, type Plan, type TaskKind } from "@/lib/assistant/model";
 import { AssistantBrowserStatus } from "./assistant-browser-status";
 import type { BrowserReadiness } from "@/lib/assistant/browser-readiness";
 import { AssistantMeeting } from "./assistant-meeting";
@@ -113,6 +113,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
 }
 function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Task; people: CommunicationPersonOption[]; busy: boolean; act: Api; snapshot: AssistantSnapshot; onRefresh: () => Promise<void> }) {
   const p = task.plan, e = p.evidence, decision = decisionCard(p, task.kind);
+  const brief = approvalBrief(p, task.kind, task.status);
   const [draft, setDraft] = useState(p.draft), [person, setPerson] = useState(p.recipientPersonId ?? ""), [search, setSearch] = useState("");
   const [followAt, setFollowAt] = useState(p.followUpAt ? new Date(Date.parse(p.followUpAt) - new Date(p.followUpAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
   const [approved, setApproved] = useState(false), [note, setNote] = useState(""), [feedback, setFeedback] = useState("useful"), [meeting, setMeeting] = useState(false), [copied, setCopied] = useState(false);
@@ -125,11 +126,11 @@ function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Ta
   return <>
     <p className="eyebrow">{kindLabels[task.kind]} · {statusLabels[task.status]}</p><h2>{e.title}</h2>
     <div className="assistant-contact-actions"><PersonLink personId={e.personId ?? undefined} name={e.personName} />{e.personId && <a className="btn" href={`/contacts/${encodeURIComponent(e.personId)}`}>Redigera kontakt</a>}</div><p>{e.source} · {e.account}</p>
-    <section className="decision-card" aria-label="Beslutsunderlag">
-      <div className="decision-card-section"><span>Sammanfattning</span><p>{decision.summary}</p></div>
-      <div className="decision-card-section"><span>Varför detta är viktigt</span><p>{decision.whyImportant}</p></div>
-      <div className="decision-card-section"><span>Föreslagen åtgärd</span><p>{decision.proposedAction}</p>{decision.targetUrl && <a href={decision.targetUrl} target="_blank" rel="noreferrer">{decision.targetUrl}</a>}</div>
-      <div className="decision-card-section approval-outcome"><span>Detta händer när du godkänner</span><p>{decision.approvalOutcome}</p></div>
+    <section className={`approval-brief approval-brief-${brief.state}`} aria-label="Godkännandesteg">
+      <div className="approval-brief-heading"><div><span>Approval-to-Execution</span><h3>{brief.state === "ready" ? "Redo för ditt godkännande" : brief.state === "blocked" ? "Planen är spärrad" : "Planen behöver granskas"}</h3></div><span className="approval-state">{brief.state === "ready" ? "Redo" : brief.state === "blocked" ? "Spärrad" : "Granska"}</span></div>
+      <div className="approval-brief-grid"><div><span>Ärendet</span><p>{decision.summary}</p></div><div><span>Det systemet gör</span><p>{brief.action}</p></div><div><span>Mål</span><p>{brief.destination}</p></div></div>
+      <p className="approval-brief-guard">{brief.guard}</p>
+      <details className="decision-card-details"><summary>Visa bakgrund och full effekt av beslutet</summary><div className="decision-card"><div className="decision-card-section"><span>Varför detta är viktigt</span><p>{decision.whyImportant}</p></div><div className="decision-card-section"><span>Föreslagen åtgärd</span><p>{decision.proposedAction}</p>{decision.targetUrl && <a href={decision.targetUrl} target="_blank" rel="noreferrer">{decision.targetUrl}</a>}</div><div className="decision-card-section approval-outcome"><span>Detta händer när du godkänner</span><p>{decision.approvalOutcome}</p></div></div></details>
     </section>
     {e.mediaState && e.mediaState !== "not_applicable" && <section className="assistant-notice"><strong>Bilaga/media:</strong> {mediaDecisionLabel(e.mediaState)}{e.mediaState === "pending" || e.mediaState === "processing" ? ". Systemet håller tillbaka svar och andra externa åtgärder tills den säkra analysen är klar." : "."}{e.mediaState === "ready" && e.mediaSummaries?.length ? <details className="assistant-media-details"><summary>Vad AI hittade i bilagan</summary><ul>{e.mediaSummaries.map((summary, index) => <li key={`${index}:${summary}`}>{summary}</li>)}</ul></details> : null}</section>}
     {["instagram", "whatsapp"].includes(e.source) ? <section className="assistant-original-card assistant-original-visible" aria-label="Hela meddelandet"><h3>Hela meddelandet från {e.personName}</h3><p className="assistant-original">{e.body || "Originaltexten saknas i den synkroniserade posten."}</p></section> : <details className="assistant-source-details"><summary>Visa original och underlag</summary><section className="assistant-original-card" aria-label="Kontaktens originalmeddelande"><h3>Kontaktens originalmeddelande</h3><p className="assistant-original">{e.body || "Originaltexten saknas i den synkroniserade posten."}</p></section><ol className="assistant-steps">{p.steps.map(s => <li key={s}>{s}</li>)}</ol></details>}
