@@ -20,5 +20,5 @@ export async function GET(request: NextRequest) {
     jar.set("google_oauth_state", attempt.state, options);
     jar.set("google_oauth_verifier", attempt.verifier, options);
     return NextResponse.redirect(googleAuthorizationUrl(config, attempt.state, attempt.challenge, "drive"));
-  } catch { return NextResponse.redirect(new URL("/?view=settings&settings=documents&documents=configuration", request.url)); }
+  } catch { return NextResponse.redirect(new URL("/?view=settings&settings=documents&documents=configuration&documentProvider=google-drive", request.url)); }
 }

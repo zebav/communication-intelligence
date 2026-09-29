@@ -21,7 +21,7 @@ function resultRedirect(request: NextRequest, result: "connected" | "denied" | "
 }
 
 function documentsResultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
-  return NextResponse.redirect(new URL(`/?view=settings&settings=documents&documents=${result}`, request.url));
+  return NextResponse.redirect(new URL(`/?view=settings&settings=documents&documents=${result}&documentProvider=google-drive`, request.url));
 }
 
 async function finishDriveConsent(request: NextRequest) {
