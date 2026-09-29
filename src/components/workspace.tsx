@@ -12,6 +12,7 @@ import { ContactAvatar } from "@/components/contact-avatar";
 import { ContactPhotoEditor } from "@/components/contact-photo-editor";
 const PersonalKnowledgeVault = dynamic(() => import("@/components/personal-knowledge-vault").then(module => module.PersonalKnowledgeVault), { loading: () => <p>Öppnar personlig kontext…</p> });
 const DocumentVault = dynamic(() => import("@/components/document-vault").then(module => module.DocumentVault), { loading: () => <p>Öppnar dokument och media…</p> });
+const ServiceToolLayer = dynamic(() => import("@/components/service-tool-layer").then(module => module.ServiceToolLayer), { loading: () => <p>Hämtar tjänster och säkerhetsregler…</p> });
 import { MessageAttachments } from "@/components/message-attachments";
 import { PriorityFeedback } from "@/components/priority-feedback";
 const AccountPlan = dynamic(() => import("@/components/account-plan").then(module => module.AccountPlan), { loading: () => <p>Hämtar abonnemang…</p> });
@@ -609,12 +610,17 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
   })}</div></div>;
 }
 function SettingsView({ persona, people, learningSignals, followUps, outcomes, calendarHistory, connections, onSaved }: { persona: UniversalCommunicationProfile; people: CommunicationPersonOption[]; learningSignals: LearningSignal[]; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; connections: ChannelConnection[]; onSaved: (profile: UniversalCommunicationProfile) => void }) {
-  type SettingsTab = "context" | "documents" | "intelligence" | "outcomes" | "connections" | "account" | "security";
-  const [tab, setTab] = useState<SettingsTab>(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("settings") === "documents" ? "documents" : "context");
+  type SettingsTab = "context" | "documents" | "services" | "intelligence" | "outcomes" | "connections" | "account" | "security";
+  const [tab, setTab] = useState<SettingsTab>(() => {
+    if (typeof window === "undefined") return "context";
+    const requested = new URLSearchParams(window.location.search).get("settings");
+    return requested === "documents" || requested === "services" || requested === "intelligence" || requested === "outcomes" || requested === "connections" || requested === "account" || requested === "security" ? requested : "context";
+  });
   return <div className="page"><PageHeader eyebrow="Private workspace" title="Settings" subtitle="Din personliga kontext, dina AI-regler och dina anslutna källor finns samlade här." />
-    <div className="toolbar" aria-label="Inställningar"><button className={`btn ${tab === "context" ? "primary" : ""}`} onClick={() => setTab("context")}>Personal Context</button><button className={`btn ${tab === "documents" ? "primary" : ""}`} onClick={() => setTab("documents")}>Documents & Media</button><button className={`btn ${tab === "intelligence" ? "primary" : ""}`} onClick={() => setTab("intelligence")}>Learning & Memory</button><button className={`btn ${tab === "outcomes" ? "primary" : ""}`} onClick={() => setTab("outcomes")}>Outcomes</button><button className={`btn ${tab === "connections" ? "primary" : ""}`} onClick={() => setTab("connections")}>Connections</button><button className={`btn ${tab === "account" ? "primary" : ""}`} onClick={() => setTab("account")}>Plan & usage</button><button className={`btn ${tab === "security" ? "primary" : ""}`} onClick={() => setTab("security")}>Security</button></div>
+    <div className="toolbar" aria-label="Inställningar"><button className={`btn ${tab === "context" ? "primary" : ""}`} onClick={() => setTab("context")}>Personal Context</button><button className={`btn ${tab === "documents" ? "primary" : ""}`} onClick={() => setTab("documents")}>Documents & Media</button><button className={`btn ${tab === "services" ? "primary" : ""}`} onClick={() => setTab("services")}>Services & Tools</button><button className={`btn ${tab === "intelligence" ? "primary" : ""}`} onClick={() => setTab("intelligence")}>Learning & Memory</button><button className={`btn ${tab === "outcomes" ? "primary" : ""}`} onClick={() => setTab("outcomes")}>Outcomes</button><button className={`btn ${tab === "connections" ? "primary" : ""}`} onClick={() => setTab("connections")}>Connections</button><button className={`btn ${tab === "account" ? "primary" : ""}`} onClick={() => setTab("account")}>Plan & usage</button><button className={`btn ${tab === "security" ? "primary" : ""}`} onClick={() => setTab("security")}>Security</button></div>
     {tab === "context" && <><div className="section-title"><CircleUserRound size={14} /> Your shared foundation</div><p className="subtitle">Din befintliga kommunikationsprofil är kvar som enda källa för hur AI skriver och agerar. Personliga uppgifter ligger säkert i Personal Context nedan — utan en parallell profil.</p><PersonaForm initial={persona} people={people} onSaved={onSaved} /><PersonalKnowledgeVault /></>}
     {tab === "documents" && <DocumentVault />}
+    {tab === "services" && <ServiceToolLayer />}
     {tab === "intelligence" && <Intelligence items={learningSignals} people={people} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} />}
     {tab === "outcomes" && <Outcomes items={outcomes} />}
     {tab === "connections" && <Connections connections={connections} />}

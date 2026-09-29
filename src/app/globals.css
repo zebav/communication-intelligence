@@ -131,6 +131,28 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .screenshot-import { border: 1px solid var(--line); border-radius: 9px; padding: 12px; display: grid; gap: 9px; }.screenshot-import > strong { font-size: 11px; }.screenshot-import input[type="file"] { color: var(--muted); font-size: 10px; }.screenshot-import .btn { justify-self: start; }
 .simple-import { max-width: 900px; }.import-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.import-choice-button { min-height: 92px; border: 1px solid #303943; border-radius: 10px; background: #11161a; color: #cfd8d3; display: grid; place-items: center; align-content: center; gap: 5px; cursor: pointer; }.import-choice-button:hover { border-color: #4a8e73; background: #132019; }.import-choice-button strong { font-size: 12px; }.import-choice-button span { color: var(--muted); font-size: 9px; }.import-divider { display: flex; align-items: center; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }.import-divider::before, .import-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }.import-divider span { padding: 0 10px; }.simple-import-text { min-height: 170px !important; font-size: 12px !important; line-height: 1.55; }.analyze-import-button { justify-self: start; }.import-privacy { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.45; }.import-analysis { display: grid; gap: 12px; }.import-detected { display: flex; flex-wrap: wrap; gap: 6px; }.import-detected span { border: 1px solid #385a4c; border-radius: 999px; padding: 5px 8px; color: #a8ddc9; font-size: 9px; }.import-analysis section { border: 1px solid var(--line); border-radius: 9px; padding: 12px; }.import-analysis section small { color: #8fcdb5; font-weight: 700; }.import-analysis section p { margin: 7px 0 0; color: #d8dfdc; font-size: 11px; line-height: 1.5; }.import-reply { border-color: #3b755e !important; background: #0d1713; }.import-reply > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; }.import-reply textarea { min-height: 180px; margin-top: 10px; background: #090d0b; border-color: #3a6b5b; color: #f0f7f4; font-size: 13px; line-height: 1.6; }
 .connector-global-actions { display: flex; justify-content: flex-end; margin: 0 0 14px; }
+
+.service-tool-layer { display: grid; gap: 20px; }
+.service-layer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px; border: 1px solid var(--border); border-radius: 16px; background: linear-gradient(140deg, rgba(52,211,153,.11), rgba(15,23,42,.01)); }
+.service-layer-head h2 { margin: 5px 0 7px; }
+.service-layer-head p { max-width: 680px; margin: 0; color: var(--muted); }
+.service-group { display: grid; gap: 9px; }
+.service-group h3 { margin: 0; font-size: 14px; }
+.service-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(265px, 1fr)); gap: 12px; }
+.service-card { display: grid; align-content: start; gap: 11px; min-height: 245px; }
+.service-card-head { display: flex; align-items: center; gap: 9px; }
+.service-card-head > div { min-width: 0; display: grid; gap: 2px; }
+.service-card-head small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.service-card .service-status { margin-left: auto; white-space: nowrap; }
+.service-status.needs_setup, .service-status.planned { opacity: .72; }
+.service-status.paused { color: #b45309; }
+.service-card > p { margin: 0; min-height: 40px; color: var(--muted); font-size: 13px; }
+.service-capabilities { display: flex; flex-wrap: wrap; gap: 5px; }
+.service-capabilities span { font-size: 11px; padding: 4px 7px; border-radius: 999px; background: var(--subtle); color: var(--muted); }
+.service-policy { display: grid; grid-template-columns: 1fr auto; gap: 7px; align-items: center; margin-top: auto; }
+.service-policy label { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.service-policy select { min-width: 0; width: 100%; }
+.service-card > small { display: flex; gap: 5px; align-items: center; }
 @media (max-width: 760px) { .import-choice { grid-template-columns: 1fr; }.import-reply > div { align-items: flex-start; }.import-reply .btn { flex: none; } }
 .people-page { max-width: 1440px; }
 .people-layout { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); gap: 14px; align-items: start; }
