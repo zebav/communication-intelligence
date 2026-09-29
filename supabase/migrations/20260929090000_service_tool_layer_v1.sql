@@ -1,13 +1,9 @@
 -- Service & Tool Layer V1: owner-controlled operating boundaries and server-only audit history.
-do $$ begin
-  create type public.assistant_service_permission as enum ('off', 'read', 'suggest', 'prepare');
-exception when duplicate_object then null;
-end $$;
 
 create table if not exists public.assistant_service_policies (
   owner_id uuid not null references public.profiles(id) on delete cascade,
   service_id text not null check (service_id in ('gmail','outlook','instagram','whatsapp','slack','google_calendar','outlook_calendar','google_maps','google_drive','onedrive','browserbase')),
-  permission public.assistant_service_permission not null default 'prepare',
+  permission text not null default 'prepare' check (permission in ('off', 'read', 'suggest', 'prepare')),
   enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
