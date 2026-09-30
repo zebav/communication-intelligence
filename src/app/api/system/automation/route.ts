@@ -30,6 +30,8 @@ export async function POST(request: NextRequest) {
     await Promise.allSettled([
       "/api/cron/outlook-intelligence",
       "/api/cron/instagram-intelligence",
+      "/api/cron/whatsapp-intelligence",
+      "/api/cron/calendar-sync",
       "/api/cron/media-analysis",
       "/api/cron/vault-ingestion",
     ].map((path) => fetch(new URL(path, request.url), {

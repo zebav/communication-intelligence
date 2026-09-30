@@ -9,6 +9,14 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/whatsapp-intelligence",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/calendar-sync",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/media-analysis",
       "schedule": "*/10 * * * *"
     },
