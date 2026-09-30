@@ -18,16 +18,24 @@ export async function POST(request: NextRequest) {
   if (!cronSecret) return NextResponse.json({ queued: false, reason: "automation_not_configured" }, { status: 202 });
 
   const ownerId = user.id;
-  const maintenanceUrl = new URL("/api/cron/outlook-intelligence", request.url);
   after(async () => {
-    await fetch(maintenanceUrl, {
-      headers: {
-        authorization: `Bearer ${cronSecret}`,
-        "x-owner-id": ownerId,
-        "x-maintenance-trigger": "login",
-      },
+    const headers = {
+      authorization: `Bearer ${cronSecret}`,
+      "x-owner-id": ownerId,
+      "x-maintenance-trigger": "login",
+    };
+    // Start only bounded workers after the workspace has rendered. Each
+    // worker is independently protected by its cron authorization, and a
+    // temporary provider problem must never delay or break login.
+    await Promise.allSettled([
+      "/api/cron/outlook-intelligence",
+      "/api/cron/instagram-intelligence",
+      "/api/cron/media-analysis",
+      "/api/cron/vault-ingestion",
+    ].map((path) => fetch(new URL(path, request.url), {
+      headers,
       signal: AbortSignal.timeout(55_000),
-    }).catch(() => undefined);
+    })));
   });
 
   return NextResponse.json({ queued: true }, { headers: { "Cache-Control": "no-store" } });
