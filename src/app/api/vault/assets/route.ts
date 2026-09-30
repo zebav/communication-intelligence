@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 import {z} from "zod";
 import {createClient} from "@/lib/supabase/server";
-import {signedVaultUrl,storeVaultFile} from "@/lib/vault/vault-service";
+import {signedVaultPreviewUrl,signedVaultUrl,storeVaultFile} from "@/lib/vault/vault-service";
 
 async function auth(){
  const db=await createClient(); const {data:{user}}=await db.auth.getUser();
@@ -21,8 +21,25 @@ export async function GET(request:NextRequest){
   const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true});
   return error?NextResponse.json({error:"Bilagorna kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});
  }
- const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(500);
- return error?NextResponse.json({error:"Valvet kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});
+ const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(100);
+ if(error)return NextResponse.json({error:"Valvet kunde inte läsas."},{status:500});
+ const assets=data??[];
+ const personIds=[...new Set(assets.flatMap(asset=>asset.source_person_id?[asset.source_person_id]:[]))];
+ const messageIds=[...new Set(assets.flatMap(asset=>asset.source_message_id?[asset.source_message_id]:[]))];
+ const [{data:people},{data:messages}]=await Promise.all([
+  personIds.length?session.db.from("people").select("id,display_name,organization").eq("owner_id",session.user.id).in("id",personIds):Promise.resolve({data:[] as Array<{id:string;display_name:string;organization:string|null}>}),
+  messageIds.length?session.db.from("messages").select("id,body_text").eq("owner_id",session.user.id).in("id",messageIds):Promise.resolve({data:[] as Array<{id:string;body_text:string|null}>}),
+ ]);
+ const peopleById=new Map((people??[]).map(person=>[person.id,person]));
+ const messagesById=new Map((messages??[]).map(message=>[message.id,message]));
+ const enriched=await Promise.all(assets.map(async asset=>{
+  const person=asset.source_person_id?peopleById.get(asset.source_person_id):undefined;
+  const message=asset.source_message_id?messagesById.get(asset.source_message_id):undefined;
+  const previewable=asset.mime_type.startsWith("image/")||asset.mime_type.startsWith("audio/");
+  const previewUrl=previewable?await signedVaultPreviewUrl(session.user.id,asset.id).catch(()=>undefined):undefined;
+  return {...asset,previewUrl,sourcePerson:person?{id:person.id,name:person.display_name,organization:person.organization}:null,transcript:asset.mime_type.startsWith("audio/")?(message?.body_text||asset.summary||null):null};
+ }));
+ return NextResponse.json({assets:enriched},{headers:{"Cache-Control":"no-store"}});
 }
 export async function POST(request:NextRequest){
  if(request.headers.get("origin")!==request.nextUrl.origin)return NextResponse.json({error:"Ogiltigt ursprung."},{status:403});

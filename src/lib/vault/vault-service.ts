@@ -59,3 +59,13 @@ export async function signedVaultUrl(ownerId:string,assetId:string){
   if(signed.error||!signed.data?.signedUrl) throw new Error("Dokumentlänken kunde inte skapas.");
   return {...data,url:signed.data.signedUrl};
 }
+
+/** A short-lived inline URL for a vault item already authorized for its owner. */
+export async function signedVaultPreviewUrl(ownerId:string,assetId:string){
+  const db=createAdminClient();
+  const {data,error}=await db.from("vault_assets").select("storage_bucket,storage_path,mime_type").eq("owner_id",ownerId).eq("id",assetId).eq("retention_status","saved").single();
+  if(error||!data) throw new Error("Dokumentet kunde inte hittas.");
+  const signed=await db.storage.from(data.storage_bucket).createSignedUrl(data.storage_path,300);
+  if(signed.error||!signed.data?.signedUrl) throw new Error("Förhandsvisningen kunde inte skapas.");
+  return signed.data.signedUrl;
+}
