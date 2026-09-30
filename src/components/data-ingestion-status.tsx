@@ -1,12 +1,26 @@
 "use client";
 import { useEffect, useState } from "react";
 import { CheckCircle2, RefreshCw, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
 type Status = { pendingMedia: number; failedMedia: number; connections?: { id: string; provider: string; account: string; health: string; lastSyncAt: string | null; needsAttention: boolean }[]; error?: string };
 export function DataIngestionStatus({ compact = false }: { compact?: boolean }) {
-  const [status, setStatus] = useState<Status | null>(null); const [refreshing, setRefreshing] = useState(false); const [processing, setProcessing] = useState(false);
+  const router = useRouter();
+  const [status, setStatus] = useState<Status | null>(null); const [refreshing, setRefreshing] = useState(false); const [processing, setProcessing] = useState(false); const [syncMessage, setSyncMessage] = useState("");
   const load = async () => { const response = await fetch("/api/system/data-health", { cache: "no-store" }); const data = await response.json() as Status; if (!response.ok) throw new Error(data.error ?? "Status kunde inte läsas."); setStatus(data); };
   useEffect(() => { void load().catch((error) => setStatus({ pendingMedia: 0, failedMedia: 0, error: error instanceof Error ? error.message : "Status kunde inte läsas." })); }, []);
-  const refresh = async () => { setRefreshing(true); await load().catch((error) => setStatus({ pendingMedia: 0, failedMedia: 0, error: error instanceof Error ? error.message : "Status kunde inte läsas." })); setRefreshing(false); };
+  const refresh = async () => {
+    setRefreshing(true); setSyncMessage("");
+    try {
+      const response = await fetch("/api/system/automation", { method: "POST", headers: { "content-type": "application/json" } });
+      const data = await response.json().catch(() => ({})) as { error?: string; queued?: boolean };
+      if (!response.ok) throw new Error(data.error ?? "Synkroniseringen kunde inte startas.");
+      setSyncMessage(data.queued ? "Hämtning startad. Inkorgen uppdateras automatiskt inom kort." : "Kontrollerar anslutningarnas status.");
+      await load();
+      window.setTimeout(() => router.refresh(), 8_000);
+    } catch (error) {
+      setStatus({ pendingMedia: 0, failedMedia: 0, error: error instanceof Error ? error.message : "Synkroniseringen kunde inte startas." });
+    } finally { setRefreshing(false); }
+  };
   const processPending = async () => {
     setProcessing(true);
     try {
@@ -39,5 +53,5 @@ export function DataIngestionStatus({ compact = false }: { compact?: boolean }) 
   const attention = status.pendingMedia > 0 || status.failedMedia > 0;
   const message = status.failedMedia ? `${status.failedMedia} bilag${status.failedMedia === 1 ? "a behöver" : "or behöver"} kontrolleras.` : status.pendingMedia ? `${status.pendingMedia} bilag${status.pendingMedia === 1 ? "a väntar" : "or väntar"} på analys.` : "Meddelanden och sparade bilagor är i synk.";
   const stale = status.connections?.filter((connection) => connection.needsAttention) ?? [];
-  return <div className={`ingestion-status ${attention || stale.length ? "warning" : ""} ${compact ? "compact" : ""}`}><div>{attention || stale.length ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} />}<span><strong>Datainhämtning</strong><small>{message}{!compact && stale.length ? ` · ${stale.length} anslut${stale.length === 1 ? "ning behöver" : "ningar behöver"} synk eller kontroll.` : ""}</small></span></div><div className="ingestion-status-actions">{status.failedMedia > 0 && <button className="btn" onClick={() => void retryFailed()} disabled={processing || refreshing}>{processing ? "Återställer…" : "Försök igen"}</button>}{status.pendingMedia > 0 && <button className="btn" onClick={() => void processPending()} disabled={processing || refreshing}>{processing ? "Analyserar…" : "Bearbeta nu"}</button>}<button className="btn" onClick={() => void refresh()} disabled={refreshing || processing}>{refreshing ? "Kontrollerar…" : "Uppdatera"}</button></div>{!compact && stale.length > 0 && <small className="ingestion-stale">Kontrollera: {stale.slice(0, 3).map((connection) => connection.account).join(" · ")}{stale.length > 3 ? ` + ${stale.length - 3} till` : ""}</small>}</div>;
+  return <div className={`ingestion-status ${attention || stale.length ? "warning" : ""} ${compact ? "compact" : ""}`}><div>{attention || stale.length ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} />}<span><strong>Datainhämtning</strong><small>{syncMessage || message}{!compact && !syncMessage && stale.length ? ` · ${stale.length} anslut${stale.length === 1 ? "ning behöver" : "ningar behöver"} synk eller kontroll.` : ""}</small></span></div><div className="ingestion-status-actions">{status.failedMedia > 0 && <button className="btn" onClick={() => void retryFailed()} disabled={processing || refreshing}>{processing ? "Återställer…" : "Försök igen"}</button>}{status.pendingMedia > 0 && <button className="btn" onClick={() => void processPending()} disabled={processing || refreshing}>{processing ? "Analyserar…" : "Bearbeta nu"}</button>}<button className="btn" onClick={() => void refresh()} disabled={refreshing || processing}>{refreshing ? "Startar synk…" : "Synka nu"}</button></div>{!compact && stale.length > 0 && <small className="ingestion-stale">Kontrollera: {stale.slice(0, 3).map((connection) => connection.account).join(" · ")}{stale.length > 3 ? ` + ${stale.length - 3} till` : ""}</small>}</div>;
 }
