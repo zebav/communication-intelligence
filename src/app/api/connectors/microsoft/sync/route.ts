@@ -154,7 +154,10 @@ export async function POST(request: NextRequest) {
       if (!message.id || !address) continue;
       const displayName = message.from?.emailAddress?.name?.trim() || address;
       const { data: identity, error: identityLookupError } = await supabase.from("identities").select("id,person_id")
-        .eq("owner_id", userId).eq("source", "email").eq("external_identifier", address).maybeSingle();
+        // Historical imports can contain pre-existing duplicate identities. A
+        // duplicate must not block the whole mailbox; contact reconciliation
+        // handles consolidation separately.
+        .eq("owner_id", userId).eq("source", "email").eq("external_identifier", address).order("created_at", { ascending: true }).limit(1).maybeSingle();
       if (identityLookupError) throw new Error(`identity_lookup_failed_${identityLookupError.code}`);
       let personId = identity?.person_id;
       let identityId = identity?.id;

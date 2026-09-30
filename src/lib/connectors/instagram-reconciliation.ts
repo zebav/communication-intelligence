@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramConnector } from "@/lib/connectors/instagram";
-import { instagramConversationsUrl } from "@/lib/connectors/instagram-api";
+import { instagramConversationsUrl, instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 
@@ -34,7 +34,14 @@ export async function reconcileInstagramConnection(connectionId: string) {
     const body = item.message?.trim() ?? "";
     if (!externalId || !participantId || participantId === accountId || !body) continue;
     const sentAt = item.created_time && !Number.isNaN(Date.parse(item.created_time)) ? new Date(item.created_time).toISOString() : new Date().toISOString();
-    const person = await resolveOrCreateChannelPerson({ database, ownerId: connection.owner_id, source: "instagram", externalIdentifier: `instagram:${participantId}`, displayName: "", username: null, connectionId: connection.id, confidence: 0.65, contactAt: sentAt, identityMetadata: { instagram_scoped_id: participantId, discovered_by: "reconciliation" } });
+    let profile: { name?: string; username?: string } | null = null;
+    try {
+      const profileResponse = await fetch(instagramUserProfileUrl(participantId), { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000) });
+      if (profileResponse.ok) profile = await profileResponse.json() as { name?: string; username?: string };
+    } catch { /* A message is still more valuable than blocking the import. */ }
+    const username = profile?.username?.trim() || null;
+    const displayName = profile?.name?.trim() || (username ? `@${username}` : `Instagram contact ${participantId.slice(-6)}`);
+    const person = await resolveOrCreateChannelPerson({ database, ownerId: connection.owner_id, source: "instagram", externalIdentifier: `instagram:${participantId}`, displayName, username, connectionId: connection.id, confidence: profile ? 0.8 : 0.65, contactAt: sentAt, identityMetadata: { instagram_scoped_id: participantId, discovered_by: "reconciliation" } });
     const conversationKey = `instagram:${connection.id}:${participantId}`;
     const { data: existing } = await database.from("conversations").select("id").eq("owner_id", connection.owner_id).eq("source", "instagram").eq("external_conversation_id", conversationKey).maybeSingle();
     const values: Record<string, unknown> = { owner_id: connection.owner_id, person_id: person.personId, connection_id: connection.id, source: "instagram", external_conversation_id: conversationKey, title: `Instagram · ${connection.account_identifier ?? connection.account_name ?? "account"}`, conversation_type: "direct_message", last_message_at: sentAt, ...(direction === "in" ? { last_other_message_at: sentAt } : { last_user_message_at: sentAt }), updated_at: new Date().toISOString() };
