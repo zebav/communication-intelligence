@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type Item = { id: string; source: string; body: string; sentAt: string; title: string; personId: string; person: string; account: string; status: string; reply: string };
+type ScheduledItem = { id: string; source: string; body: string; scheduledFor: string; status: string; error?: string | null; title: string; person: string };
 const labels: Record<string, string> = { sent: "Skickat", delivered: "Levererat", read: "Läst", pending: "Väntar på sändning", failed: "Misslyckat" };
 export function SentMessages({ accounts }: { accounts: { id: string; name: string }[] }) {
   const [filters, setFilters] = useState({ person: "", source: "", account: "", from: "", to: "" });
   const [selectedId, setSelectedId] = useState("");
   const [page, setPage] = useState(0); const [retry, setRetry] = useState(0);
   const [state, setState] = useState<{ items: Item[]; more: boolean; loading: boolean; error: string }>({ items: [], more: false, loading: true, error: "" });
+  const [scheduled, setScheduled] = useState<{ items: ScheduledItem[]; loading: boolean; error: string }>({ items: [], loading: true, error: "" });
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(async () => {
@@ -23,9 +25,11 @@ export function SentMessages({ accounts }: { accounts: { id: string; name: strin
     }, filters.person ? 250 : 0);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [filters, page, retry]);
+  useEffect(() => { const controller = new AbortController(); void fetch("/api/scheduled-messages", { signal: controller.signal }).then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error); if (!controller.signal.aborted) setScheduled({ items: data.items ?? [], loading: false, error: "" }); }).catch(error => { if (!controller.signal.aborted) setScheduled({ items: [], loading: false, error: error instanceof Error ? error.message : "Kunde inte hämta planerade utskick." }); }); return () => controller.abort(); }, [retry]);
   const update = (key: keyof typeof filters, value: string) => { setPage(0); setFilters(f => ({ ...f, [key]: value })); };
   const selected = state.items.find(item => item.id === selectedId) ?? state.items[0];
   return <section className="sent-workspace"><h1>Skickade meddelanden</h1><p>Importerade och skickade meddelanden från alla anslutna källor. Leveransstatus visas när tjänsten har rapporterat den.</p>
+    <section className="scheduled-messages" aria-label="Planerade utskick"><div className="section-title">Planerade utskick</div>{scheduled.loading ? <p className="muted">Hämtar planerade utskick…</p> : scheduled.error ? <p className="negative">{scheduled.error}</p> : scheduled.items.length === 0 ? <p className="muted">Inga planerade utskick.</p> : <div className="person-stack">{scheduled.items.map(item => <article className="person-fact" key={item.id}><strong>{item.person} · {item.title}</strong><span>{item.source} · {new Date(item.scheduledFor).toLocaleString("sv-SE")}</span><small>{item.status === "scheduled" ? "Väntar på sändning" : item.status === "processing" ? "Kontrolleras före sändning" : item.status === "needs_review" ? "Behöver granskas" : "Misslyckat"}{item.error ? ` · ${item.error}` : ""}</small>{item.status === "scheduled" && <button className="btn" onClick={async () => { try { const response = await fetch("/api/scheduled-messages", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id, action: "cancel" }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error); setRetry(value => value + 1); } catch (error) { setScheduled(value => ({ ...value, error: error instanceof Error ? error.message : "Kunde inte avbryta utskicket." })); } }}>Avbryt utskick</button>}</article>)}</div>}</section>
     <div className="person-facts" style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "20px 0" }}>
       <label>Person<input aria-label="Person" value={filters.person} onChange={e => update("person", e.target.value)} /></label>
       <label>Källa<select value={filters.source} onChange={e => update("source", e.target.value)}><option value="">Alla källor</option>{["email", "whatsapp", "instagram", "imessage", "messenger", "tinder", "linkedin", "tiktok", "manual"].map(s => <option key={s}>{s}</option>)}</select></label>

@@ -247,6 +247,16 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 .sent-inbox .inbox-col, .sent-detail { overflow: auto; min-width: 0; }
 .sent-detail { padding: 24px; }
 .sent-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; margin-top: 24px; }
+.scheduled-messages { margin: 18px 0 24px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel) 84%, #5564d8 16%); }
+.scheduled-messages .person-stack { max-height: 250px; overflow: auto; }
+.scheduled-messages .person-fact { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 14px; align-items: center; }
+.scheduled-messages .person-fact > span, .scheduled-messages .person-fact > small { grid-column: 1; }
+.scheduled-messages .person-fact > button { grid-column: 2; grid-row: 1 / span 3; }
+.scheduled-send-control { display: grid; gap: 8px; margin-top: 10px; }
+.scheduled-send-picker { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: rgba(10, 13, 18, .7); }
+.scheduled-send-picker label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.scheduled-send-picker input { min-height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); padding: 6px 8px; }
+.scheduled-send-picker > div { display: flex; gap: 7px; }
 @media (max-width: 760px) { .sent-inbox.inbox { grid-template-columns: minmax(0,1fr); height: auto; } .sent-inbox .inbox-col { max-height: 300px; } .sent-workspace { padding: 12px; } }
 
 .decision-link-row { min-width:0; display:flex; gap:6px; align-items:center; }
