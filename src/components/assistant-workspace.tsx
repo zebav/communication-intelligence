@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { approvalBrief, decisionCard, kinds, kindLabels, sendCapability, statusLabels, taskBucket, type Task, type Plan, type TaskKind } from "@/lib/assistant/model";
 import { AssistantBrowserStatus } from "./assistant-browser-status";
 import type { BrowserReadiness } from "@/lib/assistant/browser-readiness";
@@ -23,6 +23,7 @@ type Api = (body: Record<string, unknown>) => Promise<void>;
 export function AssistantWorkspace({ people }: { people: CommunicationPersonOption[] }) {
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState("");
+  const maintenanceRefreshScheduled = useRef(false);
   const load = useCallback(async (signal?: AbortSignal) => {
     const timeout = AbortSignal.timeout(15_000);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -32,6 +33,16 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
     return data as AssistantSnapshot;
   }, [cursor]);
   useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Notiscentret tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [load]);
+  // The workspace starts maintenance just after login. Refresh once after its
+  // bounded first pass so new decisions appear without the user pressing a button.
+  useEffect(() => {
+    if (maintenanceRefreshScheduled.current) return;
+    maintenanceRefreshScheduled.current = true;
+    const timer = window.setTimeout(() => {
+      void load().then((data) => { setSnapshot(data); setError(""); }).catch(() => undefined);
+    }, 9_000);
+    return () => window.clearTimeout(timer);
+  }, [load]);
   const refresh = async () => { setSnapshot(await load()); };
   const act: Api = async body => {
     setBusy(true); setError("");
@@ -86,7 +97,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
   const operationalIssues = (operations?.pendingMedia ?? 0) + (operations?.failedMedia ?? 0) + (operations?.staleConnections ?? 0) + (operations?.awaitingAnalysis ?? 0);
   return <>
     {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: systemet kan förbereda förslag men skickar eller bokar inget härifrån utan ett separat godkännande.</p>}
-    {operations && <section className={`assistant-operations ${operationalIssues ? "needs-attention" : ""}`} aria-label="Systemkontroll"><div><p className="eyebrow">Systemkontroll</p><h2>{operationalIssues ? "Systemet har några saker att färdigställa" : "All datainhämtning är i normal drift"}</h2><p>{operations.awaitingAnalysis ? `${operations.awaitingAnalysis} nya meddelanden väntar på analys. ` : ""}{operations.pendingMedia ? `${operations.pendingMedia} bilagor väntar på analys. ` : ""}{operations.failedMedia ? `${operations.failedMedia} bilagor behöver ett nytt försök. ` : ""}{operations.staleConnections ? `${operations.staleConnections} anslutningar behöver synk eller kontroll. ` : ""}{!operationalIssues ? "Nya meddelanden sorteras och förbereds automatiskt." : "Du hittar återställning och anslutningsstatus under Settings → Connections."}</p></div><div className="assistant-operation-stats"><span><strong>{operations.learningSuggestions}</strong> lärandeförslag</span><span><strong>{snapshot.candidates.length}</strong> nya beslut</span><span><strong>{snapshot.notes?.length ?? 0}</strong> att notera</span></div></section>}
+    {operations && <section className={`assistant-operations ${operations.failedMedia ? "needs-attention" : ""}`} aria-label="Systemkontroll"><div><p className="eyebrow">Systemkontroll</p><h2>{operationalIssues ? "Systemet uppdaterar din arbetsyta" : "All datainhämtning är i normal drift"}</h2><p>{operations.awaitingAnalysis ? `${operations.awaitingAnalysis} nya meddelanden analyseras i bakgrunden. ` : ""}{operations.pendingMedia ? `${operations.pendingMedia} bilagor analyseras i bakgrunden. ` : ""}{operations.failedMedia ? `${operations.failedMedia} bilagor behöver granskas efter att automatiken försökt. ` : ""}{operations.staleConnections ? `${operations.staleConnections} anslutningar kontrolleras. ` : ""}{!operationalIssues ? "Nya meddelanden sorteras och förbereds automatiskt." : "Du behöver bara agera om en anslutning faktiskt behöver loggas in igen."}</p></div><div className="assistant-operation-stats"><span><strong>{operations.learningSuggestions}</strong> lärandeförslag</span><span><strong>{snapshot.candidates.length}</strong> nya beslut</span><span><strong>{snapshot.notes?.length ?? 0}</strong> att notera</span></div></section>}
     <nav className="assistant-tabs" aria-label="Notisvyer"><button className={`btn ${mode === "handle" ? "primary" : ""}`} aria-pressed={mode === "handle"} onClick={() => setMode("handle")}>Bör hanteras <span>{snapshot.candidates.length + snapshot.tasks.filter(t => ["decision", "ready"].includes(taskBucket(t))).length}</span></button><button className={`btn ${mode === "note" ? "primary" : ""}`} aria-pressed={mode === "note"} onClick={() => setMode("note")}>Bör noteras <span>{snapshot.notes?.length ?? 0}</span></button></nav>
     {mode === "handle" && <><nav className="assistant-tabs assistant-status-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
     <label className="assistant-search">Sök person, ärende eller konto<input value={query} onChange={e => setQuery(e.target.value)} /></label>

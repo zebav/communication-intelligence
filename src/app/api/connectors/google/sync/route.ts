@@ -59,8 +59,11 @@ export async function POST(request: NextRequest) {
 
   const connectionId = request.nextUrl.searchParams.get("connectionId");
   if (!connectionId) return jsonError("Choose a Gmail account.", 400);
-  const { data: connection } = await supabase.from("connections").select("id,account_identifier,encrypted_credentials,token_metadata").eq("id", connectionId).eq("owner_id", userId).eq("provider", googleGmailConnector.id).eq("status", "connected").maybeSingle();
+  const { data: connection } = await supabase.from("connections").select("id,account_identifier,encrypted_credentials,token_metadata,last_sync_at").eq("id", connectionId).eq("owner_id", userId).eq("provider", googleGmailConnector.id).eq("status", "connected").maybeSingle();
   if (!connection?.encrypted_credentials || !connection.account_identifier) return jsonError("Connect Gmail before importing messages.", 409);
+  if (request.headers.get("x-sync-trigger") === "automatic" && connection.last_sync_at && Date.now() - new Date(connection.last_sync_at).getTime() < 5 * 60 * 1000) {
+    return NextResponse.json({ imported: 0, skipped: true, syncedAt: connection.last_sync_at });
+  }
   const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!encryptionKey) return jsonError("The server encryption key is not configured.");
 

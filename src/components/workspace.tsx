@@ -80,7 +80,6 @@ function sourceConnectionStatus(source: Source, connections: ChannelConnection[]
 
 export function Workspace({ userEmail, communicationCases, connections, syncedEmails, emailLoadFailed = false, backgroundPaused = false, followUps, outcomes, calendarHistory, people, learningSignals, persona, profilePeople, initialView = "today" }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; emailLoadFailed?: boolean; backgroundPaused?: boolean; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[]; initialView?: View }) {
   const router = useRouter();
-  const emailConnections = connections.filter((item) => item.provider === "microsoft-graph" || item.provider === "gmail");
   const automaticSyncStarted = useRef(false);
   const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>(initialView);
@@ -101,7 +100,19 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const [activePersona, setActivePersona] = useState(persona);
   const [commandOpen, setCommandOpen] = useState(false);
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen((open) => !open); } if (event.key === "Escape") setCommandOpen(false); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
-  useEffect(() => { if (backgroundPaused || !emailConnections.length || automaticSyncStarted.current) return; const due = emailConnections.filter((connection) => !connection.lastSyncAt || Date.now() - new Date(connection.lastSyncAt).getTime() >= 5 * 60 * 1000); if (!due.length) return; automaticSyncStarted.current = true; void Promise.all(due.map((connection) => { const providerPath = connection.provider === "gmail" ? "google" : "microsoft"; return fetch(`/api/connectors/${providerPath}/sync?connectionId=${connection.id}`, { method: "POST", headers: { "x-sync-trigger": "automatic" } }); })).then(() => router.refresh()).catch(() => undefined); }, [backgroundPaused, emailConnections, router]);
+  useEffect(() => {
+    if (backgroundPaused || automaticSyncStarted.current) return;
+    automaticSyncStarted.current = true;
+    // Start maintenance after the interactive shell is already visible. The
+    // server responds immediately and processes sync, media and AI analysis
+    // in the background, so logging in never waits for a mailbox import.
+    const start = window.setTimeout(() => {
+      void fetch("/api/system/automation", { method: "POST", headers: { "content-type": "application/json" } })
+        .then((response) => response.ok ? window.setTimeout(() => router.refresh(), 8_000) : undefined)
+        .catch(() => undefined);
+    }, 350);
+    return () => window.clearTimeout(start);
+  }, [backgroundPaused, router]);
   return <div className="workspace">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Solvani<br />Smart Assistant</span></div>
