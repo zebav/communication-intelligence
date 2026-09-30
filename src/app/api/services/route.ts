@@ -18,14 +18,15 @@ async function authenticatedDatabase() {
 export async function GET() {
   const session = await authenticatedDatabase();
   if ("error" in session) return session.error;
-  const [connections, policies] = await Promise.all([
+  const [connections, policies, calendarAccounts] = await Promise.all([
     session.db.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at").eq("owner_id", session.user.id),
     session.db.from("assistant_service_policies").select("service_id,permission,enabled,updated_at").eq("owner_id", session.user.id),
+    session.db.from("calendar_accounts").select("provider,address,created_at").eq("owner_id", session.user.id),
   ]);
   if (connections.error) return NextResponse.json({ error: "Anslutningarna kunde inte läsas." }, { status: 500 });
   const policiesUnavailable = Boolean(policies.error);
   return NextResponse.json({
-    services: serviceSnapshots({ connections: (connections.data ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source ?? undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: {} })), policies: policies.error ? [] : policies.data as { service_id: string; permission: ServicePermission; enabled: boolean; updated_at: string | null }[], environment: process.env }),
+    services: serviceSnapshots({ connections: (connections.data ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source ?? undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: {} })), calendars: calendarAccounts.error ? [] : (calendarAccounts.data ?? []).filter((item): item is { provider: "google" | "microsoft"; address: string; created_at: string } => item.provider === "google" || item.provider === "microsoft").map((item) => ({ provider: item.provider, address: item.address, lastSyncAt: item.created_at })), policies: policies.error ? [] : policies.data as { service_id: string; permission: ServicePermission; enabled: boolean; updated_at: string | null }[], environment: process.env }),
     policiesUnavailable,
   }, { headers: { "Cache-Control": "no-store" } });
 }
