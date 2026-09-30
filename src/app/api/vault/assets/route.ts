@@ -1,7 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 import {z} from "zod";
 import {createClient} from "@/lib/supabase/server";
-import {signedVaultPreviewUrl,signedVaultUrl,storeVaultFile} from "@/lib/vault/vault-service";
+import {signedVaultUrl,storeVaultFile} from "@/lib/vault/vault-service";
 
 async function auth(){
  const db=await createClient(); const {data:{user}}=await db.auth.getUser();
@@ -18,10 +18,12 @@ export async function GET(request:NextRequest){
  const messageId=request.nextUrl.searchParams.get("messageId");
  if(messageId){
   const parsed=z.string().uuid().safeParse(messageId); if(!parsed.success)return NextResponse.json({error:"Ogiltigt meddelande."},{status:400});
-  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true});
-  return error?NextResponse.json({error:"Bilagorna kunde inte läsas."},{status:500}):NextResponse.json({assets:data??[]});
+  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,ai_decision,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true});
+  if(error)return NextResponse.json({error:"Bilagorna kunde inte läsas."},{status:500});
+  const assets=(data??[]).map(asset=>{const decision=asset.ai_decision&&typeof asset.ai_decision==="object"&&!Array.isArray(asset.ai_decision)?asset.ai_decision as Record<string,unknown>:{};const audio=asset.mime_type.startsWith("audio/");return {...asset,previewUrl:(asset.mime_type.startsWith("image/")||audio)?`/api/vault/assets/${asset.id}/preview`:undefined,transcript:audio?(typeof decision.transcript==="string"?decision.transcript:asset.summary||null):null};});
+  return NextResponse.json({assets},{headers:{"Cache-Control":"no-store"}});
  }
- const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(100);
+ const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,ai_decision,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(100);
  if(error)return NextResponse.json({error:"Valvet kunde inte läsas."},{status:500});
  const assets=data??[];
  const personIds=[...new Set(assets.flatMap(asset=>asset.source_person_id?[asset.source_person_id]:[]))];
@@ -35,9 +37,10 @@ export async function GET(request:NextRequest){
  const enriched=await Promise.all(assets.map(async asset=>{
   const person=asset.source_person_id?peopleById.get(asset.source_person_id):undefined;
   const message=asset.source_message_id?messagesById.get(asset.source_message_id):undefined;
-  const previewable=asset.mime_type.startsWith("image/")||asset.mime_type.startsWith("audio/");
-  const previewUrl=previewable?await signedVaultPreviewUrl(session.user.id,asset.id).catch(()=>undefined):undefined;
-  return {...asset,previewUrl,sourcePerson:person?{id:person.id,name:person.display_name,organization:person.organization}:null,transcript:asset.mime_type.startsWith("audio/")?(message?.body_text||asset.summary||null):null};
+  const audio=asset.mime_type.startsWith("audio/");
+  const decision=asset.ai_decision&&typeof asset.ai_decision==="object"&&!Array.isArray(asset.ai_decision)?asset.ai_decision as Record<string,unknown>:{};
+  const previewUrl=(asset.mime_type.startsWith("image/")||audio)?`/api/vault/assets/${asset.id}/preview`:undefined;
+  return {...asset,previewUrl,sourcePerson:person?{id:person.id,name:person.display_name,organization:person.organization}:null,transcript:audio?(typeof decision.transcript==="string"?decision.transcript:message?.body_text||asset.summary||null):null};
  }));
  return NextResponse.json({assets:enriched},{headers:{"Cache-Control":"no-store"}});
 }

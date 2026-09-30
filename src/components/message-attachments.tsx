@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FileText, Image as ImageIcon, Music2, Paperclip, Play, ExternalLink } from "lucide-react";
 
-type Asset = { id: string; asset_kind: string; title: string; filename: string; mime_type: string; summary?: string; source_type: string };
+type Asset = { id: string; asset_kind: string; title: string; filename: string; mime_type: string; summary?: string; source_type: string; previewUrl?: string; transcript?: string | null };
 
 function icon(asset: Asset) {
   if (asset.asset_kind === "image") return <ImageIcon size={14} />;
@@ -15,7 +15,7 @@ function icon(asset: Asset) {
 export function MessageAttachments({ messageId, expected = 0 }: { messageId: string; expected?: number }) {
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [notice, setNotice] = useState("");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(expected > 0);
 
   useEffect(() => {
     if (!open || assets !== null || !messageId) return;
@@ -45,8 +45,8 @@ export function MessageAttachments({ messageId, expected = 0 }: { messageId: str
     {open && <div className="message-attachment-list">
       {assets === null && !notice && <small>Hämtar säkra bilagor…</small>}
       {assets?.length === 0 && <small>{expected ? "Bilagan analyseras eller kunde inte hämtas från källan ännu." : "Inga sparade bilagor i denna del av tråden."}</small>}
-      {assets?.map((asset) => <div className="message-attachment" key={asset.id}>
-        {icon(asset)}<div><strong>{asset.title || asset.filename}</strong>{asset.summary && <small>{asset.summary}</small>}</div>
+      {assets?.map((asset) => <div className={`message-attachment ${asset.mime_type.startsWith("image/") ? "image" : ""}`} key={asset.id}>
+        {asset.mime_type.startsWith("image/") && asset.previewUrl ? <img src={asset.previewUrl} alt={asset.summary || asset.title || "Bilaga"} /> : icon(asset)}<div><strong>{asset.title || asset.filename}</strong>{asset.mime_type.startsWith("audio/") && asset.previewUrl ? <audio controls preload="metadata" src={asset.previewUrl} /> : null}{asset.transcript ? <details><summary>Transkribering</summary><p>{asset.transcript}</p></details> : asset.summary && <small>{asset.summary}</small>}</div>
         <button type="button" className="icon-button" title="Öppna säkert" aria-label={`Öppna ${asset.title || asset.filename}`} onClick={() => void openAsset(asset.id)}><ExternalLink size={13} /></button>
       </div>)}
       {notice && <small className="negative">{notice}</small>}

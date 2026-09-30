@@ -157,7 +157,7 @@ export default async function Home({ searchParams }: HomeProps) {
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
     const whatsappIdentities = (identityRows ?? []).filter((identity) => row.source === "whatsapp" && identity.source === "whatsapp" && identity.person_id === person?.id);
     const whatsappRecipient = whatsappIdentities.length === 1 ? whatsappIdentities[0].external_identifier : undefined;
-    return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at, attachmentCount: Number(item.attachment_count ?? 0) })).filter((item) => item.body) };
+    return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at, attachmentCount: Number(item.attachment_count ?? 0) })).filter((item) => item.body || item.attachmentCount > 0) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
     const messageFingerprint = normalizedConversationText(item.message);
@@ -182,7 +182,7 @@ export default async function Home({ searchParams }: HomeProps) {
       : {};
     const analysis = metadata.ai_analysis && typeof metadata.ai_analysis.draftResponse === "string" ? metadata.ai_analysis : undefined;
     const deepAnalysis = metadata.deep_analysis && typeof metadata.deep_analysis.overview === "string" ? { ...metadata.deep_analysis, sources: deduplicateStoredSources(metadata.deep_analysis.sources) } : undefined;
-    const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at, attachmentCount: Number(message.attachment_count ?? 0) })).filter((message) => message.body);
+    const threadMessages = [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((message) => ({ id: message.id, direction: message.direction as "in" | "out", body: message.body_text ?? "", sentAt: message.sent_at, attachmentCount: Number(message.attachment_count ?? 0) })).filter((message) => message.body || message.attachmentCount > 0);
     return {
       id: row.id,
       personId: person?.id ?? "",
