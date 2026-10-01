@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type IngestionConnection = { id: string; provider: string; account: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
+export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
 export type IngestionHealth = { pendingMedia: number; failedMedia: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
 export async function readDataIngestionHealth(database: SupabaseClient, ownerId?: string): Promise<IngestionHealth> {
@@ -14,10 +14,9 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
   let connections: IngestionConnection[] = [];
   if (ownerId) {
     const { data, error: connectionError } = await database.from("connections")
-      .select("id,provider,account_identifier,account_name,health_status,last_sync_at")
-      .eq("owner_id", ownerId).eq("status", "connected").order("updated_at", { ascending: false }).limit(30);
+      .select("id,provider,account_identifier,account_name,status,health_status,last_sync_at")
+      .eq("owner_id", ownerId).in("status", ["connected", "reconnect_required", "error"]).order("updated_at", { ascending: false }).limit(30);
     if (connectionError) throw new Error("Connection health could not be read.");
-    const staleAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
     connections = (data ?? []).map((connection) => {
       const lastSyncAt = typeof connection.last_sync_at === "string" ? connection.last_sync_at : null;
       const health = typeof connection.health_status === "string" ? connection.health_status : "unknown";
@@ -25,9 +24,12 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
         id: connection.id,
         provider: connection.provider,
         account: connection.account_identifier ?? connection.account_name ?? "Anslutet konto",
+        status: connection.status,
         health,
         lastSyncAt,
-        needsAttention: health === "degraded" || !lastSyncAt || Date.parse(lastSyncAt) < staleAt,
+        // The automation handles a stale timestamp and bounded retries. Only
+        // a disconnected credential needs intervention from the owner.
+        needsAttention: connection.status !== "connected" || health === "reconnect_required",
       };
     });
   }

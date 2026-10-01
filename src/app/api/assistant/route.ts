@@ -111,7 +111,7 @@ export async function GET(request: Request) {
     const operations = {
       pendingMedia: ingestion?.pendingMedia ?? 0,
       failedMedia: ingestion?.failedMedia ?? 0,
-      staleConnections: ingestion?.connections.filter(connection => connection.needsAttention).length ?? 0,
+      actionRequiredConnections: ingestion?.connections.filter(connection => connection.needsAttention).length ?? 0,
       awaitingAnalysis: awaitingAnalysis.error ? 0 : awaitingAnalysis.count ?? 0,
       learningSuggestions: suggestedLearning.error ? 0 : suggestedLearning.count ?? 0,
     };
