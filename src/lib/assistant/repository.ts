@@ -120,7 +120,14 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
       .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
   ]);
   if (email.error || other.error) throw new Error("Underlaget kunde inte hämtas. Försök igen; befintliga uppdrag finns kvar.");
-  const rows = [...(email.data ?? []), ...(other.data ?? [])].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+  // A backfill can import a month of mail at once. `created_at` would make
+  // that historical batch look newer than a message that actually arrived
+  // today, so the decision queue must use priority and the original send time.
+  const rows = [...(email.data ?? []), ...(other.data ?? [])].sort((a, b) =>
+    Number(b.importance_score ?? 0) - Number(a.importance_score ?? 0)
+    || String(b.sent_at ?? "").localeCompare(String(a.sent_at ?? ""))
+    || String(b.id ?? "").localeCompare(String(a.id ?? "")),
+  );
   return {
     // Full originals are fetched again from the database when the owner opens
     // or prepares a task. The queue only needs a safe, readable excerpt.
