@@ -25,7 +25,14 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   ]);
   const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
-  const personaContext = resolveCommunicationProfile(universalProfile, { source, personId: conversation.person_id, situation: person?.relationship_type === "dating" ? "romantic" : "personal" });
+  const messageMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata as Record<string, unknown> : {};
+  const slackMode = source === "slack" && messageMetadata.slack_channel_mode === "work" ? "work" : source === "slack" ? "private" : null;
+  const slackContext = slackMode === "work"
+    ? "This is a work Slack channel. Prioritize explicit owner mentions, deadlines, questions and requests. Keep the draft concise and professional."
+    : slackMode === "private"
+      ? "This is a private Slack conversation. Treat it as direct communication, but do not assume a response is needed without a question, request or commitment."
+      : "";
+  const personaContext = resolveCommunicationProfile(universalProfile, { source, personId: conversation.person_id, situation: person?.relationship_type === "dating" ? "romantic" : "personal" }) + (slackContext ? `\n${slackContext}` : "");
   const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at ?? undefined })).filter((item) => item.body);
   const burst = inboundBurst((history ?? []).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text, sentAt: item.sent_at })), message.id);
   const analyzedMedia = await mediaContextForMessage(database, input.ownerId, message.id);
@@ -33,7 +40,8 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
   const now = new Date().toISOString();
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, assessedMessageIds: burst.messageIds, assessedMessageCount: burst.count, planningSuggestion: analysis.planningSuggestion, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };
-  await database.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...existingMetadata, ai_analysis: storedAnalysis } }).eq("id", message.id).eq("owner_id", input.ownerId);
+  const mentionPriority = messageMetadata.slack_mentioned_owner === true ? 9 : 0;
+  await database.from("messages").update({ classification: analysis.category, importance_score: Math.max(analysis.priorityScore, mentionPriority), processed_at: now, metadata: { ...existingMetadata, ai_analysis: { ...storedAnalysis, slackRoutine: source === "slack" ? (messageMetadata.slack_mentioned_owner === true ? "owner_mentioned" : slackMode === "work" ? "work_channel" : "private_conversation") : undefined } } }).eq("id", message.id).eq("owner_id", input.ownerId);
   await database.from("conversations").update({ priority_score: analysis.priorityScore, summary: analysis.summary, recommended_action: { action: analysis.recommendedAction, reason: analysis.priorityReason, source: "ai" }, updated_at: now }).eq("id", conversation.id).eq("owner_id", input.ownerId);
   if (conversation.person_id) {
     if ((!person?.relationship_type || person.relationship_type === "unknown") && analysis.relationshipSuggestion.confidence >= 0.8 && relationshipTypes.includes(analysis.relationshipSuggestion.type)) {

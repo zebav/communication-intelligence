@@ -59,6 +59,8 @@ export async function reconcileSlackConnection(connectionId: string) {
         displayNames.set(senderId, displayName);
       }
       const sentAt = new Date(Number(timestamp.split(".")[0]) * 1000).toISOString();
+      const channelMode = channel.is_im || channel.is_mpim ? "private" : "work";
+      const mentionedOwner = Boolean(credentials.slackUserId && text.includes(`<@${credentials.slackUserId}>`));
       const person = await resolveOrCreateChannelPerson({ database: db, ownerId: connection.owner_id, source: "slack", externalIdentifier: `slack:${senderId}`, displayName, connectionId: connection.id, contactAt: sentAt, identityMetadata: { slack_user_id: senderId } });
       const conversationKey = `slack:${connection.id}:${channelId}`;
       const title = channel.is_im ? `Slack · ${displayName}` : channel.is_mpim ? "Slack · gruppmeddelande" : `Slack · #${channel.name ?? "kanal"}`;
@@ -66,7 +68,7 @@ export async function reconcileSlackConnection(connectionId: string) {
       const values = { owner_id: connection.owner_id, person_id: person.personId, connection_id: connection.id, source: "slack", external_conversation_id: conversationKey, title, conversation_type: channel.is_im ? "direct_message" : "group", last_message_at: sentAt, last_other_message_at: sentAt, updated_at: new Date().toISOString() };
       const savedConversation = existing?.id ? await db.from("conversations").update(values).eq("id", existing.id).select("id").single() : await db.from("conversations").insert(values).select("id").single();
       if (savedConversation.error || !savedConversation.data) throw savedConversation.error ?? new Error("slack_conversation_save_failed");
-      const { data: saved, error } = await db.from("messages").upsert({ owner_id: connection.owner_id, conversation_id: savedConversation.data.id, external_message_id: `slack:${channelId}:${timestamp}`, direction: "in", sender_identity_id: person.identityId, source: "slack", body_text: text, sent_at: sentAt, metadata: { provider: "slack", connection_id: connection.id, channel_id: channelId, channel_name: channel.name ?? null }, processed_at: null }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
+      const { data: saved, error } = await db.from("messages").upsert({ owner_id: connection.owner_id, conversation_id: savedConversation.data.id, external_message_id: `slack:${channelId}:${timestamp}`, direction: "in", sender_identity_id: person.identityId, source: "slack", body_text: text, sent_at: sentAt, classification: mentionedOwner ? "Action Required" : channelMode === "work" ? "Information Only" : "Personal", importance_score: mentionedOwner ? 9 : channelMode === "private" ? 6 : 4, metadata: { provider: "slack", connection_id: connection.id, channel_id: channelId, channel_name: channel.name ?? null, slack_channel_mode: channelMode, slack_mentioned_owner: mentionedOwner }, processed_at: null }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
       if (error) throw error; if (saved) { imported += 1; analyses.push({ ownerId: connection.owner_id, conversationId: savedConversation.data.id, messageId: saved.id, source: "slack" }); }
     }
   }
