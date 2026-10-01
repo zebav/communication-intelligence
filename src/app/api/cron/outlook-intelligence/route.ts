@@ -7,7 +7,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
-import { processPendingEmailMediaJobs } from "@/lib/media/email-worker";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -74,10 +73,6 @@ export async function GET(request: NextRequest) {
   const requestedOwner = z.string().uuid().safeParse(request.headers.get("x-owner-id"));
   const ownerId = requestedOwner.success ? requestedOwner.data : null;
   const loginTriggered = request.headers.get("x-maintenance-trigger") === "login";
-  // Hobby plans allow two scheduled jobs. Process one queued attachment before
-  // the normal email import rather than registering a third cron endpoint.
-  // A single bounded job protects the 60-second function budget.
-  const media = await processPendingEmailMediaJobs(supabase, 1, ownerId ?? undefined).catch(() => ({ scanned: 0, processed: 0, failed: 1 }));
   let connectionQuery = supabase.from("connections").select("owner_id,id,provider").in("provider", ["microsoft-graph", "gmail"]).eq("status", "connected");
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
   const { data: connections, error } = await connectionQuery.limit(ownerId ? 4 : 10);
@@ -99,5 +94,5 @@ export async function GET(request: NextRequest) {
   const { data: pending } = await pendingQuery.limit(ownerId ? 30 : 50);
   const candidates = (pending ?? []).filter((message) => isRelevantEmail(message.classification ?? "") && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
   const analyzed = (await Promise.allSettled(candidates.map((message) => analyzeCandidate(supabase, message)))).filter((result) => result.status === "fulfilled" && result.value).length;
-  return NextResponse.json({ ok: true, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3, media, ownerId, loginTriggered });
+  return NextResponse.json({ ok: true, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3, ownerId, loginTriggered });
 }

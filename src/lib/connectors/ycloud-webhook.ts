@@ -38,8 +38,9 @@ export function ycloudMessage(event: NonNullable<ReturnType<typeof parseYCloudEv
   const participantId = (direction === "in" ? value.from : value.to).replace(/^\+/, "");
   const body = value.type === "text" ? value.text?.body ?? "" : value.image?.caption || value.video?.caption || value.document?.caption || `[WhatsApp ${value.type}]`;
   if (!body.trim()) throw new Error("empty_message");
+  const hasRetainableMedia = value.type === "image" || value.type === "video" || value.type === "document";
   return { businessAccountId: value.wabaId, phoneNumberId, participantId, participantName: value.customerProfile?.name,
-    message: normalizeCommunicationMessage(whatsappConnector, { externalId: value.wamid, externalConversationId: participantId, direction, senderIdentifier: direction === "in" ? participantId : event.businessPhone, body, sentAt: value.sendTime, attachmentCount: value.type === "text" ? 0 : 1, metadata: { provider: "ycloud", ycloud_event_id: event.eventId, whatsapp_business_account_id: value.wabaId, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: value.type } }) };
+    message: normalizeCommunicationMessage(whatsappConnector, { externalId: value.wamid, externalConversationId: participantId, direction, senderIdentifier: direction === "in" ? participantId : event.businessPhone, body, sentAt: value.sendTime, attachmentCount: hasRetainableMedia ? 1 : 0, metadata: { provider: "ycloud", ycloud_event_id: event.eventId, whatsapp_business_account_id: value.wabaId, whatsapp_phone_number_id: phoneNumberId, whatsapp_message_type: value.type } }) };
 }
 
 export const ycloudWhatsAppProvider: WhatsAppProviderAdapter<{ phoneNumberId: string }> = {

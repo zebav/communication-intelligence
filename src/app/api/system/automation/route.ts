@@ -33,7 +33,6 @@ export async function POST(request: NextRequest) {
       "/api/cron/whatsapp-intelligence",
       "/api/cron/slack-intelligence",
       "/api/cron/calendar-sync",
-      "/api/cron/media-analysis",
       "/api/cron/vault-ingestion",
     ].map((path) => fetch(new URL(path, request.url), {
       headers,
