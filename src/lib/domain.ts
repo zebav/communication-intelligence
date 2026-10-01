@@ -182,5 +182,5 @@ export function recommendAction(score: number, hasDecision = false, canQuickRepl
 }
 
 export const actionLabels: Record<RecommendedAction, string> = {
-  RESPOND_NOW: "Respond now", RESPOND_TODAY: "Respond today", RESPOND_LATER: "Respond later", QUICK_REPLY: "Quick reply", RESEARCH_FIRST: "Research first", DECISION_REQUIRED: "Decision required", FOLLOW_UP: "Follow up", WAIT: "Wait", IGNORE: "Can ignore", ARCHIVE: "Archive", UNSUBSCRIBE: "Unsubscribe", UNSUBSCRIBE_AND_DELETE: "Unsubscribe + delete", END_CONVERSATION: "End conversation", SPAM: "Spam", MANUAL_REVIEW: "Manual review",
+  RESPOND_NOW: "Respond now", RESPOND_TODAY: "Respond today", RESPOND_LATER: "Respond later", QUICK_REPLY: "Thoughtful reply", RESEARCH_FIRST: "Research first", DECISION_REQUIRED: "Decision required", FOLLOW_UP: "Follow up", WAIT: "Wait", IGNORE: "Can ignore", ARCHIVE: "Archive", UNSUBSCRIBE: "Unsubscribe", UNSUBSCRIBE_AND_DELETE: "Unsubscribe + delete", END_CONVERSATION: "End conversation", SPAM: "Spam", MANUAL_REVIEW: "Manual review",
 };

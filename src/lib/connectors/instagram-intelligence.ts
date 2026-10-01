@@ -11,23 +11,23 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   const database = createAdminClient();
   const [{ data: conversation }, { data: message }, { data: profile }] = await Promise.all([
     database.from("conversations").select("id,title,person_id").eq("id", input.conversationId).eq("owner_id", input.ownerId).eq("source", source).maybeSingle(),
-    database.from("messages").select("id,body_text,metadata,direction").eq("id", input.messageId).eq("owner_id", input.ownerId).eq("source", source).maybeSingle(),
+    database.from("messages").select("id,body_text,metadata,direction,sent_at").eq("id", input.messageId).eq("owner_id", input.ownerId).eq("source", source).maybeSingle(),
     database.from("profiles").select("preferences").eq("id", input.ownerId).maybeSingle(),
   ]);
   if (!conversation || !message || message.direction !== "in") return;
   if (blocksDecisionUntilMediaReady(message.metadata)) return;
   const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }] = await Promise.all([
     conversation.person_id ? database.from("people").select("display_name,relationship_type,organization,relationship_summary").eq("id", conversation.person_id).eq("owner_id", input.ownerId).maybeSingle() : Promise.resolve({ data: null }),
-    database.from("messages").select("direction,body_text").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", source).order("sent_at", { ascending: false }).limit(20),
+    database.from("messages").select("direction,body_text,sent_at").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", source).order("sent_at", { ascending: false }).limit(20),
     conversation.person_id ? database.from("memories").select("content").eq("owner_id", input.ownerId).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
     database.from("messages").select("body_text").eq("owner_id", input.ownerId).eq("source", source).eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
   ]);
   const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const personaContext = resolveCommunicationProfile(universalProfile, { source, personId: conversation.person_id, situation: person?.relationship_type === "dating" ? "romantic" : "personal" });
-  const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
+  const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at ?? undefined })).filter((item) => item.body);
   const analyzedMedia = await mediaContextForMessage(database, input.ownerId, message.id);
-  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source, senderName: person?.display_name ?? `${source} contact`, subject: conversation.title ?? `${source} conversation`, preview: message.body_text ?? "", currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || `new ${source} contact`, personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
+  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source, senderName: person?.display_name ?? `${source} contact`, subject: conversation.title ?? `${source} conversation`, preview: message.body_text ?? "", messageSentAt: message.sent_at ?? undefined, currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || `new ${source} contact`, personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
   const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
   const now = new Date().toISOString();
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };

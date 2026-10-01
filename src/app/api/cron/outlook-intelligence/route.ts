@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type AdminClient = ReturnType<typeof createAdminClient>;
-type Candidate = { id: string; owner_id: string; conversation_id: string; body_text: string | null; classification: string | null; metadata: unknown; attachment_count: number | null };
+type Candidate = { id: string; owner_id: string; conversation_id: string; body_text: string | null; sent_at: string | null; classification: string | null; metadata: unknown; attachment_count: number | null };
 
 function metadataObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -26,14 +26,14 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const [{ data: person }, { data: profile }, { data: history }, { data: recentReplies }, { data: verifiedMemories }] = await Promise.all([
     conversation.person_id ? supabase.from("people").select("display_name,relationship_type,organization").eq("id", conversation.person_id).eq("owner_id", message.owner_id).maybeSingle() : Promise.resolve({ data: null }),
     supabase.from("profiles").select("preferences").eq("id", message.owner_id).maybeSingle(),
-    supabase.from("messages").select("direction,body_text").eq("owner_id", message.owner_id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12),
+    supabase.from("messages").select("direction,body_text,sent_at").eq("owner_id", message.owner_id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12),
     supabase.from("messages").select("body_text").eq("owner_id", message.owner_id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
     conversation.person_id ? supabase.from("memories").select("content").eq("owner_id", message.owner_id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
   ]);
   const preferences = metadataObject(profile?.preferences) as { communication_persona?: unknown; universal_communication_profile?: unknown };
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
-  const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "" })).filter((item) => item.body);
+  const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at ?? undefined })).filter((item) => item.body);
   const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
   const analyzedMedia = await mediaContextForMessage(supabase, message.owner_id, message.id);
   const analysis = await getAIService().analyzeEmail({
@@ -41,6 +41,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     senderName: person?.display_name ?? "Unknown sender",
     subject: conversation.title ?? "(No subject)",
     preview: message.body_text ?? "",
+    messageSentAt: message.sent_at ?? undefined,
     currentClassification: message.classification ?? "Information Only",
     relationshipContext: [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "known email contact",
     personaContext,
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,classification,metadata,attachment_count").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false });
+  let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,sent_at,classification,metadata,attachment_count").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false });
   if (ownerId) pendingQuery = pendingQuery.eq("owner_id", ownerId);
   const { data: pending } = await pendingQuery.limit(ownerId ? 30 : 50);
   const candidates = (pending ?? []).filter((message) => isRelevantEmail(message.classification ?? "") && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
