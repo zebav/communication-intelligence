@@ -31,7 +31,9 @@ export async function GET(request: NextRequest) {
   })));
   const analyzed = results.filter((result) => result.status === "fulfilled").length;
   const failed = results.length - analyzed;
-  if (failed) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).eq("provider", whatsappConnector.id).eq("status", "connected");
-  else if (analyzed) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("provider", whatsappConnector.id).eq("status", "connected");
+  // Analysis is a recovery worker, not evidence that the live webhook is
+  // disconnected. A transient AI/media error must not present WhatsApp as
+  // requiring reconnection in the UI.
+  if (analyzed) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("provider", whatsappConnector.id).eq("status", "connected");
   return NextResponse.json({ ok: true, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3 });
 }

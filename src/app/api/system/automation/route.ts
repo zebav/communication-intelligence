@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
       "/api/cron/outlook-intelligence",
       "/api/cron/instagram-intelligence",
       "/api/cron/whatsapp-intelligence",
+      "/api/cron/slack-intelligence",
       "/api/cron/calendar-sync",
       "/api/cron/media-analysis",
       "/api/cron/vault-ingestion",
