@@ -20,8 +20,10 @@ export interface CommunicationCase {
   recommendedAction?: string;
   threadMessages?: { id: string; direction: "in" | "out"; body: string; sentAt: string; attachmentCount?: number }[];
   conversationType?: string;
-  analysis?: { summary?: string; intent?: string; priorityReason?: string; requiresReply?: boolean; draftResponse?: string; draftTone?: string; sendTiming?: { recommendation: "now" | "within_3_hours" | "tomorrow_afternoon" | "in_3_days" | "no_reply_needed"; rationale: string } };
+  analysis?: { summary?: string; intent?: string; priorityReason?: string; requiresReply?: boolean; draftResponse?: string; draftTone?: string; sendTiming?: { recommendation: "now" | "within_3_hours" | "tomorrow_afternoon" | "in_3_days" | "no_reply_needed"; rationale: string }; planningSuggestion?: PlanningSuggestion };
 }
+
+export type PlanningSuggestion = { detected: boolean; kind: "meeting" | "date" | "meal" | "travel" | "booking" | "none"; objective: string; placeQuery: string; travelNeeded: boolean; calendarNeeded: boolean; rationale: string };
 
 export type CommunicationSituation = "business" | "conflict" | "followUp" | "personal" | "romantic" | "logistics" | "sensitive";
 export interface ProfileGuidance { tone: string; guidance: string }
@@ -57,7 +59,7 @@ export interface SyncedEmailConversation {
   relevanceReasons?: string[];
   memories?: PersonMemory[];
   threadMessages: { id: string; direction: "in" | "out"; body: string; sentAt: string; attachmentCount?: number }[];
-  analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; sendTiming?: { recommendation: "now" | "within_3_hours" | "tomorrow_afternoon" | "in_3_days" | "no_reply_needed"; rationale: string }; relationshipSuggestion?: { type: string; confidence: number; reason: string }; forwardingSuggestion?: { recommended: boolean; recipientRole: "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "business_partner" | "other" | "none"; reason: string; introduction: string }; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number }; actionSuggestion?: { detected: boolean; type: "contact_lookup" | "web_research" | "website_task" | "form_completion" | "none"; task: string; reason: string; targetUrl: string; requiresLogin: boolean; contactIds: string[]; requiredFields: { key: string; label: string; kind: "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other"; description: string; sensitivity: "personal" | "sensitive" | "restricted" }[]; confidence: number; status?: "proposed" | "started" | "completed" } };
+  analysis?: { confidence: number; summary: string; intent: string; priorityReason: string; requiresReply: boolean; draftResponse: string; draftTone: string; sendTiming?: { recommendation: "now" | "within_3_hours" | "tomorrow_afternoon" | "in_3_days" | "no_reply_needed"; rationale: string }; planningSuggestion?: PlanningSuggestion; relationshipSuggestion?: { type: string; confidence: number; reason: string }; forwardingSuggestion?: { recommended: boolean; recipientRole: "lawyer" | "accountant" | "advisor" | "insurance_contact" | "colleague" | "business_partner" | "other" | "none"; reason: string; introduction: string }; commitment?: { description: string; dueAt: string; owner: "user" | "sender" | "unknown"; confidence: number }; actionSuggestion?: { detected: boolean; type: "contact_lookup" | "web_research" | "website_task" | "form_completion" | "none"; task: string; reason: string; targetUrl: string; requiresLogin: boolean; contactIds: string[]; requiredFields: { key: string; label: string; kind: "text" | "email" | "phone" | "date" | "username" | "password" | "account_number" | "one_time_code" | "other"; description: string; sensitivity: "personal" | "sensitive" | "restricted" }[]; confidence: number; status?: "proposed" | "started" | "completed" } };
   deepAnalysis?: DeepAnalysis;
 }
 

@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { CalendarClock } from "lucide-react";
-import { ConversationMapsAssistant } from "@/components/conversation-maps-assistant";
 
 type Timing = "now" | "within_3_hours" | "tomorrow_afternoon" | "in_3_days" | "no_reply_needed";
 type Props = { conversationId: string; messageId: string; source: string; body: string; suggestedTiming?: Timing; suggestedTimingReason?: string; disabled?: boolean; onScheduled?: () => void };
@@ -26,7 +25,7 @@ export function ScheduledSendControl({ conversationId, messageId, source, body, 
   };
   const suggested = suggestedDate(suggestedTiming);
   return <div className="scheduled-send-control">
-    {open ? <div className="scheduled-send-picker">{suggested && suggestedTiming && <button className="btn" type="button" onClick={() => setWhen(suggested)}>Använd AI:s förslag: {timingLabels[suggestedTiming]}</button>}<label>Skicka senare<input aria-label="Tidpunkt för schemalagt utskick" type="datetime-local" value={when} min={initialDate()} onChange={(event) => setWhen(event.target.value)} /></label>{suggestedTimingReason && <small className="muted">AI:s bedömning: {suggestedTimingReason}</small>}<ConversationMapsAssistant /><div><button className="btn" type="button" disabled={saving} onClick={() => setOpen(false)}>Avbryt</button><button className="btn" type="button" disabled={saving || disabled || !when} onClick={() => void schedule()}>{saving ? "Planerar…" : "Planera exakt detta svar"}</button></div></div> : <button className="btn" type="button" disabled={disabled} onClick={() => { setOpen(true); if (suggested) setWhen(suggested); setNotice(""); }}><CalendarClock size={13} />{suggestedTiming && suggestedTiming !== "now" && suggestedTiming !== "no_reply_needed" ? `Skicka ${timingLabels[suggestedTiming]}` : "Skicka senare"}</button>}
+    {open ? <div className="scheduled-send-picker">{suggested && suggestedTiming && <button className="btn" type="button" onClick={() => setWhen(suggested)}>Använd AI:s förslag: {timingLabels[suggestedTiming]}</button>}<label>Skicka senare<input aria-label="Tidpunkt för schemalagt utskick" type="datetime-local" value={when} min={initialDate()} onChange={(event) => setWhen(event.target.value)} /></label>{suggestedTimingReason && <small className="muted">AI:s bedömning: {suggestedTimingReason}</small>}<div><button className="btn" type="button" disabled={saving} onClick={() => setOpen(false)}>Avbryt</button><button className="btn" type="button" disabled={saving || disabled || !when} onClick={() => void schedule()}>{saving ? "Planerar…" : "Planera exakt detta svar"}</button></div></div> : <button className="btn" type="button" disabled={disabled} onClick={() => { setOpen(true); if (suggested) setWhen(suggested); setNotice(""); }}><CalendarClock size={13} />{suggestedTiming && suggestedTiming !== "now" && suggestedTiming !== "no_reply_needed" ? `Skicka ${timingLabels[suggestedTiming]}` : "Skicka senare"}</button>}
     {notice && <p className={notice.startsWith("Planerat") ? "positive" : "negative"}>{notice}</p>}
   </div>;
 }
