@@ -2,6 +2,7 @@ import {NextRequest,NextResponse} from "next/server";
 import {z} from "zod";
 import {createClient} from "@/lib/supabase/server";
 import {signedVaultUrl,storeVaultFile} from "@/lib/vault/vault-service";
+import {isDecorativeEmailSignatureAttachment} from "@/lib/vault/email-attachment-filter";
 
 async function auth(){
  const db=await createClient(); const {data:{user}}=await db.auth.getUser();
@@ -25,7 +26,9 @@ export async function GET(request:NextRequest){
  }
  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,ai_decision,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(100);
  if(error)return NextResponse.json({error:"Valvet kunde inte läsas."},{status:500});
- const assets=data??[];
+ // Older imports predate the signature filter. Keep them recoverable in
+ // storage, but do not present decorative signature/logo assets as important media.
+ const assets=(data??[]).filter(asset=>asset.source_type!=="email"||!isDecorativeEmailSignatureAttachment({filename:asset.filename,mimeType:asset.mime_type,sizeBytes:asset.size_bytes}));
  const personIds=[...new Set(assets.flatMap(asset=>asset.source_person_id?[asset.source_person_id]:[]))];
  const messageIds=[...new Set(assets.flatMap(asset=>asset.source_message_id?[asset.source_message_id]:[]))];
  const [{data:people},{data:messages}]=await Promise.all([

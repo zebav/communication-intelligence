@@ -6,6 +6,7 @@ import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { googleGmailConnector } from "@/lib/connectors/google-gmail";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { analyzeStoredMedia } from "@/lib/media/analysis";
+import { isDecorativeEmailSignatureAttachment } from "@/lib/vault/email-attachment-filter";
 
 type Credentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 export type MediaJob = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; source_type?: "email" | "instagram" | "whatsapp"; metadata?: unknown };
@@ -68,15 +69,15 @@ async function outlookAttachments(accessToken: string, messageId: string): Promi
   url.searchParams.set("$select", "id,name,contentType,size,contentBytes");
   const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(25_000) });
   if (!response.ok) throw new Error(response.status === 401 ? "reconnect_required" : `outlook_attachments_${response.status}`);
-  const body = await response.json() as { value?: Array<{ name?: string; contentType?: string; contentBytes?: string; size?: number; '@odata.type'?: string }> };
+  const body = await response.json() as { value?: Array<{ name?: string; contentType?: string; contentBytes?: string; size?: number; isInline?: boolean; '@odata.type'?: string }> };
   return (body.value ?? []).flatMap((item) => {
-    if (!item.contentBytes || item['@odata.type']?.includes("referenceAttachment")) return [];
+    if (!item.contentBytes || item['@odata.type']?.includes("referenceAttachment") || isDecorativeEmailSignatureAttachment({ filename:item.name, mimeType:item.contentType, sizeBytes:item.size, isInline:item.isInline })) return [];
     const bytes = Buffer.from(item.contentBytes, "base64");
     return [{ filename: item.name?.trim() || "attachment", mimeType: item.contentType?.trim().toLowerCase() || "application/octet-stream", bytes }];
   });
 }
 
-type GmailPart = { mimeType?: string; filename?: string; body?: { attachmentId?: string; data?: string }; parts?: GmailPart[] };
+type GmailPart = { mimeType?: string; filename?: string; headers?: Array<{name?:string;value?:string}>; body?: { attachmentId?: string; data?: string; size?:number }; parts?: GmailPart[] };
 function gmailParts(part: GmailPart | undefined): GmailPart[] {
   if (!part) return [];
   return [(part.body?.attachmentId ? part : null), ...(part.parts ?? []).flatMap(gmailParts)].filter((value): value is GmailPart => Boolean(value));
@@ -88,14 +89,17 @@ async function gmailAttachments(accessToken: string, externalMessageId: string):
   if (!messageResponse.ok) throw new Error(messageResponse.status === 401 ? "reconnect_required" : `gmail_message_${messageResponse.status}`);
   const message = await messageResponse.json() as { payload?: GmailPart };
   const parts = gmailParts(message.payload);
-  return Promise.all(parts.map(async (part) => {
+  const attachments: Array<MediaAttachment | null> = await Promise.all(parts.map(async (part): Promise<MediaAttachment | null> => {
     const attachmentId = part.body?.attachmentId;
     if (!attachmentId) throw new Error("gmail_attachment_id_missing");
     const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(25_000) });
     if (!response.ok) throw new Error(response.status === 401 ? "reconnect_required" : `gmail_attachment_${response.status}`);
     const body = await response.json() as { data?: string };
-    return { filename: part.filename?.trim() || "attachment", mimeType: part.mimeType?.trim().toLowerCase() || "application/octet-stream", bytes: Buffer.from(body.data ?? "", "base64url") };
+    const attachment = { filename: part.filename?.trim() || "attachment", mimeType: part.mimeType?.trim().toLowerCase() || "application/octet-stream", bytes: Buffer.from(body.data ?? "", "base64url") };
+    const headers = new Map((part.headers ?? []).map((header) => [(header.name ?? "").toLowerCase(), header.value ?? ""]));
+    return isDecorativeEmailSignatureAttachment({ filename:attachment.filename, mimeType:attachment.mimeType, sizeBytes:attachment.bytes.length, contentId:headers.get("content-id"), contentDisposition:headers.get("content-disposition") }) ? null : attachment;
   }));
+  return attachments.filter((attachment): attachment is MediaAttachment => attachment !== null);
 }
 
 async function markMessage(database: SupabaseClient, job: MediaJob, state: "ready" | "blocked" | "failed", details: Record<string, unknown>) {
@@ -128,6 +132,10 @@ async function storeAttachment(database: SupabaseClient, job: MediaJob, attachme
 }
 
 export async function ingestTrustedMediaAttachments(database: SupabaseClient, job: MediaJob, attachments: MediaAttachment[]) {
+  if (!attachments.length) {
+    await markMessage(database, job, "ready", { asset_count: 0, reason: "no_retainable_attachment" });
+    return { state: "ready" as const, assetCount: 0, assetIds: [] as string[] };
+  }
   const results = await Promise.all(attachments.map((attachment) => storeAttachment(database, job, attachment)));
   const ready = results.length > 0 && results.every((result) => result.state === "ready");
   const blocked = results.some((result) => result.state === "blocked");

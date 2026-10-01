@@ -4,7 +4,7 @@ import { storeVaultFile } from "@/lib/vault/vault-service";
 
 type Database = { from: (table: string) => any };
 type Credentials = { accessToken: string; refreshToken: string; expiresAt?: string; tokenType?: string; scope?: string };
-type PickerSession = { id?: string; name?: string; pickerUri?: string; pollingConfig?: { pollingInterval?: string } };
+type PickerSession = { id?: string; name?: string; pickerUri?: string; pollingConfig?: { pollInterval?: string } };
 type PickerItem = { id?: string; mediaFile?: { baseUrl?: string; mimeType?: string; filename?: string }; baseUrl?: string; mimeType?: string; filename?: string };
 
 function sessionId(value: PickerSession) { return value.id ?? value.name ?? ""; }
@@ -31,11 +31,14 @@ async function accessTokenFor(ownerId: string, db: Database) {
 
 export async function startGooglePhotosPicker(ownerId: string, db: Database) {
   const accessToken = await accessTokenFor(ownerId, db);
-  const response = await fetch("https://photospicker.googleapis.com/v1/sessions", { method: "POST", headers: requestHeaders(accessToken), body: JSON.stringify({ pickingConfig: { maxItemCount: 10 } }), signal: AbortSignal.timeout(15_000) });
+  const response = await fetch("https://photospicker.googleapis.com/v1/sessions", { method: "POST", headers: requestHeaders(accessToken), body: JSON.stringify({ pickingConfig: { maxItemCount: "10" } }), signal: AbortSignal.timeout(15_000) });
   const session = await response.json().catch(() => ({})) as PickerSession;
   const id = sessionId(session);
-  if (!response.ok || !id || !session.pickerUri) throw new Error("Google Foto kunde inte öppna bildväljaren.");
-  return { sessionId: id, pickerUri: session.pickerUri, pollAfter: session.pollingConfig?.pollingInterval ?? "5s" };
+  if (!response.ok || !id || !session.pickerUri) {
+    console.error("google_photos_picker_session_failed", { status: response.status, hasSessionId: Boolean(id), hasPickerUri: Boolean(session.pickerUri) });
+    throw new Error(response.status === 403 ? "Google Foto saknar behörighet för bildväljaren. Anslut tjänsten igen." : "Google Foto kunde inte öppna bildväljaren.");
+  }
+  return { sessionId: id, pickerUri: session.pickerUri, pollAfter: session.pollingConfig?.pollInterval ?? "5s" };
 }
 
 export async function importGooglePhotosPickerSelection(ownerId: string, db: Database, id: string) {

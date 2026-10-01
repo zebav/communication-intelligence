@@ -10,6 +10,7 @@ import {isAuthorizedCron} from "@/lib/cron-auth";
 import {ingestTrustedMediaAttachments, type MediaJob} from "@/lib/media/email-worker";
 import {instagramConnector} from "@/lib/connectors/instagram";
 import {downloadEphemeralInstagramMedia} from "@/lib/connectors/instagram-media";
+import {isDecorativeEmailSignatureAttachment} from "@/lib/vault/email-attachment-filter";
 import {z} from "zod";
 
 export const maxDuration=120;
@@ -42,7 +43,7 @@ async function refreshGoogle(credentials:Credentials,origin:string){
  if(!t.access_token||!t.expires_in)throw new Error("reconnect_required");
  return {...credentials,accessToken:t.access_token,refreshToken:t.refresh_token??credentials.refreshToken,expiresAt:new Date(Date.now()+t.expires_in*1000).toISOString()};
 }
-type Attachment={name:string;mime:string;bytes:Uint8Array};
+type Attachment={name:string;mime:string;bytes:Uint8Array;isInline?:boolean;contentId?:string;contentDisposition?:string};
 async function microsoftAttachments(token:string,messageId:string):Promise<Attachment[]>{
  const list=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});
  if(!list.ok)throw new Error(`graph_attachments_${list.status}`);
@@ -52,11 +53,13 @@ async function microsoftAttachments(token:string,messageId:string):Promise<Attac
   if(!item.id||!item.name||item.isInline||(item.size??0)>100*1024*1024)continue;
   const raw=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(item.id)}/$value`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(30_000)});
   if(!raw.ok)continue;
-  out.push({name:item.name,mime:item.contentType||raw.headers.get("content-type")||"application/octet-stream",bytes:new Uint8Array(await raw.arrayBuffer())});
+  const bytes=new Uint8Array(await raw.arrayBuffer());
+  const attachment={name:item.name,mime:item.contentType||raw.headers.get("content-type")||"application/octet-stream",bytes,isInline:item.isInline};
+  if(!isDecorativeEmailSignatureAttachment({filename:attachment.name,mimeType:attachment.mime,sizeBytes:bytes.length,isInline:attachment.isInline}))out.push(attachment);
  }
  return out;
 }
-type GmailPart={filename?:string;mimeType?:string;body?:{attachmentId?:string;data?:string;size?:number};parts?:GmailPart[]};
+type GmailPart={filename?:string;mimeType?:string;headers?:Array<{name?:string;value?:string}>;body?:{attachmentId?:string;data?:string;size?:number};parts?:GmailPart[]};
 function gmailParts(part?:GmailPart):GmailPart[]{if(!part)return[];return [...(part.filename?.trim()&&part.body&&(part.body.attachmentId||part.body.data)?[part]:[]),...(part.parts??[]).flatMap(gmailParts)];}
 async function gmailAttachments(token:string,messageId:string):Promise<Attachment[]>{
  const msg=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=full`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});
@@ -65,7 +68,10 @@ async function gmailAttachments(token:string,messageId:string):Promise<Attachmen
  for(const part of gmailParts(data.payload)){
   if(!part.filename||(part.body?.size??0)>100*1024*1024)continue; let encoded=part.body?.data??"";
   if(part.body?.attachmentId){const r=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.body.attachmentId)}`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});if(!r.ok)continue;encoded=String((await r.json() as {data?:string}).data??"");}
-  if(!encoded)continue; out.push({name:part.filename,mime:part.mimeType||"application/octet-stream",bytes:new Uint8Array(Buffer.from(encoded,"base64url"))});
+  if(!encoded)continue;
+  const bytes=new Uint8Array(Buffer.from(encoded,"base64url")); const headers=new Map((part.headers??[]).map(header=>[(header.name??"").toLowerCase(),header.value??""]));
+  const attachment={name:part.filename,mime:part.mimeType||"application/octet-stream",bytes,contentId:headers.get("content-id"),contentDisposition:headers.get("content-disposition")};
+  if(!isDecorativeEmailSignatureAttachment({filename:attachment.name,mimeType:attachment.mime,sizeBytes:bytes.length,contentId:attachment.contentId,contentDisposition:attachment.contentDisposition}))out.push(attachment);
  }
  return out;
 }
