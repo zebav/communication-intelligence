@@ -1,5 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { logOperation } from "@/lib/observability";
 
 // The workspace must remain quick even when a mailbox has a large backlog.
 // This authenticated endpoint acknowledges the login immediately, then starts
@@ -7,15 +8,22 @@ import { createClient } from "@/lib/supabase/server";
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const database = await createClient();
   const { data: { user } } = await database.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Din session har gått ut." }, { status: 401 });
+  if (!user) {
+    logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: "unauthenticated" });
+    return NextResponse.json({ error: "Din session har gått ut." }, { status: 401 });
+  }
   const { data: assurance } = await database.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return NextResponse.json({ error: "Tvåstegsverifiering krävs." }, { status: 403 });
   if (request.headers.get("origin") !== request.nextUrl.origin) return NextResponse.json({ error: "Ogiltigt ursprung." }, { status: 403 });
 
   const cronSecret = process.env.CRON_SECRET?.trim();
-  if (!cronSecret) return NextResponse.json({ queued: false, reason: "automation_not_configured" }, { status: 202 });
+  if (!cronSecret) {
+    logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: "automation_not_configured" });
+    return NextResponse.json({ queued: false, reason: "automation_not_configured" }, { status: 202 });
+  }
 
   const ownerId = user.id;
   after(async () => {
@@ -40,5 +48,6 @@ export async function POST(request: NextRequest) {
     })));
   });
 
+  logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { workers: 6 } });
   return NextResponse.json({ queued: true }, { headers: { "Cache-Control": "no-store" } });
 }

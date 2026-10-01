@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { defaultUniversalProfile, normalizeUniversalProfile } from "@/lib/communication-profile";
 import { recentWindowStartIso } from "@/lib/recent-window";
 import type { CalendarLearningEvent, ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
+import { logOperation } from "@/lib/observability";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ type HomeProps = {
 const workspaceViews = new Set<View>(["today", "cases", "inbox", "people", "followups", "cleanup", "intelligence", "connections", "settings", "calendar", "assistant"]);
 
 export default async function Home({ searchParams }: HomeProps) {
+  const workspaceStartedAt = Date.now();
   const requestedView = (await searchParams).view;
   const initialView: View = typeof requestedView === "string" && workspaceViews.has(requestedView as View) ? requestedView as View : "today";
   const supabase = await createClient();
@@ -88,7 +90,7 @@ export default async function Home({ searchParams }: HomeProps) {
     new Promise<{ kind: "timed-out" }>((resolve) => setTimeout(() => resolve({ kind: "timed-out" }), 6_500)),
   ]);
   if (workspaceLoad.kind === "timed-out") {
-    console.error("workspace_load_timed_out");
+    logOperation({ route: "/", operation: "load_workspace", outcome: "timed_out", durationMs: Date.now() - workspaceStartedAt });
     return <WorkspaceSnapshot key={user.id} failedSections={["Arbetsytans data"]} data={{
       userEmail: user.email ?? "Private owner", communicationCases: [], connections: [], syncedEmails: [], followUps: [], people: [], learningSignals: [], outcomes: [], calendarHistory: [],
       persona: defaultUniversalProfile, profilePeople: [], initialView,
@@ -112,6 +114,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const { data: messageRows, error: messageError } = conversationIds.length
     ? await supabase.from("messages").select("id,conversation_id,body_text,sent_at,direction,classification,importance_score,attachment_count,metadata").eq("owner_id", user.id).in("conversation_id", conversationIds).order("sent_at", { ascending: false }).limit(600).abortSignal(AbortSignal.timeout(6_000))
     : { data: [], error: null };
+  logOperation({ route: "/", operation: "load_workspace", outcome: "completed", durationMs: Date.now() - workspaceStartedAt, counts: { conversations: conversationRows.length, messages: messageRows?.length ?? 0, people: personRows?.length ?? 0 } });
   const messagesByConversation = new Map<string, WorkspaceMessageRow[]>();
   for (const message of (messageRows ?? []) as WorkspaceMessageRow[]) {
     const current = messagesByConversation.get(message.conversation_id) ?? [];

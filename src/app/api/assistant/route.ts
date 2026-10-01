@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createMobileClient } from "@/lib/supabase/mobile";
+import { logOperation } from "@/lib/observability";
 import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, survivesLowerPrioritySender, type Evidence, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
@@ -40,6 +41,7 @@ async function session(request?: Request) {
 }
 const json = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { "Cache-Control": "no-store" } });
 export async function GET(request: Request) {
+  const startedAt = Date.now();
   try {
     const { db, owner } = await session(request);
     const cursor = z.coerce.number().int().min(0).max(100000).parse(new URL(request.url).searchParams.get("cursor") ?? 0);
@@ -115,8 +117,12 @@ export async function GET(request: Request) {
       awaitingAnalysis: awaitingAnalysis.error ? 0 : awaitingAnalysis.count ?? 0,
       learningSuggestions: suggestedLearning.error ? 0 : suggestedLearning.count ?? 0,
     };
+    logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { messages_scanned: page.messages.length, candidates: candidates.length, notes: notes.length, tasks: stored.length } });
     return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations });
-  } catch (e) { return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503); }
+  } catch (e) {
+    logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: e });
+    return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503);
+  }
 }
 export async function POST(request: NextRequest) {
   const native = /^Bearer\s+.+/i.test(request.headers.get("authorization") ?? "") && request.headers.get("x-client") === "ios";
