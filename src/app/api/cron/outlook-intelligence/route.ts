@@ -49,7 +49,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     conversationMessages,
     analyzedMedia,
   });
-  const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
+  const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
   const now = new Date().toISOString();
   const { error } = await supabase.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...metadataObject(message.metadata), ai_analysis: storedAnalysis, analyzed_automatically: true } }).eq("id", message.id).eq("owner_id", message.owner_id);
   if (error) return false;
