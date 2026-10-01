@@ -4,6 +4,7 @@ const guidance: Record<Source, string> = {
   email: "Use an email structure when useful: clear opening, complete answer, and appropriate sign-off.",
   imessage: "Use a natural, concise chat style that matches the existing personal relationship.",
   instagram: "Use a concise direct-message style and preserve the relationship's established tone.",
+  slack: "Use concise, clear workplace chat language and preserve the existing channel or direct-message context.",
   whatsapp: "Use a conversational chat style, short paragraphs, and avoid unnecessary formality.",
   messenger: "Use a concise direct-message style and make the next action easy to understand.",
   tinder: "Use natural personal language. Never automate sending or impersonate the owner.",

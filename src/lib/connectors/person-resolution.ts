@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type ChannelPersonResolutionInput = {
   database: SupabaseClient;
   ownerId: string;
-  source: "instagram" | "whatsapp" | "email" | "messenger" | "tinder" | "tiktok" | "linkedin" | "manual";
+  source: "instagram" | "whatsapp" | "slack" | "email" | "messenger" | "tinder" | "tiktok" | "linkedin" | "manual";
   externalIdentifier: string;
   displayName?: string | null;
   username?: string | null;

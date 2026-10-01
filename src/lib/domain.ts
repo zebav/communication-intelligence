@@ -1,4 +1,4 @@
-export type Source = "email" | "imessage" | "instagram" | "whatsapp" | "messenger" | "tinder" | "tiktok" | "linkedin" | "manual";
+export type Source = "email" | "imessage" | "instagram" | "whatsapp" | "slack" | "messenger" | "tinder" | "tiktok" | "linkedin" | "manual";
 export type RecommendedAction = "RESPOND_NOW" | "RESPOND_TODAY" | "RESPOND_LATER" | "QUICK_REPLY" | "RESEARCH_FIRST" | "DECISION_REQUIRED" | "FOLLOW_UP" | "WAIT" | "IGNORE" | "ARCHIVE" | "UNSUBSCRIBE" | "UNSUBSCRIBE_AND_DELETE" | "END_CONVERSATION" | "SPAM" | "MANUAL_REVIEW";
 
 export interface ScoreDimension { label: string; value: number; reason: string }
