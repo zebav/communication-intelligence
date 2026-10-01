@@ -6,7 +6,10 @@ export const maxDuration=300;
 
 function transientFailure(reason: unknown) {
  const value=typeof reason==="string"?reason:"";
- return value==="vault_upload_failed"||value==="credential_update_failed"||value==="outlook_attachments_400"||value==="document_analysis_400_invalid_value"||/(gmail_|outlook_attachments_|graph_attachments_).*(429|5\d\d)$/.test(value);
+ // A YCloud media URL may initially fail because the earlier worker did not
+ // attach the provider credential. It is safe to retry that bounded failure:
+ // the updated worker now authenticates the download and never exposes bytes.
+ return value==="vault_upload_failed"||value==="credential_update_failed"||value==="outlook_attachments_400"||value==="document_analysis_400_invalid_value"||/^media_fetch_(401|403|429|5\d\d)$/.test(value)||/(gmail_|outlook_attachments_|graph_attachments_).*(429|5\d\d)$/.test(value);
 }
 
 export async function GET(request:NextRequest){
