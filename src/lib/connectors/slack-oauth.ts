@@ -3,15 +3,19 @@ import { createHash, randomBytes } from "node:crypto";
 export const SLACK_OAUTH_COOKIE_PATH = "/api/connectors/slack";
 
 /**
- * Slack has no refresh token in its standard OAuth V2 response. The token is
- * therefore kept encrypted and can only be used for the explicitly granted,
- * read-only pilot scopes below.
+ * Use Slack's user OAuth flow: a bot token can only see conversations the bot
+ * itself belongs to, while Solvani needs the owner's own DM and channel view.
+ * The token is kept encrypted and is limited to the read-only scopes below.
  */
 export const slackReadOnlyScopes = [
   "channels:read",
   "channels:history",
+  "groups:read",
+  "groups:history",
   "im:read",
   "im:history",
+  "mpim:read",
+  "mpim:history",
   "users:read",
 ] as const;
 
@@ -40,11 +44,11 @@ export function createSlackOAuthAttempt() {
 }
 
 export function slackAuthorizationUrl(config: ReturnType<typeof slackConfig>, state: string, challenge: string) {
-  const url = new URL("https://slack.com/oauth/v2/authorize");
+  const url = new URL("https://slack.com/oauth/v2_user/authorize");
   url.search = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
-    scope: slackReadOnlyScopes.join(","),
+    user_scope: slackReadOnlyScopes.join(","),
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",

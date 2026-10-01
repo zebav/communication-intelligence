@@ -11,7 +11,7 @@ type SlackTokenResponse = {
   token_type?: string;
   scope?: string;
   team?: { id?: string; name?: string };
-  authed_user?: { id?: string };
+  authed_user?: { id?: string; access_token?: string; scope?: string };
 };
 
 function sameState(left: string, right: string) {
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const config = slackConfig(request.nextUrl.origin);
-    const response = await fetch("https://slack.com/api/oauth.v2.access", {
+    const response = await fetch("https://slack.com/api/oauth.v2.user.access", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, code, redirect_uri: config.redirectUri, code_verifier: verifier }),
@@ -46,7 +46,9 @@ export async function GET(request: NextRequest) {
     });
     if (!response.ok) return resultRedirect(request, "failed");
     const token = await response.json() as SlackTokenResponse;
-    if (!token.ok || !token.access_token || !token.team?.id) return resultRedirect(request, "failed");
+    const userAccessToken = token.authed_user?.access_token ?? token.access_token;
+    const userScopes = token.authed_user?.scope ?? token.scope;
+    if (!token.ok || !userAccessToken || !token.team?.id) return resultRedirect(request, "failed");
     const encryptionKey = process.env.CREDENTIAL_ENCRYPTION_KEY;
     if (!encryptionKey) return resultRedirect(request, "failed");
     const accountIdentifier = token.team.id;
@@ -54,9 +56,9 @@ export async function GET(request: NextRequest) {
     const values = {
       owner_id: user.id, provider: "slack", source: "manual", account_name: token.team.name ?? "Slack workspace", account_identifier: accountIdentifier,
       status: "connected", health_status: "healthy", capabilities: { validateConnection: true, fullSync: false, incrementalSync: false, pushNotifications: false, createDraft: true, sendWithApproval: false },
-      scopes: token.scope?.split(",").filter(Boolean) ?? [...slackReadOnlyScopes],
-      encrypted_credentials: encryptCredential({ accessToken: token.access_token, tokenType: token.token_type, slackUserId: token.authed_user?.id, workspaceId: token.team.id }, encryptionKey),
-      token_metadata: { workspace_id: token.team.id, workspace_name: token.team.name ?? null, pilot: "read_only" }, updated_at: new Date().toISOString(),
+      scopes: userScopes?.split(",").filter(Boolean) ?? [...slackReadOnlyScopes],
+      encrypted_credentials: encryptCredential({ accessToken: userAccessToken, tokenType: token.token_type, tokenAudience: "user", slackUserId: token.authed_user?.id, workspaceId: token.team.id }, encryptionKey),
+      token_metadata: { workspace_id: token.team.id, workspace_name: token.team.name ?? null, pilot: "read_only", token_audience: "user" }, updated_at: new Date().toISOString(),
     };
     const saved = existing?.id ? await db.from("connections").update(values).eq("id", existing.id).eq("owner_id", user.id) : await db.from("connections").insert(values);
     return saved.error ? resultRedirect(request, "failed") : resultRedirect(request, "connected");

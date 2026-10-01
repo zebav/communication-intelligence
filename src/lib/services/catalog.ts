@@ -24,7 +24,7 @@ export const serviceCatalog: readonly ServiceDefinition[] = [
   { id: "outlook", name: "Outlook", category: "Messages", purpose: "Imports Microsoft mail and prepares approved replies.", maxPermission: "prepare", capabilities: ["Read messages", "Suggest replies", "Prepare approved send"], providerIds: ["microsoft-graph"], available: true },
   { id: "instagram", name: "Instagram", category: "Messages", purpose: "Collects professional direct messages and proposes replies.", maxPermission: "prepare", capabilities: ["Read messages", "Suggest replies", "Prepare approved send"], providerIds: ["instagram", "instagram-professional"], available: true },
   { id: "whatsapp", name: "WhatsApp", category: "Messages", purpose: "Brings business conversations into the shared inbox.", maxPermission: "prepare", capabilities: ["Read messages", "Suggest replies", "Prepare approved send"], providerIds: ["whatsapp", "whatsapp-business", "ycloud"], available: true },
-  { id: "slack", name: "Slack", category: "Messages", purpose: "Collects selected direct messages and channels into the shared inbox.", maxPermission: "suggest", capabilities: ["Read selected messages", "Suggest replies", "Suggest a follow-up"], providerIds: ["slack"], environment: ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"], available: true, setupNote: "Synkar läsbehöriga direktmeddelanden och öppna kanaler. Utkast skapas i Solvani; inget skickas till Slack utan en separat framtida skrivbehörighet." },
+  { id: "slack", name: "Slack", category: "Messages", purpose: "Collects direct messages and channels you are a member of into the shared inbox.", maxPermission: "suggest", capabilities: ["Read direct messages", "Read member channels", "Suggest replies", "Suggest a follow-up"], providerIds: ["slack"], environment: ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"], available: true, setupNote: "Synkar dina läsbehöriga direktmeddelanden och kanaler. Utkast skapas i Solvani; inget skickas till Slack utan ett separat framtida godkännande." },
   { id: "google_calendar", name: "Google Calendar", category: "Planning", purpose: "Provides availability to the master calendar and creates approved bookings.", maxPermission: "prepare", capabilities: ["Read availability", "Suggest times", "Prepare approved booking"], providerIds: ["google-calendar"], available: true },
   { id: "outlook_calendar", name: "Outlook Calendar", category: "Planning", purpose: "Provides Microsoft availability to the master calendar.", maxPermission: "prepare", capabilities: ["Read availability", "Suggest times", "Prepare approved booking"], providerIds: ["microsoft-calendar"], available: true },
   { id: "google_maps", name: "Google Maps", category: "Planning", purpose: "Finds places, estimates travel time and checks weather for meeting plans.", maxPermission: "suggest", capabilities: ["Find places", "Estimate travel", "Check weather", "Show map"], environment: ["CALENDAR_MAPS_ENABLED", "CALENDAR_BROWSER_MAPS_ENABLED", "GOOGLE_MAPS_SERVER_API_KEY", "GOOGLE_MAPS_BROWSER_API_KEY"], available: true },
@@ -47,6 +47,7 @@ export type ServiceSnapshot = ServiceDefinition & {
   lastSyncAt: string | null;
   policy: ServicePermission;
   policyUpdatedAt: string | null;
+  requiresReconnect: boolean;
 };
 
 export function serviceSnapshots(input: { connections: ChannelConnection[]; calendars?: CalendarAccount[]; policies: StoredPolicy[]; environment?: NodeJS.ProcessEnv }): ServiceSnapshot[] {
@@ -56,12 +57,13 @@ export function serviceSnapshots(input: { connections: ChannelConnection[]; cale
     const calendar = calendarProvider ? input.calendars?.find((item) => item.provider === calendarProvider) : undefined;
     const policy = input.policies.find((item) => item.service_id === service.id);
     const mapsKeyConfigured = Boolean(input.environment?.GOOGLE_MAPS_SERVER_API_KEY?.trim());
+    const requiresReconnect = service.id === "slack" && connection?.healthStatus === "degraded";
     const configured = service.id === "google_maps"
       ? input.environment?.CALENDAR_MAPS_ENABLED === "true" && input.environment?.CALENDAR_BROWSER_MAPS_ENABLED === "true" && mapsKeyConfigured && Boolean(input.environment?.GOOGLE_MAPS_BROWSER_API_KEY?.trim())
       : !service.environment?.length || service.environment.every((key) => Boolean(input.environment?.[key]?.trim()));
     const enabled = policy?.enabled ?? true;
     const isConnected = Boolean(connection || calendar || (service.id === "google_maps" && configured));
-    const status: ServiceSnapshot["status"] = !enabled ? "paused" : isConnected ? "connected" : service.id === "google_maps" && mapsKeyConfigured ? "ready" : !service.available ? "planned" : service.environment?.length && configured ? "ready" : "needs_setup";
+    const status: ServiceSnapshot["status"] = !enabled ? "paused" : requiresReconnect ? "needs_setup" : isConnected ? "connected" : service.id === "google_maps" && mapsKeyConfigured ? "ready" : !service.available ? "planned" : service.environment?.length && configured ? "ready" : "needs_setup";
     return {
       ...service,
       status,
@@ -69,6 +71,7 @@ export function serviceSnapshots(input: { connections: ChannelConnection[]; cale
       lastSyncAt: connection?.lastSyncAt ?? calendar?.lastSyncAt ?? null,
       policy: policy?.permission ?? service.maxPermission,
       policyUpdatedAt: policy?.updated_at ?? null,
+      requiresReconnect,
     };
   });
 }
