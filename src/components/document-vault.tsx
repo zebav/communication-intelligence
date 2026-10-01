@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useState} from "react";
-import {CheckCircle2,ChevronDown,FileText,Image as ImageIcon,Music2,Upload,ExternalLink,UserRound,XCircle} from "lucide-react";
+import {CheckCircle2,ChevronDown,FileText,Image as ImageIcon,Music2,Play,Upload,ExternalLink,UserRound,XCircle} from "lucide-react";
 
 type ImportOrigin="google_drive"|"onedrive"|"google_photos"|"device";
 type Asset={id:string;asset_kind:string;title:string;filename:string;mime_type:string;size_bytes:number;sensitivity:string;document_type?:string|null;summary:string;retention_reason:string;importance_score:number;reusable:boolean;source_type:string;external_origin?:ImportOrigin|null;created_at:string;previewUrl?:string;transcript?:string|null;sourcePerson?:{id:string;name:string;organization:string|null}|null};
@@ -22,13 +22,13 @@ function Transcript({value}:{value:string}){
 }
 
 function AssetCard({asset,onOpen}:{asset:Asset;onOpen:(id:string)=>void}){
- const image=asset.mime_type.startsWith("image/"); const audio=asset.mime_type.startsWith("audio/");
- const kind=image?"Bild":audio?"Ljudmeddelande":asset.document_type||"Dokument";
+ const image=asset.mime_type.startsWith("image/"); const audio=asset.mime_type.startsWith("audio/"); const video=asset.mime_type.startsWith("video/");
+ const kind=image?"Bild":audio?"Ljudmeddelande":video?"Video":asset.document_type||"Dokument";
  return <article className={`vault-asset-card ${image?"is-image":""}`}>
-  {image&&asset.previewUrl?<img className="vault-image" src={asset.previewUrl} alt={asset.summary||asset.title||"Bild från kontakt"}/>:<div className="vault-kind-icon">{audio?<Music2 size={19}/>:asset.asset_kind==="document"?<FileText size={19}/>:<ImageIcon size={19}/>}</div>}
+  {image&&asset.previewUrl?<img className="vault-image" src={asset.previewUrl} alt={asset.summary||asset.title||"Bild från kontakt"}/>:video&&asset.previewUrl?<video className="vault-video" controls preload="metadata" src={asset.previewUrl}>Din webbläsare kan inte spela upp videon.</video>:<div className="vault-kind-icon">{audio?<Music2 size={19}/>:video?<Play size={19}/>:asset.asset_kind==="document"?<FileText size={19}/>:<ImageIcon size={19}/>}</div>}
   <div className="vault-asset-content"><div className="vault-card-top"><div><span className="vault-kind">{kind}</span><h3>{asset.title||asset.filename||kind}</h3></div><span className="vault-date">{readableDate(asset.created_at)}</span></div><Sender asset={asset}/>
    {audio&&asset.previewUrl&&<audio controls preload="metadata" src={asset.previewUrl}>Din webbläsare kan inte spela upp ljudet.</audio>}
-   {audio&&asset.transcript?<><span className="vault-section-label">Transkribering</span><Transcript value={asset.transcript}/></>:asset.summary&&<p className="vault-summary">{asset.summary}</p>}
+   {(audio||video)&&asset.transcript?<><span className="vault-section-label">Transkribering</span><Transcript value={asset.transcript}/></>:asset.summary&&<p className="vault-summary">{asset.summary}</p>}
    <div className="vault-card-footer"><span>{sourceLabel[asset.source_type]??asset.source_type}</span><span className="pill">{asset.sensitivity}</span><button className="btn" onClick={()=>void onOpen(asset.id)}><ExternalLink size={13}/>Öppna original</button></div>
   </div>
  </article>;

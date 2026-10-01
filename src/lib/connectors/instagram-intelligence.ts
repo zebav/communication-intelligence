@@ -5,6 +5,7 @@ import { relationshipTypes } from "@/lib/relationship-types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
+import { inboundBurst } from "@/lib/ai/inbound-burst";
 
 export async function analyzeIncomingInstagramMessage(input: { ownerId: string; conversationId: string; messageId: string; source?: "instagram" | "slack" }) {
   const source = input.source ?? "instagram";
@@ -18,7 +19,7 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   if (blocksDecisionUntilMediaReady(message.metadata)) return;
   const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }] = await Promise.all([
     conversation.person_id ? database.from("people").select("display_name,relationship_type,organization,relationship_summary").eq("id", conversation.person_id).eq("owner_id", input.ownerId).maybeSingle() : Promise.resolve({ data: null }),
-    database.from("messages").select("direction,body_text,sent_at").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", source).order("sent_at", { ascending: false }).limit(20),
+    database.from("messages").select("id,direction,body_text,sent_at").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", source).order("sent_at", { ascending: false }).limit(30),
     conversation.person_id ? database.from("memories").select("content").eq("owner_id", input.ownerId).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
     database.from("messages").select("body_text").eq("owner_id", input.ownerId).eq("source", source).eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
   ]);
@@ -26,11 +27,12 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const personaContext = resolveCommunicationProfile(universalProfile, { source, personId: conversation.person_id, situation: person?.relationship_type === "dating" ? "romantic" : "personal" });
   const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at ?? undefined })).filter((item) => item.body);
+  const burst = inboundBurst((history ?? []).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text, sentAt: item.sent_at })), message.id);
   const analyzedMedia = await mediaContextForMessage(database, input.ownerId, message.id);
-  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source, senderName: person?.display_name ?? `${source} contact`, subject: conversation.title ?? `${source} conversation`, preview: message.body_text ?? "", messageSentAt: message.sent_at ?? undefined, currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || `new ${source} contact`, personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
+  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source, senderName: person?.display_name ?? `${source} contact`, subject: conversation.title ?? `${source} conversation`, preview: burst.text || message.body_text || "", messageSentAt: message.sent_at ?? undefined, currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || `new ${source} contact`, personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
   const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
   const now = new Date().toISOString();
-  const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, planningSuggestion: analysis.planningSuggestion, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };
+  const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, assessedMessageIds: burst.messageIds, assessedMessageCount: burst.count, planningSuggestion: analysis.planningSuggestion, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };
   await database.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...existingMetadata, ai_analysis: storedAnalysis } }).eq("id", message.id).eq("owner_id", input.ownerId);
   await database.from("conversations").update({ priority_score: analysis.priorityScore, summary: analysis.summary, recommended_action: { action: analysis.recommendedAction, reason: analysis.priorityReason, source: "ai" }, updated_at: now }).eq("id", conversation.id).eq("owner_id", input.ownerId);
   if (conversation.person_id) {

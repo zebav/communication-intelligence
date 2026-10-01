@@ -8,6 +8,7 @@ export type StoredMediaAnalysis = {
 
 const visionMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const audioMimeTypes = new Set(["audio/mpeg", "audio/mp4", "audio/m4a", "audio/wav", "audio/x-wav", "audio/ogg", "audio/webm"]);
+const videoMimeTypes = new Set(["video/mp4", "video/webm", "video/quicktime"]);
 const documentMimeTypes = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -30,6 +31,12 @@ export async function analyzeStoredMedia(input: { ownerId: string; mimeType: str
   const mimeType = input.mimeType.toLowerCase();
   if (visionMimeTypes.has(mimeType)) return analyzeImage(input);
   if (audioMimeTypes.has(mimeType)) return analyzeAudio(input);
+  // OpenAI's transcription endpoint accepts MP4 and WebM. For MOV we retain
+  // the private video and request owner review rather than silently discarding
+  // it, because its audio stream is not guaranteed to be accepted.
+  if (videoMimeTypes.has(mimeType)) return mimeType === "video/quicktime"
+    ? { state: "blocked", summary: "Videon är sparad och kan spelas upp, men behöver konverteras innan ljudet kan transkriberas.", decision: { analysis_state: "blocked", reason: "video_format_requires_conversion" } }
+    : analyzeAudio(input);
   if (documentMimeTypes.has(mimeType)) return analyzeDocument(input);
   return {
     state: "blocked",
@@ -122,5 +129,5 @@ async function analyzeAudio(input: { ownerId: string; mimeType: string; filename
   const body = await response.json() as { text?: unknown };
   const transcript = typeof body.text === "string" ? body.text.trim().slice(0, 20_000) : "";
   if (!transcript) throw new Error("audio_transcript_empty");
-  return { state: "ready", summary: transcript.slice(0, 1800), decision: { analysis_state: "ready", type: "audio", transcript } };
+  return { state: "ready", summary: transcript.slice(0, 1800), decision: { analysis_state: "ready", type: input.mimeType.startsWith("video/") ? "video" : "audio", transcript } };
 }

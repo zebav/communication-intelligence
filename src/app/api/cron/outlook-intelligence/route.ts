@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
+import { inboundBurst } from "@/lib/ai/inbound-burst";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const [{ data: person }, { data: profile }, { data: history }, { data: recentReplies }, { data: verifiedMemories }] = await Promise.all([
     conversation.person_id ? supabase.from("people").select("display_name,relationship_type,organization").eq("id", conversation.person_id).eq("owner_id", message.owner_id).maybeSingle() : Promise.resolve({ data: null }),
     supabase.from("profiles").select("preferences").eq("id", message.owner_id).maybeSingle(),
-    supabase.from("messages").select("direction,body_text,sent_at").eq("owner_id", message.owner_id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(12),
+    supabase.from("messages").select("id,direction,body_text,sent_at").eq("owner_id", message.owner_id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(30),
     supabase.from("messages").select("body_text").eq("owner_id", message.owner_id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
     conversation.person_id ? supabase.from("memories").select("content").eq("owner_id", message.owner_id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
   ]);
@@ -33,13 +34,14 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const personaContext = resolveCommunicationProfile(universalProfile, { source: "email", personId: conversation.person_id, situation: situationForClassification(message.classification ?? "Business") });
   const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at ?? undefined })).filter((item) => item.body);
+  const burst = inboundBurst((history ?? []).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text, sentAt: item.sent_at })), message.id);
   const styleExamples = [...(history ?? []).filter((item) => item.direction === "out"), ...(recentReplies ?? [])].map((item) => item.body_text ?? "").filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).slice(0, 6);
   const analyzedMedia = await mediaContextForMessage(supabase, message.owner_id, message.id);
   const analysis = await getAIService().analyzeEmail({
     ownerId: message.owner_id,
     senderName: person?.display_name ?? "Unknown sender",
     subject: conversation.title ?? "(No subject)",
-    preview: message.body_text ?? "",
+    preview: burst.text || message.body_text || "",
     messageSentAt: message.sent_at ?? undefined,
     currentClassification: message.classification ?? "Information Only",
     relationshipContext: [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "known email contact",
@@ -49,7 +51,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     conversationMessages,
     analyzedMedia,
   });
-  const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
+  const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, assessedMessageIds: burst.messageIds, assessedMessageCount: burst.count, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? { description: analysis.commitment.description, dueAt: analysis.commitment.dueAt, owner: analysis.commitment.owner, confidence: analysis.commitment.confidence } : undefined };
   const now = new Date().toISOString();
   const { error } = await supabase.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...metadataObject(message.metadata), ai_analysis: storedAnalysis, analyzed_automatically: true } }).eq("id", message.id).eq("owner_id", message.owner_id);
   if (error) return false;

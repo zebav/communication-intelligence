@@ -73,7 +73,9 @@ export async function POST(request: NextRequest) {
     const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     listUrl.searchParams.set("maxResults", "50"); listUrl.searchParams.append("labelIds", "INBOX"); listUrl.searchParams.set("q", "newer_than:1y");
-    if (typeof metadata.gmail_page_token === "string") listUrl.searchParams.set("pageToken", metadata.gmail_page_token);
+    // Every scheduled pass begins at the newest Inbox page. The old cursor was
+    // a backfill cursor and made later syncs walk only older mail indefinitely.
+    // De-duplication below keeps this inexpensive and safe to repeat.
     const listResponse = await fetch(listUrl, { headers: { authorization: `Bearer ${authorized.token}` }, signal: AbortSignal.timeout(15_000) });
     if (listResponse.status === 401) throw new Error("reconnect_required");
     if (!listResponse.ok) throw new Error(`gmail_list_${listResponse.status}`);
@@ -137,7 +139,7 @@ export async function POST(request: NextRequest) {
     }
 
     const syncedAt = new Date().toISOString();
-    const nextMetadata = { ...metadata, expires_at: authorized.credentials.expiresAt, gmail_page_token: list.nextPageToken ?? null, gmail_initial_import_complete: !list.nextPageToken };
+    const nextMetadata = { ...metadata, expires_at: authorized.credentials.expiresAt, gmail_backfill_page_token: list.nextPageToken ?? null, gmail_initial_import_complete: !list.nextPageToken };
     const update: Record<string, unknown> = { last_sync_at: syncedAt, health_status: "healthy", token_metadata: nextMetadata, updated_at: syncedAt };
     if (authorized.refreshed) update.encrypted_credentials = encryptCredential(authorized.credentials, encryptionKey);
     await supabase.from("connections").update(update).eq("id", connection.id).eq("owner_id", userId);
