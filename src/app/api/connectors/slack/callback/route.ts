@@ -1,8 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { encryptCredential } from "@/lib/connectors/credential-crypto";
 import { slackConfig, slackReadOnlyScopes } from "@/lib/connectors/slack-oauth";
+import { reconcileSlackConnection } from "@/lib/connectors/slack-reconciliation";
 import { createClient } from "@/lib/supabase/server";
 
 type SlackTokenResponse = {
@@ -60,8 +61,15 @@ export async function GET(request: NextRequest) {
       encrypted_credentials: encryptCredential({ accessToken: userAccessToken, tokenType: token.token_type, tokenAudience: "user", slackUserId: token.authed_user?.id, workspaceId: token.team.id }, encryptionKey),
       token_metadata: { workspace_id: token.team.id, workspace_name: token.team.name ?? null, pilot: "read_only", token_audience: "user" }, updated_at: new Date().toISOString(),
     };
-    const saved = existing?.id ? await db.from("connections").update(values).eq("id", existing.id).eq("owner_id", user.id) : await db.from("connections").insert(values);
-    return saved.error ? resultRedirect(request, "failed") : resultRedirect(request, "connected");
+    const saved = existing?.id
+      ? await db.from("connections").update(values).eq("id", existing.id).eq("owner_id", user.id).select("id").single()
+      : await db.from("connections").insert(values).select("id").single();
+    if (saved.error || !saved.data) return resultRedirect(request, "failed");
+    // A reconnect should make the inbox useful immediately. The bounded import
+    // runs after the confirmation response, and the regular 15-minute worker
+    // remains the retry path if Slack is temporarily unavailable.
+    after(async () => { await reconcileSlackConnection(saved.data.id).catch(() => undefined); });
+    return resultRedirect(request, "connected");
   } catch {
     return resultRedirect(request, "failed");
   }
