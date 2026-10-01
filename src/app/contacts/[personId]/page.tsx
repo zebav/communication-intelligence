@@ -31,8 +31,6 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
   const priority = Number(person.manual_priority ?? person.overall_priority ?? 0);
   return <main className="page contact-profile-page" style={{ maxWidth: 980, margin: "0 auto" }}>
     <div className="contact-profile-toolbar"><BackToWorkspaceButton /><ContactProfileEditor person={person} /></div>
-    <ContactMergePicker personId={personId} name={person.display_name ?? "kontakten"} />
-    <ContactCalendar personId={personId}/>
     <div className="person-detail">
       {mergedProfiles?.map(merge => <section className="card" key={merge.id}><h2>Bevarade uppgifter från sammanförd kontakt</h2>{Object.entries(merge.source_profile as Record<string, unknown>).filter(([key, value]) => ["display_name", "organization", "notes", "relationship_summary", "professional_specialty", "jurisdiction", "relationship_type"].includes(key) && value).map(([key,value]) => <p key={key}><strong>{key}</strong>: {String(value)}</p>)}</section>)}
       <div className="person-detail-head"><ContactPhotoEditor personId={personId} name={person.display_name ?? "Kontakt"} /><div><span className="eyebrow">Contact profile</span><h1 style={{ marginTop: 4 }}>{person.display_name}</h1><p className="subtitle">{[person.organization, person.relationship_type].filter(Boolean).join(" · ") || "Unified person profile"}</p></div></div>
@@ -43,6 +41,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
 
         <section className="card"><div className="intel-label">Identities & channels</div>{(identities ?? []).length === 0 ? <p className="muted">No channel identities linked yet.</p> : <div className="person-stack">{identities?.map((identity) => <div className="person-fact" key={identity.id}><strong>{identity.source}</strong><span>{identity.username || identity.external_identifier}{identity.verified_match ? " · verified" : ""}</span></div>)}</div>}</section>
       </div>
+
+      <ContactCalendar personId={personId} />
+      <ContactMergePicker personId={personId} name={person.display_name ?? "kontakten"} />
 
       <div className="section-title">Conversation history</div>{(conversations ?? []).length === 0 ? <div className="empty-card">No conversations linked to this person yet.</div> : <div className="list">{conversations?.map((conversation) => <div className="list-row" key={conversation.id}><div className="avatar">{String(conversation.source).slice(0, 2).toUpperCase()}</div><div><strong>{conversation.title || "Untitled conversation"}</strong><small>{conversation.source}</small></div><div><span>{conversation.summary || "No summary yet."}</span><small>{conversation.last_message_at ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(conversation.last_message_at)) : "No message time"}</small></div><div>{conversation.priority_score != null && <span className="score">{Number(conversation.priority_score)}</span>}</div></div>)}</div>}
 
