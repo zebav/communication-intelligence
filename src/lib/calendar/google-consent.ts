@@ -1,6 +1,6 @@
 import { googleCalendarScopes } from "./google-calendar";
 
-export type GoogleConsentPurpose = "gmail" | "calendar";
+export type GoogleConsentPurpose = "gmail" | "calendar" | "photos";
 // Missing scopes never mean consent was granted. Token response is authoritative.
 export function grantedGoogleScopes(scope: unknown): string[] {
   if (typeof scope !== "string") return [];

@@ -6,7 +6,7 @@ import { decryptCredential, encryptCredential } from "@/lib/connectors/credentia
 import { googleGmailConnector } from "@/lib/connectors/google-gmail";
 import { googleConfig } from "@/lib/connectors/google-oauth";
 import { createClient } from "@/lib/supabase/server";
-import { documentCloudCapabilities, googleDriveScopes } from "@/lib/documents/cloud-connections";
+import { documentCloudCapabilities, googleDriveScopes, googlePhotosPickerScopes, type DocumentCloudProvider } from "@/lib/documents/cloud-connections";
 
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; token_type?: string };
 type GoogleProfile = { sub?: string; name?: string; email?: string; hd?: string };
@@ -20,8 +20,8 @@ function resultRedirect(request: NextRequest, result: "connected" | "denied" | "
   return NextResponse.redirect(new URL(`/?google=${result}`, request.url));
 }
 
-function documentsResultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed") {
-  return NextResponse.redirect(new URL(`/?view=settings&settings=documents&documents=${result}&documentProvider=google-drive`, request.url));
+function documentsResultRedirect(request: NextRequest, result: "connected" | "denied" | "invalid" | "failed", provider: DocumentCloudProvider = "google-drive") {
+  return NextResponse.redirect(new URL(`/?view=settings&settings=documents&documents=${result}&documentProvider=${provider}`, request.url));
 }
 
 async function finishDriveConsent(request: NextRequest) {
@@ -56,9 +56,43 @@ async function finishDriveConsent(request: NextRequest) {
   } catch { return documentsResultRedirect(request, "failed"); }
 }
 
+async function finishPhotosConsent(request: NextRequest) {
+  const redirect = (result: "connected" | "denied" | "invalid" | "failed") => documentsResultRedirect(request, result, "google-photos");
+  if (request.nextUrl.searchParams.get("error")) return redirect("denied");
+  const code = request.nextUrl.searchParams.get("code"); const state = request.nextUrl.searchParams.get("state");
+  const jar = await cookies(); const expectedState = jar.get("google_oauth_state")?.value; const verifier = jar.get("google_oauth_verifier")?.value;
+  jar.delete("google_oauth_state"); jar.delete("google_oauth_verifier"); jar.delete("google_oauth_purpose");
+  if (!code || !state || !expectedState || !verifier || !sameState(state, expectedState)) return redirect("invalid");
+  const db = await createClient(); const { data: { user } } = await db.auth.getUser();
+  if (!user) return NextResponse.redirect(new URL("/login", request.url));
+  const { data: assurance } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (assurance?.currentLevel !== "aal2") return NextResponse.redirect(new URL("/auth/mfa", request.url));
+  try {
+    const config = googleConfig(request.nextUrl.origin);
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, code, code_verifier: verifier, grant_type: "authorization_code", redirect_uri: config.redirectUri }), signal: AbortSignal.timeout(15_000) });
+    if (!tokenResponse.ok) return redirect("failed");
+    const tokens = await tokenResponse.json() as TokenResponse;
+    if (!tokens.access_token || !tokens.expires_in) return redirect("failed");
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${tokens.access_token}` }, signal: AbortSignal.timeout(15_000) });
+    if (!profileResponse.ok) return redirect("failed");
+    const profile = await profileResponse.json() as GoogleProfile; const key = process.env.CREDENTIAL_ENCRYPTION_KEY;
+    if (!key || !profile.sub || !profile.email) return redirect("failed");
+    const { data: existing } = await db.from("connections").select("id,encrypted_credentials").eq("owner_id", user.id).eq("provider", "google-photos").eq("account_identifier", profile.email.toLowerCase()).maybeSingle();
+    let refreshToken = tokens.refresh_token;
+    if (!refreshToken && existing?.encrypted_credentials) refreshToken = decryptCredential<{ refreshToken?: string }>(existing.encrypted_credentials, key).refreshToken;
+    if (!refreshToken) return redirect("failed");
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+    const credentials = encryptCredential({ accessToken: tokens.access_token, refreshToken, tokenType: tokens.token_type, scope: tokens.scope, expiresAt }, key);
+    const values = { owner_id:user.id, provider:"google-photos", source:"manual", account_name:profile.name ?? profile.email, account_identifier:profile.email.toLowerCase(), status:"connected", health_status:"healthy", capabilities:documentCloudCapabilities, scopes:[...googlePhotosPickerScopes], encrypted_credentials:credentials, token_metadata:{google_profile_id:profile.sub, expires_at:expiresAt, purpose:"photos_picker"}, updated_at:new Date().toISOString() };
+    const result = existing?.id ? await db.from("connections").update(values).eq("id", existing.id) : await db.from("connections").insert(values);
+    return result.error ? redirect("failed") : redirect("connected");
+  } catch { return redirect("failed"); }
+}
+
 export async function GET(request: NextRequest) {
   if((await cookies()).get("google_oauth_purpose")?.value==="calendar") return finishCalendarConsent(request,"google");
   if((await cookies()).get("google_oauth_purpose")?.value==="drive") return finishDriveConsent(request);
+  if((await cookies()).get("google_oauth_purpose")?.value==="photos") return finishPhotosConsent(request);
   if (request.nextUrl.searchParams.get("error")) return resultRedirect(request, "denied");
   const code = request.nextUrl.searchParams.get("code"); const state = request.nextUrl.searchParams.get("state");
   const cookieStore = await cookies();

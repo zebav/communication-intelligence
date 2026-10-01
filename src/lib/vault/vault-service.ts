@@ -18,7 +18,7 @@ export async function storeVaultFile(input:{
   sourceMessageId?:string|null; sourceConversationId?:string|null; sourcePersonId?:string|null; sourceAttachmentId?:string|null;
   messageText?:string; extractedText?:string; forceKind?:"document"|"person_image"|"image"|"other"; forceSave?:boolean;
   /** User-selected provenance only. Never place OAuth credentials or share links here. */
-  provenance?: { externalOrigin?: "google_drive"|"onedrive"|"device" };
+  provenance?: { externalOrigin?: "google_drive"|"onedrive"|"google_photos"|"device" };
 }) {
   if (!allowed.has(input.mimeType)) throw new Error("Filtypen stöds inte i det säkra valvet.");
   if (!input.bytes.length || input.bytes.length > 100*1024*1024) throw new Error("Filen är tom eller för stor.");

@@ -53,7 +53,7 @@ export async function POST(request:NextRequest){
  if(!sourceTypeParsed.success)return NextResponse.json({error:"Ogiltig källa."},{status:400});
  const kindParsed=z.enum(["document","person_image","image","other"]).optional().safeParse(String(form.get("forceKind")||"")||undefined);
  if(!kindParsed.success)return NextResponse.json({error:"Ogiltig filtyp."},{status:400});
- const originParsed=z.enum(["google_drive","onedrive","device"]).optional().safeParse(String(form.get("externalOrigin")||"")||undefined);
+ const originParsed=z.enum(["google_drive","onedrive","google_photos","device"]).optional().safeParse(String(form.get("externalOrigin")||"")||undefined);
  if(!originParsed.success)return NextResponse.json({error:"Ogiltigt filursprung."},{status:400});
  try{
   const asset=await storeVaultFile({ownerId:session.user.id,bytes:new Uint8Array(await file.arrayBuffer()),filename:file.name,mimeType:file.type||"application/octet-stream",sourceType:sourceTypeParsed.data,

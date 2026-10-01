@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { googleGmailConnector } from "./google-gmail";
 import { googleCalendarScopes } from "../calendar/google-calendar";
 import type { GoogleConsentPurpose } from "../calendar/google-consent";
-import { googleDriveScopes } from "../documents/cloud-connections";
+import { googleDriveScopes, googlePhotosPickerScopes } from "../documents/cloud-connections";
 
 export const GOOGLE_OAUTH_COOKIE_PATH = "/api/connectors/google";
 
@@ -30,7 +30,9 @@ export function createGoogleOAuthAttempt() {
 export function googleAuthorizationUrl(config: ReturnType<typeof googleConfig>, state: string, challenge: string, purpose: GoogleConsentPurpose | "drive" = "gmail") {
   const scopes = purpose === "calendar"
     ? ["openid", "email", "profile", ...googleCalendarScopes]
-    : purpose === "drive" ? googleDriveScopes : googleGmailConnector.scopes;
+    : purpose === "drive" ? googleDriveScopes
+    : purpose === "photos" ? googlePhotosPickerScopes
+    : googleGmailConnector.scopes;
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.search = new URLSearchParams({
     client_id: config.clientId,
