@@ -3,12 +3,12 @@ import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { instagramConnector } from "@/lib/connectors/instagram";
 import { instagramConversationsUrl, instagramUserProfileUrl } from "@/lib/connectors/instagram-api";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
-import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 
 type GraphIdentity = { id?: string };
 type GraphMessage = { id?: string; message?: string; created_time?: string; from?: GraphIdentity; to?: { data?: GraphIdentity[] } | GraphIdentity[] };
 type GraphConversation = { messages?: { data?: GraphMessage[] } };
 type Credentials = { accessToken?: string };
+const MAX_RECONCILIATION_MESSAGES = 20;
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function participantFromTo(value: GraphMessage["to"]) { const ids = Array.isArray(value) ? value : value?.data; return ids?.map((item) => item.id ?? "").find(Boolean) ?? ""; }
@@ -26,19 +26,28 @@ export async function reconcileInstagramConnection(connectionId: string) {
   const response = await fetch(instagramConversationsUrl(accountId), { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`instagram_reconciliation_${response.status}`);
   const payload = await response.json() as { data?: GraphConversation[] };
-  let imported = 0; const analyses: Array<{ ownerId: string; conversationId: string; messageId: string }> = [];
-  for (const thread of payload.data ?? []) for (const item of thread.messages?.data ?? []) {
+  let imported = 0;
+  // Meta can return many nested messages. Reconciliation is intentionally a
+  // bounded webhook repair pass; the dedicated intelligence worker will pick
+  // up imported messages in its own small batch immediately afterwards.
+  const items = (payload.data ?? []).flatMap((thread) => thread.messages?.data ?? []).slice(0, MAX_RECONCILIATION_MESSAGES);
+  const profiles = new Map<string, { name?: string; username?: string } | null>();
+  for (const item of items) {
     const externalId = item.id?.trim() ?? "", sender = item.from?.id?.trim() ?? "";
     const direction = sender === accountId ? "out" as const : "in" as const;
     const participantId = direction === "in" ? sender : participantFromTo(item.to);
     const body = item.message?.trim() ?? "";
     if (!externalId || !participantId || participantId === accountId || !body) continue;
     const sentAt = item.created_time && !Number.isNaN(Date.parse(item.created_time)) ? new Date(item.created_time).toISOString() : new Date().toISOString();
-    let profile: { name?: string; username?: string } | null = null;
-    try {
-      const profileResponse = await fetch(instagramUserProfileUrl(participantId), { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000) });
-      if (profileResponse.ok) profile = await profileResponse.json() as { name?: string; username?: string };
-    } catch { /* A message is still more valuable than blocking the import. */ }
+    let profile = profiles.get(participantId);
+    if (profile === undefined) {
+      profile = null;
+      try {
+        const profileResponse = await fetch(instagramUserProfileUrl(participantId), { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(4_000) });
+        if (profileResponse.ok) profile = await profileResponse.json() as { name?: string; username?: string };
+      } catch { /* A message is still more valuable than blocking the import. */ }
+      profiles.set(participantId, profile);
+    }
     const username = profile?.username?.trim() || null;
     const displayName = profile?.name?.trim() || (username ? `@${username}` : `Instagram contact ${participantId.slice(-6)}`);
     const person = await resolveOrCreateChannelPerson({ database, ownerId: connection.owner_id, source: "instagram", externalIdentifier: `instagram:${participantId}`, displayName, username, connectionId: connection.id, confidence: profile ? 0.8 : 0.65, contactAt: sentAt, identityMetadata: { instagram_scoped_id: participantId, discovered_by: "reconciliation" } });
@@ -49,9 +58,8 @@ export async function reconcileInstagramConnection(connectionId: string) {
     if (conversation.error || !conversation.data) throw conversation.error ?? new Error("instagram_conversation_save_failed");
     const { data: saved, error: saveError } = await database.from("messages").upsert({ owner_id: connection.owner_id, conversation_id: conversation.data.id, external_message_id: externalId, direction, sender_identity_id: direction === "in" ? person.identityId : null, source: "instagram", body_text: body, sent_at: sentAt, attachment_count: 0, metadata: { provider: instagramConnector.id, connection_id: connection.id, reconciliation: true }, processed_at: null }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
     if (saveError) throw saveError;
-    if (saved) { imported += 1; if (direction === "in") analyses.push({ ownerId: connection.owner_id, conversationId: conversation.data.id, messageId: saved.id }); }
+    if (saved) imported += 1;
   }
   await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", connection.id);
-  await Promise.allSettled(analyses.map(analyzeIncomingInstagramMessage));
-  return { imported };
+  return { imported, scanned: items.length };
 }

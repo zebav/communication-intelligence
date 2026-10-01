@@ -8,8 +8,11 @@ export function instagramConversationsUrl(accountId: string, version = process.e
   if (!/^\d+$/.test(accountId)) throw new Error("invalid_instagram_account_id");
   if (!/^v\d+\.\d+$/.test(version)) throw new Error("invalid_meta_graph_version");
   const url = new URL(`https://graph.instagram.com/${version}/${accountId}/conversations`);
-  url.searchParams.set("fields", "messages.limit(20){id,from,to,message,created_time}");
-  url.searchParams.set("limit", "25");
+  // This is a repair path for missed webhooks, not a historical import. Keep
+  // it deliberately small so one slow Meta response cannot block all other
+  // background work.
+  url.searchParams.set("fields", "messages.limit(8){id,from,to,message,created_time}");
+  url.searchParams.set("limit", "8");
   return url.toString();
 }
 
