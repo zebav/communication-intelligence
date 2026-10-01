@@ -12,4 +12,8 @@ describe("priority V3", () => {
   it("does not interpret a missing deadline as overdue", () => {
     expect(priorityV3({ basePriority: 4, dueAt: "unknown" }).reasons.join(" ")).not.toContain("tidsfrist");
   });
+  it("surfaces a non-promotional message from an owner-prioritized contact", () => {
+    expect(priorityV3({ basePriority: 3, classification: "Information Only", manualPriority: 9 }).score).toBeGreaterThanOrEqual(8);
+    expect(priorityV3({ basePriority: 3, classification: "Marketing", manualPriority: 9 }).score).toBe(2);
+  });
 });

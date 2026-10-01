@@ -30,7 +30,14 @@ export function priorityV3(input: PriorityEvidence) {
     if (["Legal", "Financial"].includes(input.classification ?? "")) { score += 0.5; reasons.push("Ärendet rör ekonomi eller juridik och behöver bedömas."); }
     if (input.unread) { score += 0.5; reasons.push("Oläst: behöver granskas. Läst betyder inte automatiskt hanterat."); }
   }
-  if (!campaign && input.manualPriority != null) { score = score * 0.6 + input.manualPriority * 0.4; reasons.push("Din korrigerade avsändarprioritet vägs in."); }
+  if (!campaign && input.manualPriority != null) {
+    score = score * 0.6 + input.manualPriority * 0.4;
+    // A priority the owner explicitly set to 8–10 is a strong instruction.
+    // It must surface the message as a decision/note even before AI has had
+    // time to inspect it; promotional mail remains excluded above.
+    if (input.manualPriority >= 8) score = Math.max(score, 8);
+    reasons.push("Din korrigerade avsändarprioritet vägs in.");
+  }
   if (input.handlingRule === "always_priority") { score = Math.max(score, 8.5); reasons.push("Din uttryckliga regel: prioritera avsändaren."); }
   if (input.handlingRule === "low_priority") { score = Math.min(score, 3); reasons.push("Din uttryckliga regel: låg prioritet."); }
   return { score: Math.round(Math.min(10, Math.max(1, score)) * 10) / 10, reasons };

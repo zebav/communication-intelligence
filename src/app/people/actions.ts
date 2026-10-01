@@ -33,7 +33,7 @@ export async function savePersonIntelligence(input: { personId: string; name: st
   const values = { display_name: parsed.data.name, organization: parsed.data.organization || null, relationship_type: parsed.data.relationshipType, entity_type: parsed.data.entityType, professional_specialty: parsed.data.professionalSpecialty || null, jurisdiction: parsed.data.jurisdiction || null, notes: parsed.data.notes || null, relationship_summary: parsed.data.relationshipSummary || null, manual_priority: parsed.data.manualPriority, sender_preferences_verified: true, updated_at: new Date().toISOString() };
   const { error } = await supabase.from("people").update(values).eq("id", parsed.data.personId).eq("owner_id", user.id);
   if (error) return { error: "The person information could not be saved." };
-  const { data: conversations } = await supabase.from("conversations").select("id,recommended_action,messages(classification,sent_at,direction)").eq("owner_id", user.id).eq("person_id", parsed.data.personId).eq("source", "email");
+  const { data: conversations } = await supabase.from("conversations").select("id,recommended_action,messages(id,classification,sent_at,direction)").eq("owner_id", user.id).eq("person_id", parsed.data.personId).eq("source", "email");
   for (const conversation of conversations ?? []) {
     const latest = [...(conversation.messages ?? [])].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     if (!latest) continue;
@@ -42,6 +42,7 @@ export async function savePersonIntelligence(input: { personId: string; name: st
     const relevance = senderRelevance({ basePriority: emailPriority(classification), relationshipType: parsed.data.relationshipType, manualPriority: parsed.data.manualPriority, handlingRule });
     const recommendation = conversation.recommended_action && typeof conversation.recommended_action === "object" && !Array.isArray(conversation.recommended_action) ? conversation.recommended_action as Record<string, unknown> : {};
     await supabase.from("conversations").update({ priority_score: relevance.score, recommended_action: { ...recommendation, action: recommendedEmailAction(classification), relevance_reasons: relevance.reasons }, updated_at: new Date().toISOString() }).eq("id", conversation.id).eq("owner_id", user.id);
+    await supabase.from("messages").update({ importance_score: relevance.score }).eq("id", latest.id).eq("owner_id", user.id);
   }
   await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: "person.intelligence_updated", object_type: "person", object_id: parsed.data.personId, actor_type: "user", previous_value: previous, new_value: values });
   revalidatePath("/");
