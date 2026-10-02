@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { base64urlSha256, hashToken, issueOpaqueToken, normalizeScopes } from "@/lib/mcp-oauth";
+import { hashToken, issueOpaqueToken, normalizeScopes, pkceChallenge } from "@/lib/mcp-oauth";
 
 function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store", "Pragma": "no-cache" } });
@@ -52,14 +52,16 @@ export async function POST(request: NextRequest) {
       if (data.client_id !== clientId || data.redirect_uri !== redirectUri || data.resource !== resource) {
         return json({ error: "invalid_grant" }, 400);
       }
-      if (base64urlSha256(verifier) !== data.code_challenge) {
+      if (pkceChallenge(verifier) !== data.code_challenge) {
         return json({ error: "invalid_grant" }, 400);
       }
-      const { error: usedError } = await db.from("solvani_oauth_codes")
+      const { data: claimedCode, error: usedError } = await db.from("solvani_oauth_codes")
         .update({ used_at: new Date().toISOString() })
         .eq("id", data.id)
-        .is("used_at", null);
-      if (usedError) return json({ error: "invalid_grant" }, 400);
+        .is("used_at", null)
+        .select("id")
+        .maybeSingle();
+      if (usedError || !claimedCode) return json({ error: "invalid_grant" }, 400);
 
       const issued = await issueTokenSet({
         ownerId: data.owner_id,

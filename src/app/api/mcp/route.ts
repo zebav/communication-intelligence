@@ -110,9 +110,16 @@ async function findContacts(ownerId: string, query: string) {
 }
 
 async function downloadImage(file: { download_url: string; mime_type?: string; file_name?: string }) {
-  const url = new URL(file.download_url);
-  if (url.protocol !== "https:") throw new Error("Only HTTPS file URLs are allowed.");
-  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(20_000) });
+  let url = trustedOpenAiFileUrl(file.download_url);
+  let response: Response | undefined;
+  for (let redirectCount = 0; redirectCount <= 2; redirectCount += 1) {
+    response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get("location");
+    if (!location) throw new Error("Image download redirect was missing its destination.");
+    url = trustedOpenAiFileUrl(new URL(location, url).toString());
+  }
+  if (!response) throw new Error("Could not download image.");
   if (!response.ok) throw new Error(`Could not download image (${response.status}).`);
   const contentLength = Number(response.headers.get("content-length") || "0");
   if (contentLength > 5 * 1024 * 1024) throw new Error("Image must be 5 MB or smaller.");
@@ -120,6 +127,16 @@ async function downloadImage(file: { download_url: string; mime_type?: string; f
   if (bytes.length > 5 * 1024 * 1024) throw new Error("Image must be 5 MB or smaller.");
   const mimeType = (file.mime_type || response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
   return { bytes, mimeType, filename: file.file_name || "contact-avatar" };
+}
+
+function trustedOpenAiFileUrl(value: string) {
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase();
+  const isOpenAiFileHost = hostname === "files.oaiusercontent.com" || hostname.endsWith(".oaiusercontent.com");
+  if (url.protocol !== "https:" || !isOpenAiFileHost) {
+    throw new Error("The image must be provided by ChatGPT's secure file service.");
+  }
+  return url;
 }
 
 export async function OPTIONS() {

@@ -16,7 +16,7 @@ export function issueOpaqueToken(prefix: string, bytes = 32) {
 export function normalizeScopes(scope?: string | null) {
   const requested = new Set((scope ?? "").split(/\s+/).filter(Boolean));
   const allowed = ["contacts.read", "contacts.write"].filter((item) => requested.has(item));
-  return allowed.length ? allowed.join(" ") : "contacts.read contacts.write";
+  return allowed.length ? allowed.join(" ") : "contacts.read";
 }
 
 export function hasScope(scope: string, required: string) {
