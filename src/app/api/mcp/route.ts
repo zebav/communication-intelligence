@@ -1,21 +1,11 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveContactForChatGPT, setContactAvatarFromBytes } from "@/lib/chatgpt-contact-avatar";
+import { hasScope, resolveMcpAccessToken } from "@/lib/mcp-oauth";
 
 export const runtime = "nodejs";
 
 const PROTOCOL_VERSION = "2025-06-18";
-
-function authorized(request: NextRequest) {
-  const expected = process.env.CHATGPT_CAPTURE_SECRET;
-  if (!expected) return false;
-  const header = request.headers.get("authorization") ?? "";
-  const actual = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const a = Buffer.from(actual);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 function rpc(id: unknown, result: unknown) {
   return NextResponse.json({ jsonrpc: "2.0", id, result }, { headers: { "Cache-Control": "no-store" } });
@@ -69,6 +59,7 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    securitySchemes: [{ type: "oauth2", scopes: ["contacts.read"] }],
   },
   {
     name: "set_contact_avatar",
@@ -95,6 +86,7 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    securitySchemes: [{ type: "oauth2", scopes: ["contacts.write"] }],
     _meta: { "openai/fileParams": ["file"] },
   },
 ];
@@ -143,14 +135,15 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: NextRequest) {
-  if (!authorized(request)) {
+  const authorization = await resolveMcpAccessToken(request.headers.get("authorization"));
+  if (!authorization) {
+    const metadata = request.nextUrl.origin + "/.well-known/oauth-protected-resource";
     return NextResponse.json(
       { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized" } },
-      { status: 401, headers: { "WWW-Authenticate": "Bearer", "Cache-Control": "no-store" } },
+      { status: 401, headers: { "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="contacts.read contacts.write"`, "Cache-Control": "no-store" } },
     );
   }
-  const ownerId = process.env.CHATGPT_CAPTURE_OWNER_ID;
-  if (!ownerId) return rpcError(null, -32002, "Solvani owner is not configured.");
+  const ownerId = authorization.ownerId;
 
   let message: { jsonrpc?: string; id?: unknown; method?: string; params?: any };
   try {
@@ -179,6 +172,7 @@ export async function POST(request: NextRequest) {
       const name = String(message.params?.name ?? "");
       const args = message.params?.arguments ?? {};
       if (name === "find_contacts") {
+        if (!hasScope(authorization.scope, "contacts.read")) return rpcError(id, -32003, "Missing contacts.read scope");
         const query = String(args.query ?? "").trim();
         if (!query) return rpcError(id, -32602, "query is required");
         const contacts = await findContacts(ownerId, query);
@@ -188,6 +182,7 @@ export async function POST(request: NextRequest) {
         });
       }
       if (name === "set_contact_avatar") {
+        if (!hasScope(authorization.scope, "contacts.write")) return rpcError(id, -32003, "Missing contacts.write scope");
         const personId = String(args.person_id ?? "").trim();
         const file = args.file as { download_url?: string; file_id?: string; mime_type?: string; file_name?: string } | undefined;
         if (!personId || !file?.download_url || !file.file_id) return rpcError(id, -32602, "person_id and file are required");
