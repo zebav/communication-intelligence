@@ -57,7 +57,7 @@ export function serviceSnapshots(input: { connections: ChannelConnection[]; cale
     const calendar = calendarProvider ? input.calendars?.find((item) => item.provider === calendarProvider) : undefined;
     const policy = input.policies.find((item) => item.service_id === service.id);
     const mapsKeyConfigured = Boolean(input.environment?.GOOGLE_MAPS_SERVER_API_KEY?.trim());
-    const requiresReconnect = service.id === "slack" && connection?.healthStatus === "degraded";
+    const requiresReconnect = service.id === "slack" && (connection?.healthStatus === "degraded" || connection?.healthStatus === "reconnect_required");
     const configured = service.id === "google_maps"
       ? input.environment?.CALENDAR_MAPS_ENABLED === "true" && input.environment?.CALENDAR_BROWSER_MAPS_ENABLED === "true" && mapsKeyConfigured && Boolean(input.environment?.GOOGLE_MAPS_BROWSER_API_KEY?.trim())
       : !service.environment?.length || service.environment.every((key) => Boolean(input.environment?.[key]?.trim()));
