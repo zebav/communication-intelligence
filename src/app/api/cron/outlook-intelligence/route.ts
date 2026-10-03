@@ -8,6 +8,7 @@ import { normalizeCommitmentDueAt } from "@/lib/commitments";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
 import { inboundBurst } from "@/lib/ai/inbound-burst";
+import { logOperation } from "@/lib/observability";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +80,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const supabase = createAdminClient();
   const requestedOwner = z.string().uuid().safeParse(request.headers.get("x-owner-id"));
@@ -91,7 +93,10 @@ export async function GET(request: NextRequest) {
   let connectionQuery = supabase.from("connections").select("owner_id,id,provider").eq("provider", provider).eq("status", "connected").order("last_sync_at", { ascending: true, nullsFirst: true });
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
   const { data: connections, error } = await connectionQuery.limit(1);
-  if (error) return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });
+  if (error) {
+    logOperation({ route: provider === "gmail" ? "/api/cron/gmail-intelligence" : "/api/cron/outlook-intelligence", operation: "email_import_and_analysis", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: "connections_unavailable" });
+    return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });
+  }
 
   const syncResults = [];
   for (const connection of connections ?? []) {
@@ -109,5 +114,16 @@ export async function GET(request: NextRequest) {
   const { data: pending } = await pendingQuery.limit(ownerId ? 30 : 50);
   const candidates = (pending ?? []).filter((message) => metadataObject(message.metadata).provider === provider && (isRelevantEmail(message.classification ?? "") || Number(message.importance_score ?? 0) >= 8) && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
   const analyzed = (await Promise.allSettled(candidates.map((message) => analyzeCandidate(supabase, message)))).filter((result) => result.status === "fulfilled" && result.value).length;
-  return NextResponse.json({ ok: true, provider, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3, ownerId, loginTriggered });
+  const synced = syncResults.filter((result) => result.ok).length;
+  const outcome = syncResults.some((result) => !result.ok) ? "failed" : "completed";
+  logOperation({
+    route: provider === "gmail" ? "/api/cron/gmail-intelligence" : "/api/cron/outlook-intelligence",
+    operation: "email_import_and_analysis",
+    outcome,
+    durationMs: Date.now() - startedAt,
+    requestId: request.headers.get("x-vercel-id"),
+    counts: { accounts: syncResults.length, synced, analyzed, remainingCandidates: Math.max(0, (pending?.length ?? 0) - candidates.length) },
+    error: outcome === "failed" ? "email_sync_failed" : undefined,
+  });
+  return NextResponse.json({ ok: true, provider, accounts: syncResults.length, synced, analyzed, analysisLimit: 3, ownerId, loginTriggered });
 }
