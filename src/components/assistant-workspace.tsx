@@ -16,7 +16,7 @@ export type AssistantSnapshot = {
   tasks: Task[]; candidates: { messageId: string; kind: TaskKind; plan: Plan }[];
   notes?: { messageId: string; title: string; personName: string; source: string; account: string; priority: number; unread?: boolean; summary: string }[];
   reviewMessages: { id: string; title: string; person: string }[];
-  next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; emailWindowDays?: number; tasksLimited: boolean;
+  next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; emailWindowDays?: number; period?: "today" | "yesterday" | "seven_days" | "recovery"; periodLabel?: string; tasksLimited: boolean;
   feedback: { category: string }[]; timezone: string | null; executionEnabled: boolean;
   browserReadiness?: BrowserReadiness;
   operations?: { pendingMedia: number; failedMedia: number; actionRequiredConnections: number; awaitingAnalysis: number; learningSuggestions: number };
@@ -24,16 +24,16 @@ export type AssistantSnapshot = {
 type Api = (body: Record<string, unknown>) => Promise<void>;
 export function AssistantWorkspace({ people }: { people: CommunicationPersonOption[] }) {
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState("");
+  const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState(""), [period, setPeriod] = useState<"today" | "yesterday" | "seven_days" | "recovery">("seven_days");
   const maintenanceRefreshScheduled = useRef(false);
   const load = useCallback(async (signal?: AbortSignal) => {
     const timeout = AbortSignal.timeout(15_000);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-    const r = await fetch(`/api/assistant?cursor=${cursor}`, { cache: "no-store", signal: combined });
+    const r = await fetch(`/api/assistant?cursor=${cursor}&period=${period}`, { cache: "no-store", signal: combined });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "Uppdragen kunde inte hämtas.");
     return data as AssistantSnapshot;
-  }, [cursor]);
+  }, [cursor, period]);
   useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Notiscentret tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [load]);
   // The workspace starts maintenance just after login. Refresh once after its
   // bounded first pass so new decisions appear without the user pressing a button.
@@ -80,12 +80,12 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
   };
   return <div className="page assistant-workspace"><header className="assistant-header"><div><p className="eyebrow">Dina beslut</p><h1>Notiscenter</h1><p>Här visas bara sådant som behöver ditt beslut. Godkänn, neka eller be systemet förbereda nästa steg.</p></div><button className="btn" disabled={busy} onClick={() => { setError(""); void refresh().catch(e => setError(e.message)); }}>Uppdatera</button></header>
     {error && <p role="alert" className="assistant-alert">{error}</p>}
-    {!snapshot ? <p role="status">{error ? "Senast sparade uppdrag visas när anslutningen är återställd." : "Hämtar uppdrag…"}</p> : <AssistantBoard snapshot={snapshot} people={people} selected={selected} onSelect={setSelected} act={act} busy={busy} onMore={() => setCursor(snapshot.next ?? "0")} onRefresh={refresh} />}
+    {!snapshot ? <p role="status">{error ? "Senast sparade uppdrag visas när anslutningen är återställd." : "Hämtar uppdrag…"}</p> : <AssistantBoard snapshot={snapshot} people={people} selected={selected} onSelect={setSelected} act={act} busy={busy} period={period} onPeriod={(next) => { setCursor("0"); setPeriod(next); }} onMore={() => setCursor(snapshot.next ?? "0")} onRefresh={refresh} />}
   </div>;
 }
-export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy, onMore, onRefresh }: {
+export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy, period = "seven_days", onPeriod = () => undefined, onMore, onRefresh }: {
   snapshot: AssistantSnapshot; people: CommunicationPersonOption[]; selected: string; onSelect: (id: string) => void;
-  act: Api; busy: boolean; onMore: () => void; onRefresh: () => Promise<void>;
+  act: Api; busy: boolean; period?: "today" | "yesterday" | "seven_days" | "recovery"; onPeriod?: (period: "today" | "yesterday" | "seven_days" | "recovery") => void; onMore: () => void; onRefresh: () => Promise<void>;
 }) {
   const [bucket, setBucket] = useState<"decision" | "ready" | "waiting" | "done">("decision"), [mode, setMode] = useState<"handle" | "note">("handle"), [query, setQuery] = useState("");
   const [manualMessage, setManualMessage] = useState(""), [manualKind, setManualKind] = useState<TaskKind>("reply");
@@ -101,6 +101,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
     {!snapshot.executionEnabled && <p className="assistant-notice">Säkert förberedelseläge: systemet kan förbereda förslag men skickar eller bokar inget härifrån utan ett separat godkännande.</p>}
     {operations && actionRequired > 0 && <section className="assistant-operations needs-attention" aria-label="Anslutning behöver återanslutas"><div><p className="eyebrow">Anslutning behöver återanslutas</p><h2>En tjänst behöver din inloggning</h2><p>{actionRequired} anslutning{actionRequired === 1 ? " behöver" : "ar behöver"} loggas in igen. Övrig synkning, medieanalys och återförsök fortsätter automatiskt i bakgrunden.</p></div><div className="assistant-operation-stats"><span><strong>{operations.learningSuggestions}</strong> lärandeförslag</span><span><strong>{snapshot.candidates.length}</strong> nya beslut</span><span><strong>{snapshot.notes?.length ?? 0}</strong> att notera</span></div></section>}
     <nav className="assistant-tabs" aria-label="Notisvyer"><button className={`btn ${mode === "handle" ? "primary" : ""}`} aria-pressed={mode === "handle"} onClick={() => setMode("handle")}>Bör hanteras <span>{snapshot.candidates.length + snapshot.tasks.filter(t => ["decision", "ready"].includes(taskBucket(t))).length}</span></button><button className={`btn ${mode === "note" ? "primary" : ""}`} aria-pressed={mode === "note"} onClick={() => setMode("note")}>Bör noteras <span>{snapshot.notes?.length ?? 0}</span></button></nav>
+    <nav className="assistant-tabs assistant-period-tabs" aria-label="Tidsperiod för nya notiser">{([ ["today", "Idag"], ["yesterday", "Igår"], ["seven_days", "7 dagar"], ["recovery", "Äldre öppet"] ] as const).map(([value, label]) => <button className={`btn ${period === value ? "primary" : ""}`} key={value} aria-pressed={period === value} onClick={() => onPeriod(value)}>{label}</button>)}</nav>
     {mode === "handle" && <><nav className="assistant-tabs assistant-status-tabs" aria-label="Uppdragsstatus">{(["decision", "ready", "waiting", "done"] as const).map(b => <button className={`btn ${bucket === b ? "primary" : ""}`} key={b} aria-pressed={bucket === b} onClick={() => setBucket(b)}>{statusLabels[b]} <span>{snapshot.tasks.filter(t => taskBucket(t) === b).length}</span></button>)}</nav>
     <label className="assistant-search">Sök person, ärende eller konto<input value={query} onChange={e => setQuery(e.target.value)} /></label>
     {snapshot.tasksLimited && <p role="status">De 120 senast uppdaterade uppdragen visas. Detta är inte hela historiken.</p>}
@@ -108,7 +109,7 @@ export function AssistantBoard({ snapshot, people, selected, onSelect, act, busy
       {visible.length === 0 && <p className="empty-card">Inga sparade uppdrag i denna vy. Granska förslagen nedan eller lägg till ett missat uppdrag.</p>}
       {visible.map(t => <button key={t.id} className={`assistant-task ${t.id === selected ? "selected" : ""}`} onClick={() => onSelect(t.id)}><span>{kindLabels[t.kind]} · {statusLabels[t.status]}</span><strong>{t.plan.evidence.title || "Konversation"}</strong><span>{t.plan.evidence.personName}</span><small>{t.plan.evidence.source} · {t.plan.evidence.account} · Prioritet {t.plan.evidence.priority.toFixed(1)}/10{t.plan.evidence.unread ? " · Oläst" : ""}</small>{t.plan.evidence.mediaState && t.plan.evidence.mediaState !== "not_applicable" && <small>{mediaDecisionLabel(t.plan.evidence.mediaState)}</small>}{t.plan.followUpAt && <small>Följ upp {new Date(t.plan.followUpAt).toLocaleString("sv-SE")}</small>}</button>)}
     </section><section className="assistant-detail" aria-label="Granska uppdrag">{task ? <TaskDetail key={`${task.id}:${task.revision}`} task={task} people={people} busy={busy} act={act} snapshot={snapshot} onRefresh={onRefresh} /> : <div className="empty-card"><h2>Välj ett uppdrag</h2><p>Här visas original, föreslagna steg, mottagare och ditt redigerbara svar.</p></div>}</section></div>
-    <section className="assistant-proposals"><h2>Nya notiser</h2><p>Systemet har granskat {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post från de senaste ${snapshot.emailWindowDays ?? 7} dagarna och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden hålls utanför.</p>
+    <section className="assistant-proposals"><h2>Nya notiser</h2><p>{snapshot.periodLabel ?? "Senaste 7 dagarna"}: systemet har granskat {snapshot.scanned} inkommande meddelanden{snapshot.scannedBySource ? `: ${snapshot.scannedBySource.email} relevanssorterade e-post och ${snapshot.scannedBySource.messaging} från andra kanaler` : ""}. Reklam och redan besvarade meddelanden hålls utanför.</p>
       <div className="assistant-proposal-grid">{displayedCandidates.map(candidate => {
         const card = decisionCard(candidate.plan, candidate.kind);
         const evidence = candidate.plan.evidence;
