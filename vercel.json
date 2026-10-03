@@ -2,19 +2,23 @@
   "crons": [
     {
       "path": "/api/cron/outlook-intelligence",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/gmail-intelligence",
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/instagram-intelligence",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/whatsapp-intelligence",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/slack-intelligence",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/calendar-sync",
@@ -22,7 +26,7 @@
     },
     {
       "path": "/api/cron/vault-ingestion",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/scheduled-messages",

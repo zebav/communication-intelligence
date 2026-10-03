@@ -30,8 +30,8 @@ export async function GET(request: NextRequest) {
   const results = await Promise.allSettled(candidates.map((message) => analyzeIncomingInstagramMessage({ ownerId: message.owner_id, conversationId: message.conversation_id, messageId: message.id })));
   const analyzed = results.filter((result) => result.status === "fulfilled").length;
   const failed = results.length - analyzed;
-  if (failed || reconciliationFailed) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).eq("provider", instagramConnector.id).eq("status", "connected");
-  else if (analyzed) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("provider", instagramConnector.id).eq("status", "connected");
+  if ((failed || reconciliationFailed) && connections?.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
+  else if (analyzed && connections?.length) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   const health = await readDataIngestionHealth(database).catch(() => null);
   if (health?.affectedConnectionIds.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", health.affectedConnectionIds);
   const outcome = failed || reconciliationFailed ? "failed" : "completed";

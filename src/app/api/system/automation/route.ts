@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
     // temporary provider problem must never delay or break login.
     await Promise.allSettled([
       "/api/cron/outlook-intelligence",
+      "/api/cron/gmail-intelligence",
       "/api/cron/instagram-intelligence",
       "/api/cron/whatsapp-intelligence",
       "/api/cron/slack-intelligence",
@@ -48,6 +49,6 @@ export async function POST(request: NextRequest) {
     })));
   });
 
-  logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { workers: 6 } });
+  logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { workers: 7 } });
   return NextResponse.json({ queued: true }, { headers: { "Cache-Control": "no-store" } });
 }
