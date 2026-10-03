@@ -1,6 +1,7 @@
 import {NextRequest,NextResponse} from "next/server";
 import {createAdminClient} from "@/lib/supabase/admin";
 import {isAuthorizedCron} from "@/lib/cron-auth";
+import {mediaFailureUpdate} from "@/lib/media/ingestion-lifecycle";
 
 export const maxDuration=300;
 
@@ -19,12 +20,12 @@ export async function GET(request:NextRequest){
  // only clearly transient download/storage failures. Reconnect and unsupported
  // file errors deliberately remain visible for the owner instead of looping.
  const staleAt=new Date(Date.now()-20*60_000).toISOString();
- const {data:stale}=await db.from("vault_ingestion_jobs").select("id").eq("state","processing").lt("updated_at",staleAt).limit(25);
+ const {data:stale}=await db.from("vault_ingestion_jobs").select("id,attempts").eq("state","processing").lt("updated_at",staleAt).limit(25);
  const staleIds=(stale??[]).map(row=>String(row.id));
- if(staleIds.length)await db.from("vault_ingestion_jobs").update({state:"pending",updated_at:new Date().toISOString()}).in("id",staleIds).eq("state","processing");
- const {data:failed}=await db.from("vault_ingestion_jobs").select("id,last_error_code,attempts").eq("state","failed").lt("attempts",3).lt("updated_at",staleAt).limit(25);
+ for(const job of stale??[]) await db.from("vault_ingestion_jobs").update(mediaFailureUpdate(new Error("processing_timeout"),Number(job.attempts??0))).eq("id",job.id).eq("state","processing");
+ const {data:failed}=await db.from("vault_ingestion_jobs").select("id,last_error_code,attempts,next_retry_at").eq("state","failed").lt("attempts",3).lte("next_retry_at",new Date().toISOString()).limit(25);
  const retryIds=(failed??[]).filter(job=>transientFailure(job.last_error_code)).map(job=>String(job.id));
- if(retryIds.length)await db.from("vault_ingestion_jobs").update({state:"pending",updated_at:new Date().toISOString()}).in("id",retryIds).eq("state","failed");
+ if(retryIds.length)await db.from("vault_ingestion_jobs").update({state:"pending",next_retry_at:null,updated_at:new Date().toISOString()}).in("id",retryIds).eq("state","failed");
  const {data:owners,error}=await db.from("vault_ingestion_jobs").select("owner_id").eq("state","pending").order("created_at").limit(25);
  if(error)return NextResponse.json({error:"Ingest owners could not be loaded."},{status:500});
  const unique=[...new Set((owners??[]).map(row=>String(row.owner_id)))];

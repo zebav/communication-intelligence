@@ -12,6 +12,7 @@ import {instagramConnector} from "@/lib/connectors/instagram";
 import {downloadEphemeralInstagramMedia} from "@/lib/connectors/instagram-media";
 import {isDecorativeEmailSignatureAttachment} from "@/lib/vault/email-attachment-filter";
 import {z} from "zod";
+import {mediaFailureUpdate} from "@/lib/media/ingestion-lifecycle";
 
 export const maxDuration=120;
 type Credentials={accessToken:string;refreshToken?:string;expiresAt:string;tokenType?:string;scope?:string};
@@ -144,8 +145,8 @@ export async function POST(request:NextRequest){
    if(creds.accessToken!==original.accessToken)await db.from("connections").update({encrypted_credentials:encryptCredential(creds,key),updated_at:new Date().toISOString()}).eq("id",conn.id).eq("owner_id",actor.id);
    const outcome=await ingestTrustedMediaAttachments(db,{...job,source_type:sourceType,attempts:Number(job.attempts??0)} as MediaJob,files.map(file=>({filename:file.name,mimeType:file.mime,bytes:Buffer.from(file.bytes)})));
    saved+=outcome.assetCount;
-   await db.from("vault_ingestion_jobs").update({state:"done",last_error_code:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
-  }catch(e){failed++;await db.from("vault_ingestion_jobs").update({state:"failed",last_error_code:e instanceof Error?e.message.slice(0,120):"unknown",updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);}
+   await db.from("vault_ingestion_jobs").update({state:"done",last_error_code:null,failed_stage:null,error_details:{},next_retry_at:null,completed_at:new Date().toISOString(),dead_lettered_at:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
+  }catch(e){failed++;await db.from("vault_ingestion_jobs").update(mediaFailureUpdate(e,Number(job.attempts??0)+1)).eq("id",job.id).eq("owner_id",actor.id);}
  }
  return NextResponse.json({processed,saved,skipped,failed,more:(queued??[]).length>jobs.length});
 }

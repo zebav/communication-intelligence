@@ -1,16 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
-export type IngestionHealth = { pendingMedia: number; failedMedia: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
+export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
 export async function readDataIngestionHealth(database: SupabaseClient, ownerId?: string): Promise<IngestionHealth> {
-  let query = database.from("vault_ingestion_jobs").select("connection_id,state,created_at").in("state", ["pending", "processing", "failed"]).order("created_at", { ascending: true }).limit(200);
+  let query = database.from("vault_ingestion_jobs").select("connection_id,state,created_at").in("state", ["pending", "processing", "failed", "dead_letter"]).order("created_at", { ascending: true }).limit(200);
   if (ownerId) query = query.eq("owner_id", ownerId);
   const { data, error } = await query;
   if (error) throw new Error("Media queue could not be read.");
   const rows = data ?? [];
   const pending = rows.filter((item) => item.state === "pending" || item.state === "processing");
   const failed = rows.filter((item) => item.state === "failed");
+  const deadLetter = rows.filter((item) => item.state === "dead_letter");
   let connections: IngestionConnection[] = [];
   if (ownerId) {
     const { data, error: connectionError } = await database.from("connections")
@@ -33,5 +34,5 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
       };
     });
   }
-  return { pendingMedia: pending.length, failedMedia: failed.length, oldestPendingAt: pending[0]?.created_at ?? null, affectedConnectionIds: [...new Set(failed.map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))], connections };
+  return { pendingMedia: pending.length, failedMedia: failed.length, deadLetterMedia: deadLetter.length, oldestPendingAt: pending[0]?.created_at ?? null, affectedConnectionIds: [...new Set([...failed, ...deadLetter].map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))], connections };
 }

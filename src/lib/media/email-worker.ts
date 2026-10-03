@@ -7,6 +7,7 @@ import { googleGmailConnector } from "@/lib/connectors/google-gmail";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { analyzeStoredMedia } from "@/lib/media/analysis";
 import { isDecorativeEmailSignatureAttachment } from "@/lib/vault/email-attachment-filter";
+import { mediaFailureUpdate } from "@/lib/media/ingestion-lifecycle";
 
 type Credentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 export type MediaJob = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; source_type?: "email" | "instagram" | "whatsapp"; metadata?: unknown };
@@ -121,13 +122,26 @@ async function storeAttachment(database: SupabaseClient, job: MediaJob, attachme
     return { state, assetId: String(existing.id), summary: typeof existing.summary === "string" ? existing.summary : "Befintlig privat fil har kopplats till meddelandet." };
   }
   const uploaded = await database.storage.from("secure-vault").upload(path, attachment.bytes, { contentType: attachment.mimeType, upsert: false });
-  if (uploaded.error) throw new Error("vault_upload_failed");
+  // A previous attempt can finish the private upload and fail before the
+  // database row is saved. Hash-addressed storage makes that object safe to
+  // reuse; treating its conflict as fatal would make retries loop forever.
+  const uploadAlreadyExists = uploaded.error && /already exists|duplicate|409/i.test(`${uploaded.error.message ?? ""} ${uploaded.error.statusCode ?? ""}`);
+  if (uploaded.error && !uploadAlreadyExists) throw new Error("vault_upload_failed");
   const text = textMimeTypes.has(attachment.mimeType) ? attachment.bytes.toString("utf8").replace(/\u0000/g, "").slice(0, 12_000).trim() : "";
   const analyzed = text
     ? { state: "ready" as const, summary: text.slice(0, 1000), decision: { analysis_state: "ready", type: "text", extracted_text: text } }
     : await analyzeStoredMedia({ ownerId: job.owner_id, mimeType: attachment.mimeType, filename: attachment.filename, bytes: attachment.bytes });
   const { data: asset, error } = await database.from("vault_assets").insert({ owner_id: job.owner_id, asset_kind: attachment.mimeType.startsWith("image/") ? "image" : attachment.mimeType.startsWith("audio/") ? "audio" : attachment.mimeType.startsWith("video/") ? "video" : "document", title: attachment.filename, filename: attachment.filename, mime_type: attachment.mimeType, size_bytes: attachment.bytes.length, storage_path: path, sha256, source_type: job.source_type ?? "email", source_message_id: job.source_message_id, source_conversation_id: job.source_conversation_id, source_person_id: job.source_person_id, sensitivity: "personal", retention_status: "saved", summary: analyzed.summary, retention_reason: "Imported attachment", ai_decision: analyzed.decision, metadata: { provider: job.provider } }).select("id").single();
-  if (error || !asset) throw new Error("vault_asset_save_failed");
+  if (error || !asset) {
+    if (error?.code === "23505") {
+      const { data: concurrentAsset } = await database.from("vault_assets").select("id,summary,ai_decision").eq("owner_id", job.owner_id).eq("sha256", sha256).maybeSingle();
+      if (concurrentAsset?.id) {
+        const decision = metadata(concurrentAsset.ai_decision);
+        return { state: decision.analysis_state === "ready" ? "ready" as const : "blocked" as const, assetId: String(concurrentAsset.id), summary: typeof concurrentAsset.summary === "string" ? concurrentAsset.summary : "Befintlig privat fil har kopplats till meddelandet." };
+      }
+    }
+    throw new Error("vault_asset_save_failed");
+  }
   if (job.source_message_id) await database.from("attachments").insert({ owner_id: job.owner_id, message_id: job.source_message_id, filename: attachment.filename, mime_type: attachment.mimeType, size_bytes: attachment.bytes.length, storage_reference: `secure-vault/${path}`, metadata: { vault_asset_id: asset.id, sha256 } });
   return { state: analyzed.state, assetId: String(asset.id), summary: analyzed.summary };
 }
@@ -151,11 +165,11 @@ export async function processEmailMediaJob(database: SupabaseClient, job: MediaJ
     const token = await loadConnectionToken(database, job);
     const attachments = job.provider === microsoftGraphConnector.id ? await outlookAttachments(token, job.provider_message_id) : await gmailAttachments(token, job.provider_message_id);
     const outcome = await ingestTrustedMediaAttachments(database, job, attachments);
-    await database.from("vault_ingestion_jobs").update({ state: "done", last_error_code: null, updated_at: new Date().toISOString(), metadata: { ...metadata(job.metadata), stored_assets: outcome.assetIds, result: outcome.state } }).eq("id", job.id).eq("owner_id", job.owner_id);
+    await database.from("vault_ingestion_jobs").update({ state: "done", last_error_code: null, failed_stage: null, error_details: {}, next_retry_at: null, completed_at: new Date().toISOString(), dead_lettered_at: null, updated_at: new Date().toISOString(), metadata: { ...metadata(job.metadata), stored_assets: outcome.assetIds, result: outcome.state } }).eq("id", job.id).eq("owner_id", job.owner_id);
     return { processed: true, state: outcome.state, assetCount: outcome.assetCount };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "media_worker_failed";
-    await database.from("vault_ingestion_jobs").update({ state: "failed", last_error_code: reason.slice(0, 120), updated_at: new Date().toISOString() }).eq("id", job.id).eq("owner_id", job.owner_id);
+    await database.from("vault_ingestion_jobs").update(mediaFailureUpdate(error, job.attempts + 1)).eq("id", job.id).eq("owner_id", job.owner_id);
     await markMessage(database, job, "failed", { reason });
     throw error;
   }
