@@ -10,6 +10,7 @@ import { mediaContextForMessage } from "@/lib/media/context";
 import { inboundBurst } from "@/lib/ai/inbound-burst";
 import { logOperation } from "@/lib/observability";
 import { z } from "zod";
+import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -33,12 +34,13 @@ function metadataObject(value: unknown) {
 async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
   const { data: conversation } = await supabase.from("conversations").select("id,title,person_id").eq("id", message.conversation_id).eq("owner_id", message.owner_id).maybeSingle();
   if (!conversation) return false;
-  const [{ data: person }, { data: profile }, { data: history }, { data: recentReplies }, { data: verifiedMemories }] = await Promise.all([
+  const [{ data: person }, { data: profile }, { data: history }, { data: recentReplies }, { data: verifiedMemories }, relationshipIntelligence] = await Promise.all([
     conversation.person_id ? supabase.from("people").select("display_name,relationship_type,organization").eq("id", conversation.person_id).eq("owner_id", message.owner_id).maybeSingle() : Promise.resolve({ data: null }),
     supabase.from("profiles").select("preferences").eq("id", message.owner_id).maybeSingle(),
     supabase.from("messages").select("id,direction,body_text,sent_at").eq("owner_id", message.owner_id).eq("conversation_id", conversation.id).eq("source", "email").order("sent_at", { ascending: false }).limit(30),
     supabase.from("messages").select("body_text").eq("owner_id", message.owner_id).eq("source", "email").eq("direction", "out").order("sent_at", { ascending: false }).limit(8),
     conversation.person_id ? supabase.from("memories").select("content").eq("owner_id", message.owner_id).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(12) : Promise.resolve({ data: [] }),
+    conversation.person_id ? relationshipContextForAI(supabase, message.owner_id, conversation.person_id).catch(() => "") : Promise.resolve(""),
   ]);
   const preferences = metadataObject(profile?.preferences) as { communication_persona?: unknown; universal_communication_profile?: unknown };
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
@@ -54,7 +56,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     preview: burst.text || message.body_text || "",
     messageSentAt: message.sent_at ?? undefined,
     currentClassification: message.classification ?? "Information Only",
-    relationshipContext: [person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "known email contact",
+    relationshipContext: [[person?.relationship_type, person?.organization].filter(Boolean).join(" at ") || "known email contact", relationshipIntelligence].filter(Boolean).join("\n"),
     personaContext,
     verifiedPersonMemories: (verifiedMemories ?? []).map((item) => item.content),
     styleExamples,
@@ -76,6 +78,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     const { data: existingOpen } = await supabase.from("commitments").select("id").eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("status", "open").limit(1).maybeSingle();
     if (!existingOpen) await supabase.from("commitments").upsert({ owner_id: message.owner_id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
+  if (conversation.person_id) await refreshRelationshipIntelligence(supabase, message.owner_id, conversation.person_id).catch(() => undefined);
   return true;
 }
 
