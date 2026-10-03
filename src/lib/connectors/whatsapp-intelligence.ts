@@ -5,7 +5,7 @@ import { relationshipTypes } from "@/lib/relationship-types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
-import { refreshRelationshipIntelligence } from "@/lib/relationship-intelligence-service";
+import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 
 export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; conversationId: string; messageId: string }) {
   const database = createAdminClient();
@@ -16,18 +16,19 @@ export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; c
   ]);
   if (!conversation || !message || message.direction !== "in") return;
   if (blocksDecisionUntilMediaReady(message.metadata)) return;
-  const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }] = await Promise.all([
+  const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }, relationshipIntelligence] = await Promise.all([
     conversation.person_id ? database.from("people").select("display_name,relationship_type,organization,relationship_summary").eq("id", conversation.person_id).eq("owner_id", input.ownerId).maybeSingle() : Promise.resolve({ data: null }),
     database.from("messages").select("direction,body_text,sent_at").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", "whatsapp").order("sent_at", { ascending: false }).limit(100),
     conversation.person_id ? database.from("memories").select("content").eq("owner_id", input.ownerId).eq("person_id", conversation.person_id).eq("user_verified", true).order("created_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] }),
     database.from("messages").select("body_text").eq("owner_id", input.ownerId).eq("source", "whatsapp").eq("direction", "out").order("sent_at", { ascending: false }).limit(20),
+    conversation.person_id ? relationshipContextForAI(database, input.ownerId, conversation.person_id).catch(() => "") : Promise.resolve(""),
   ]);
   const preferences = profile?.preferences && typeof profile.preferences === "object" && !Array.isArray(profile.preferences) ? profile.preferences as { communication_persona?: unknown; universal_communication_profile?: unknown } : {};
   const universalProfile = normalizeUniversalProfile(preferences.universal_communication_profile, preferences.communication_persona);
   const personaContext = resolveCommunicationProfile(universalProfile, { source: "whatsapp", personId: conversation.person_id, situation: person?.relationship_type === "dating" ? "romantic" : "personal" });
   const conversationMessages = [...(history ?? [])].reverse().map((item) => ({ direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at ?? undefined })).filter((item) => item.body);
   const analyzedMedia = await mediaContextForMessage(database, input.ownerId, message.id);
-  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source: "whatsapp", senderName: person?.display_name ?? "WhatsApp contact", subject: conversation.title ?? "WhatsApp conversation", preview: message.body_text ?? "", messageSentAt: message.sent_at ?? undefined, currentClassification: "Personal", relationshipContext: [person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || "WhatsApp contact", personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
+  const analysis = await getAIService().analyzeEmail({ ownerId: input.ownerId, source: "whatsapp", senderName: person?.display_name ?? "WhatsApp contact", subject: conversation.title ?? "WhatsApp conversation", preview: message.body_text ?? "", messageSentAt: message.sent_at ?? undefined, currentClassification: "Personal", relationshipContext: [[person?.relationship_type, person?.organization, person?.relationship_summary].filter(Boolean).join(" · ") || "WhatsApp contact", relationshipIntelligence].filter(Boolean).join("\n"), personaContext, verifiedPersonMemories: (memories ?? []).map((item) => item.content), styleExamples: (styleRows ?? []).map((item) => item.body_text ?? "").filter(Boolean), conversationMessages, analyzedMedia });
   const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
   const now = new Date().toISOString();
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, planningSuggestion: analysis.planningSuggestion, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };

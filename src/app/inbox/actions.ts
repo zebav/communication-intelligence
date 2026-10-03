@@ -14,7 +14,7 @@ import { enforceProfessionalRouting } from "@/lib/action-routing";
 import { bestSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
 import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
-import { refreshRelationshipIntelligence } from "@/lib/relationship-intelligence-service";
+import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -162,6 +162,8 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
     senderAddress = identity?.external_identifier ?? "";
     senderName = person?.display_name ?? senderName;
     relationshipContext = [person?.relationship_type, person?.organization, person?.professional_specialty, person?.jurisdiction].filter(Boolean).join(" · ") || "known email contact";
+    const relationshipIntelligence = await relationshipContextForAI(supabase, user.id, conversation.person_id).catch(() => "");
+    relationshipContext = [relationshipContext, relationshipIntelligence].filter(Boolean).join("\n");
   }
   try {
     const { data: profile } = await supabase.from("profiles").select("preferences").eq("id", user.id).maybeSingle();

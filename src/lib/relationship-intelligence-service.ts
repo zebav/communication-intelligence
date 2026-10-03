@@ -6,6 +6,26 @@ type Json = Record<string, unknown>;
 const record = (value: unknown): Json => value && typeof value === "object" && !Array.isArray(value) ? value as Json : {};
 const signalScore = (value: number) => Math.max(0, Math.min(100, value));
 
+/**
+ * Compact, evidence-backed context for the existing message analysis.  It is
+ * deliberately descriptive rather than an instruction to elevate every
+ * message: message urgency, deadlines and explicit requests still decide the
+ * final priority.
+ */
+export async function relationshipContextForAI(database: SupabaseClient, ownerId: string, personId: string) {
+  const { data } = await database
+    .from("relationship_snapshots")
+    .select("category,strength_score,quality_score,priority_score,confidence,trend")
+    .eq("owner_id", ownerId)
+    .eq("person_id", personId)
+    .order("snapshot_date", { ascending: false })
+    .limit(12);
+  const seen = new Set<string>();
+  const current = (data ?? []).filter((row) => !seen.has(row.category) && Boolean(seen.add(row.category))).slice(0, 3);
+  if (!current.length) return "";
+  return `Relationship evidence (use as context, not as a substitute for message urgency): ${current.map((row) => `${String(row.category).replaceAll("_", " ")} — strength ${Math.round(Number(row.strength_score ?? 0))}, quality ${Math.round(Number(row.quality_score ?? 0))}, owner priority ${Math.round(Number(row.priority_score ?? 0))}, ${Math.round(Number(row.confidence ?? 0) * 100)}% confidence, ${row.trend ?? "stable"}`).join("; ")}.`;
+}
+
 function suggestionCategory(metadata: unknown) {
   const type = record(record(metadata).ai_analysis).relationshipSuggestion;
   return categoryForLegacyRelationship(typeof type === "object" && type ? String(record(type).type) : null);
