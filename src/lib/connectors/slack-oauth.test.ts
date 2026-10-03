@@ -8,8 +8,8 @@ describe("Slack OAuth", () => {
 
   it("requests owner-authorised, read-only scopes", () => {
     const url = new URL(slackAuthorizationUrl({ clientId: "id", clientSecret: "secret", redirectUri: "https://www.solvani.app/api/connectors/slack/callback" }, "state", "challenge"));
-    expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2_user/authorize");
-    expect(url.searchParams.get("scope")).toBeNull();
+    expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2/authorize");
+    expect(url.searchParams.get("scope")).toBe("users:read");
     expect(url.searchParams.get("user_scope")).toBe("channels:read,channels:history,groups:read,groups:history,im:read,im:history,mpim:read,mpim:history,users:read");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });

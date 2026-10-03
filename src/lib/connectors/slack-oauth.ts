@@ -19,6 +19,11 @@ export const slackReadOnlyScopes = [
   "users:read",
 ] as const;
 
+// Slack's installation flow requires a non-empty app scope even when Solvani
+// ultimately imports with the owner's user token. Keep that app scope strictly
+// read-only; no bot write capability is requested or used.
+export const slackInstallScopes = ["users:read"] as const;
+
 export function slackRedirectUri(
   origin: string,
   environment?: { SLACK_REDIRECT_URI?: string; VERCEL_PROJECT_PRODUCTION_URL?: string },
@@ -44,10 +49,11 @@ export function createSlackOAuthAttempt() {
 }
 
 export function slackAuthorizationUrl(config: ReturnType<typeof slackConfig>, state: string, challenge: string) {
-  const url = new URL("https://slack.com/oauth/v2_user/authorize");
+  const url = new URL("https://slack.com/oauth/v2/authorize");
   url.search = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
+    scope: slackInstallScopes.join(","),
     user_scope: slackReadOnlyScopes.join(","),
     state,
     code_challenge: challenge,
