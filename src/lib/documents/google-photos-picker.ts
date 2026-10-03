@@ -1,8 +1,9 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { storeVaultFile } from "@/lib/vault/vault-service";
 
-type Database = { from: (table: string) => any };
+type Database = Pick<SupabaseClient, "from">;
 type Credentials = { accessToken: string; refreshToken: string; expiresAt?: string; tokenType?: string; scope?: string };
 type PickerSession = { id?: string; name?: string; pickerUri?: string; pollingConfig?: { pollInterval?: string } };
 type PickerItem = { id?: string; mediaFile?: { baseUrl?: string; mimeType?: string; filename?: string }; baseUrl?: string; mimeType?: string; filename?: string };

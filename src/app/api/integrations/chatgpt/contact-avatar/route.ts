@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
 
   let assetId = existingAsset?.id;
   let finalPath = existingAsset?.storage_path;
-  let finalBucket = existingAsset?.storage_bucket ?? "secure-vault";
+  const finalBucket = existingAsset?.storage_bucket ?? "secure-vault";
 
   if (!assetId) {
     const upload = await db.storage.from("secure-vault").upload(storagePath, bytes, {

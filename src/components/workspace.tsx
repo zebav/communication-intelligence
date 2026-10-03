@@ -98,11 +98,14 @@ function AIPlanner({ plan }: { plan?: PlannerSuggestion }) {
   useEffect(() => {
     if (!plan?.detected || !plan.placeQuery.trim()) return;
     let active = true;
-    setLoading(true); setStatus("");
-    void fetch("/api/calendar/planning", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "places", query: plan.placeQuery }) })
-      .then(async (response) => { const data = await response.json() as { places?: PlannerPlace[]; error?: string }; if (!response.ok) throw new Error(data.error ?? "Platsförslagen kunde inte hämtas."); if (active) setPlaces(data.places ?? []); })
-      .catch((error) => { if (active) setStatus(error instanceof Error ? error.message : "Platsförslagen kunde inte hämtas."); })
-      .finally(() => { if (active) setLoading(false); });
+    queueMicrotask(() => {
+      if (!active) return;
+      setLoading(true); setStatus("");
+      void fetch("/api/calendar/planning", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "places", query: plan.placeQuery }) })
+        .then(async (response) => { const data = await response.json() as { places?: PlannerPlace[]; error?: string }; if (!response.ok) throw new Error(data.error ?? "Platsförslagen kunde inte hämtas."); if (active) setPlaces(data.places ?? []); })
+        .catch((error) => { if (active) setStatus(error instanceof Error ? error.message : "Platsförslagen kunde inte hämtas."); })
+        .finally(() => { if (active) setLoading(false); });
+    });
     return () => { active = false; };
   }, [plan?.detected, plan?.placeQuery]);
   if (!plan?.detected) return null;
