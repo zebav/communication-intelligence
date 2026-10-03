@@ -40,7 +40,21 @@ export async function startRelationshipBackfill() {
   if (assurance?.currentLevel !== "aal2") return { error: "Tvåfaktorsautentisering krävs." };
   const { data: active } = await database.from("relationship_backfill_jobs").select("id,status").eq("owner_id", user.id).in("status", ["pending", "running", "paused"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (active) return { success: true, alreadyActive: true };
-  const { error } = await database.from("relationship_backfill_jobs").insert({ owner_id: user.id, status: "pending", cost_budget_cents: 0 });
+  // Freeze the denominator when the job starts. New contacts can be analyzed
+  // incrementally later, but must not make an in-progress percentage jump.
+  const { count, error: countError } = await database.from("people")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", user.id)
+    .eq("entity_type", "person")
+    .or("relationship_status.is.null,relationship_status.neq.merged");
+  if (countError) return { error: "Kontakterna kunde inte räknas inför den historiska analysen." };
+  const { error } = await database.from("relationship_backfill_jobs").insert({
+    owner_id: user.id,
+    status: "pending",
+    current_stage: "queued",
+    total_people: count ?? 0,
+    cost_budget_cents: 0,
+  });
   if (error) return { error: "Historisk analys kunde inte startas." };
   revalidatePath("/relationships");
   return { success: true, alreadyActive: false };

@@ -42,7 +42,7 @@ type HomeProps = {
   searchParams: Promise<{ view?: string | string[] }>;
 };
 
-const workspaceViews = new Set<View>(["today", "cases", "inbox", "people", "followups", "cleanup", "intelligence", "connections", "settings", "calendar", "assistant"]);
+const workspaceViews = new Set<View>(["today", "cases", "inbox", "people", "followups", "cleanup", "intelligence", "connections", "settings", "calendar", "assistant", "relationships"]);
 
 export default async function Home({ searchParams }: HomeProps) {
   const requestedView = (await searchParams).view;
