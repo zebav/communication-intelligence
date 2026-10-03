@@ -13,6 +13,15 @@ import { z } from "zod";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+type EmailProvider = "gmail" | "microsoft-graph";
+
+function requestedProvider(request: NextRequest): EmailProvider {
+  // The Outlook endpoint remains the backward-compatible default. Gmail gets
+  // its own Vercel Cron route, but both providers deliberately share the same
+  // bounded worker and analysis contract.
+  return request.nextUrl.searchParams.get("provider") === "gmail" ? "gmail" : "microsoft-graph";
+}
+
 type AdminClient = ReturnType<typeof createAdminClient>;
 type Candidate = { id: string; owner_id: string; conversation_id: string; body_text: string | null; sent_at: string | null; classification: string | null; importance_score: number | null; metadata: unknown; attachment_count: number | null };
 
@@ -75,9 +84,13 @@ export async function GET(request: NextRequest) {
   const requestedOwner = z.string().uuid().safeParse(request.headers.get("x-owner-id"));
   const ownerId = requestedOwner.success ? requestedOwner.data : null;
   const loginTriggered = request.headers.get("x-maintenance-trigger") === "login";
-  let connectionQuery = supabase.from("connections").select("owner_id,id,provider").in("provider", ["microsoft-graph", "gmail"]).eq("status", "connected");
+  const provider = requestedProvider(request);
+  // One account per provider pass keeps every run bounded. Ordering by the
+  // oldest successful sync means several connected accounts are serviced in
+  // turn instead of one slow mailbox delaying the rest.
+  let connectionQuery = supabase.from("connections").select("owner_id,id,provider").eq("provider", provider).eq("status", "connected").order("last_sync_at", { ascending: true, nullsFirst: true });
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
-  const { data: connections, error } = await connectionQuery.limit(ownerId ? 4 : 10);
+  const { data: connections, error } = await connectionQuery.limit(1);
   if (error) return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });
 
   const syncResults = [];
@@ -94,7 +107,7 @@ export async function GET(request: NextRequest) {
   let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,sent_at,classification,importance_score,metadata,attachment_count").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false });
   if (ownerId) pendingQuery = pendingQuery.eq("owner_id", ownerId);
   const { data: pending } = await pendingQuery.limit(ownerId ? 30 : 50);
-  const candidates = (pending ?? []).filter((message) => (isRelevantEmail(message.classification ?? "") || Number(message.importance_score ?? 0) >= 8) && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
+  const candidates = (pending ?? []).filter((message) => metadataObject(message.metadata).provider === provider && (isRelevantEmail(message.classification ?? "") || Number(message.importance_score ?? 0) >= 8) && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
   const analyzed = (await Promise.allSettled(candidates.map((message) => analyzeCandidate(supabase, message)))).filter((result) => result.status === "fulfilled" && result.value).length;
-  return NextResponse.json({ ok: true, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3, ownerId, loginTriggered });
+  return NextResponse.json({ ok: true, provider, accounts: syncResults.length, synced: syncResults.filter((result) => result.ok).length, analyzed, analysisLimit: 3, ownerId, loginTriggered });
 }
