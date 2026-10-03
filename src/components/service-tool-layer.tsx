@@ -19,7 +19,7 @@ export function ServiceToolLayer() {
     if (!response.ok) throw new Error(data.error ?? "Tjänsterna kunde inte läsas.");
     setPayload(data);
   };
-  useEffect(() => { void load().catch((caught) => setError(caught instanceof Error ? caught.message : "Tjänsterna kunde inte läsas.")); }, []);
+  useEffect(() => { queueMicrotask(() => { void load().catch((caught) => setError(caught instanceof Error ? caught.message : "Tjänsterna kunde inte läsas.")); }); }, []);
   const update = async (service: ServiceSnapshot, enabled: boolean, permission = service.policy) => {
     setSaving(service.id); setError("");
     try {

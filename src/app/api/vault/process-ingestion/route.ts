@@ -111,7 +111,7 @@ export async function POST(request:NextRequest){
  if(error)return NextResponse.json({error:"Ingest-kön kunde inte läsas."},{status:500});
  const mediaPriority=(job:{source_type?:string;attempts?:number;updated_at?:string})=>job.source_type==="whatsapp"||job.source_type==="instagram"?0:1;
  const jobs=[...(queued??[])].sort((left,right)=>mediaPriority(left)-mediaPriority(right)||Number(left.attempts??0)-Number(right.attempts??0)||String(right.updated_at??"").localeCompare(String(left.updated_at??""))).slice(0,10);
- let processed=0,saved=0,skipped=0,failed=0;
+ let processed=0,saved=0,failed=0; const skipped=0;
  for(const job of jobs??[]){
   const {data:claimed}=await db.from("vault_ingestion_jobs").update({state:"processing",attempts:Number(job.attempts??0)+1,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id).eq("state","pending").select("id").maybeSingle(); if(!claimed)continue;
   try{

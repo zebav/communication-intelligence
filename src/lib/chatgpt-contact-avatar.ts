@@ -65,7 +65,7 @@ export async function setContactAvatarFromBytes(args: {
 
   let assetId = existingAsset?.id as string | undefined;
   let finalPath = existingAsset?.storage_path as string | undefined;
-  let finalBucket = (existingAsset?.storage_bucket as string | undefined) ?? "secure-vault";
+  const finalBucket = (existingAsset?.storage_bucket as string | undefined) ?? "secure-vault";
 
   if (!assetId) {
     const upload = await db.storage.from("secure-vault").upload(storagePath, args.bytes, { contentType: args.mimeType, upsert: false });

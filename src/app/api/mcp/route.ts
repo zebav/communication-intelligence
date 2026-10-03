@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
   }
   const ownerId = authorization.ownerId;
 
-  let message: { jsonrpc?: string; id?: unknown; method?: string; params?: any };
+  let message: { jsonrpc?: string; id?: unknown; method?: string; params?: { name?: unknown; arguments?: Record<string, unknown> } };
   try {
     message = await request.json();
   } catch {
