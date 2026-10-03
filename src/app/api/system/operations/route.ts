@@ -12,6 +12,17 @@ type ConnectionRow = {
   account_name?: string | null;
 };
 
+type SyncState = "current" | "delayed" | "unknown";
+
+function syncState(lastSyncAt: string | null): SyncState {
+  if (!lastSyncAt) return "unknown";
+  const timestamp = new Date(lastSyncAt).getTime();
+  if (!Number.isFinite(timestamp)) return "unknown";
+  // Imports run every five minutes, but a provider can have a bounded retry
+  // or temporary throttling. Show a useful warning only after 45 minutes.
+  return Date.now() - timestamp > 45 * 60_000 ? "delayed" : "current";
+}
+
 function countByState(rows: Row[] | null, field = "state") {
   return (rows ?? []).reduce<Record<string, number>>((counts, row) => {
     const key = typeof row[field] === "string" ? row[field] : "unknown";
@@ -53,6 +64,7 @@ export async function GET() {
         status: item.status ?? "unknown",
         health: item.health_status ?? "unknown",
         lastSyncAt: item.last_sync_at,
+        syncState: syncState(item.last_sync_at),
       })),
     },
     media: { states: countByState((media.data ?? []) as Row[]), recentFailures: (media.data ?? []).filter((item) => item.state === "failed").slice(0, 5).map((item) => ({ at: item.updated_at, code: typeof item.last_error_code === "string" ? item.last_error_code.slice(0, 100) : "Kunde inte slutföras" })) },

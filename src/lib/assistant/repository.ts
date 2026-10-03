@@ -106,7 +106,14 @@ function stockholmDayStart(daysAgo: number) {
   const day = new Date(`${value("year")}-${value("month")}-${value("day")}T12:00:00.000Z`);
   day.setUTCDate(day.getUTCDate() - daysAgo);
   const year = day.getUTCFullYear(), month = String(day.getUTCMonth() + 1).padStart(2, "0"), date = String(day.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${date}T00:00:00+02:00`;
+  // Use Stockholm's actual UTC offset for the requested date. A fixed +02:00
+  // made the "Idag" and "Igår" filters drift by an hour during winter time.
+  const offsetParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Stockholm",
+    timeZoneName: "longOffset",
+  }).formatToParts(new Date(`${year}-${month}-${date}T12:00:00.000Z`));
+  const offset = offsetParts.find((part) => part.type === "timeZoneName")?.value?.replace("GMT", "") || "+01:00";
+  return `${year}-${month}-${date}T00:00:00${offset}`;
 }
 
 function periodRange(period: NotificationPeriod) {
@@ -121,10 +128,8 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
   // hundreds of rich messages (including full email bodies) made the decision
   // screen slow even before a person could act on the first card. Older items
   // remain available through the cursor and are still ranked by priority.
-  // A month was too short for a real decision queue: important account,
-  // legal and payout notices can remain unanswered for longer than that.
-  // Keep the payload bounded, but give the ranking model a useful recovery
-  // window for older, still-open messages.
+  // Older, still-open items are intentionally available only through the
+  // explicit recovery view. The default must keep the decision queue fresh.
   const pageSize = 60;
   const offset = Math.max(0, Number(before) || 0);
   const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in");

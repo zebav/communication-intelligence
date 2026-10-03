@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, CalendarClock, RefreshCw, ShieldCheck } from "lucide-react";
 
 type Summary = { states: Record<string, number> };
-type ConnectionAccount = { provider: string; account: string; status: string; health: string; lastSyncAt: string | null };
+type ConnectionAccount = { provider: string; account: string; status: string; health: string; lastSyncAt: string | null; syncState?: "current" | "delayed" | "unknown" };
 type Operations = {
   connections: Summary & { total: number; attention: number; latestSyncAt: string | null; accounts: ConnectionAccount[] };
   media: Summary & { recentFailures: Array<{ at: string | null; code: string }> };
@@ -28,6 +28,8 @@ function providerName(provider: string) {
 function accountState(account: ConnectionAccount) {
   if (account.status !== "connected" || account.health === "reconnect_required") return "Inloggning krävs";
   if (account.health === "degraded" || account.health === "error") return "Kontrolleras";
+  if (account.syncState === "delayed") return "Försenad hämtning — systemet försöker igen";
+  if (account.syncState === "unknown") return "Väntar på första hämtning";
   return "I synk";
 }
 

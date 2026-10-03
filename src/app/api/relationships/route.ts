@@ -10,11 +10,19 @@ export async function GET(request: NextRequest) {
   if (assurance?.currentLevel !== "aal2") return NextResponse.json({ error: "Tvåstegsverifiering krävs." }, { status: 403 });
   const requested = request.nextUrl.searchParams.get("category");
   const category = relationshipCategories.includes(requested as RelationshipCategory) ? requested as RelationshipCategory : "romantic";
-  const [{ data: snapshots, error: snapshotError }, { data: job, error: jobError }] = await Promise.all([
+  const [{ data: snapshots, error: snapshotError }, jobResult] = await Promise.all([
     db.from("relationship_snapshots").select("id,person_id,category,strength_score,quality_score,priority_score,ranking_score,trend,confidence,evidence_count,explanation,missing_information,snapshot_date").eq("owner_id", user.id).eq("category", category).order("snapshot_date", { ascending: false }).order("ranking_score", { ascending: false }).limit(500),
     db.from("relationship_backfill_jobs").select("status,processed_people,skipped_people,total_people,current_stage,error").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
-  if (snapshotError || jobError) return NextResponse.json({ error: "Relationsunderlaget kunde inte läsas." }, { status: 503 });
+  if (snapshotError) return NextResponse.json({ error: "Relationsunderlaget kunde inte läsas." }, { status: 503 });
+  // A source deployment can briefly reach the database before its additive
+  // progress migration. Keep existing rankings readable during that window;
+  // the owner only loses the optional progress detail until migration applies.
+  let job = jobResult.data;
+  if (jobResult.error) {
+    const legacy = await db.from("relationship_backfill_jobs").select("status,processed_people,skipped_people,error").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    job = legacy.data ? { ...legacy.data, total_people: null, current_stage: null } : null;
+  }
   const newest = new Map<string, NonNullable<typeof snapshots>[number]>();
   for (const snapshot of snapshots ?? []) if (!newest.has(snapshot.person_id)) newest.set(snapshot.person_id, snapshot);
   const ranked = [...newest.values()].filter((item) => Number(item.evidence_count) >= 3 || Number(item.confidence) >= .8).sort((a, b) => Number(b.ranking_score) - Number(a.ranking_score)).slice(0, 10);
