@@ -10,6 +10,7 @@ import { mediaContextForMessage } from "@/lib/media/context";
 import { inboundBurst } from "@/lib/ai/inbound-burst";
 import { logOperation } from "@/lib/observability";
 import { z } from "zod";
+import { refreshRelationshipIntelligence } from "@/lib/relationship-intelligence-service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -76,6 +77,7 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     const { data: existingOpen } = await supabase.from("commitments").select("id").eq("owner_id", message.owner_id).eq("source_message_id", message.id).eq("status", "open").limit(1).maybeSingle();
     if (!existingOpen) await supabase.from("commitments").upsert({ owner_id: message.owner_id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
+  if (conversation.person_id) await refreshRelationshipIntelligence(supabase, message.owner_id, conversation.person_id).catch(() => undefined);
   return true;
 }
 

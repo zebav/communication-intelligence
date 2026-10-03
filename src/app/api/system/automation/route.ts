@@ -43,12 +43,13 @@ export async function POST(request: NextRequest) {
       "/api/cron/slack-intelligence",
       "/api/cron/calendar-sync",
       "/api/cron/vault-ingestion",
+      "/api/cron/relationship-backfill",
     ].map((path) => fetch(new URL(path, request.url), {
       headers,
       signal: AbortSignal.timeout(55_000),
     })));
   });
 
-  logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { workers: 7 } });
+  logOperation({ route: "/api/system/automation", operation: "start_maintenance", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { workers: 8 } });
   return NextResponse.json({ queued: true }, { headers: { "Cache-Control": "no-store" } });
 }

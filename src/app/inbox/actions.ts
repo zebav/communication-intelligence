@@ -14,6 +14,7 @@ import { enforceProfessionalRouting } from "@/lib/action-routing";
 import { bestSafeExternalActionUrl, safeExternalActionUrl } from "@/lib/safe-action";
 import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
+import { refreshRelationshipIntelligence } from "@/lib/relationship-intelligence-service";
 
 const categories = ["Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"] as const;
 const correctionSchema = z.object({ messageId: z.string().uuid(), conversationId: z.string().uuid(), classification: z.enum(categories) });
@@ -215,6 +216,7 @@ export async function analyzeEmailWithAI(input: { messageId: string; conversatio
       const { data: existingOpen } = await supabase.from("commitments").select("id").eq("owner_id", user.id).eq("source_message_id", message.id).eq("status", "open").limit(1).maybeSingle();
       if (!existingOpen) await supabase.from("commitments").upsert({ owner_id: user.id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
     }
+    if (conversation.person_id) await refreshRelationshipIntelligence(supabase, user.id, conversation.person_id).catch(() => undefined);
     revalidatePath("/");
     return { success: true };
   } catch (error) {

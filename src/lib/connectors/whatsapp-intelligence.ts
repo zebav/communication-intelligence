@@ -5,6 +5,7 @@ import { relationshipTypes } from "@/lib/relationship-types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
+import { refreshRelationshipIntelligence } from "@/lib/relationship-intelligence-service";
 
 export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; conversationId: string; messageId: string }) {
   const database = createAdminClient();
@@ -38,4 +39,5 @@ export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; c
     if (candidates.length) await database.from("memories").upsert(candidates, { onConflict: "owner_id,source_message_id,category,content", ignoreDuplicates: true });
   }
   if (analysis.commitment.detected && analysis.commitment.confidence >= 0.75 && analysis.commitment.description.trim()) await database.from("commitments").upsert({ owner_id: input.ownerId, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: analysis.commitment.dueAt || null, status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
+  if (conversation.person_id) await refreshRelationshipIntelligence(database, input.ownerId, conversation.person_id).catch(() => undefined);
 }
