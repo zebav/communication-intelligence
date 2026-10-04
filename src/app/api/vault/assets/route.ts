@@ -19,10 +19,14 @@ export async function GET(request:NextRequest){
  const messageId=request.nextUrl.searchParams.get("messageId");
  if(messageId){
   const parsed=z.string().uuid().safeParse(messageId); if(!parsed.success)return NextResponse.json({error:"Ogiltigt meddelande."},{status:400});
-  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,ai_decision,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true});
+  const [{data,error},{data:jobs,error:jobError}]=await Promise.all([
+    session.db.from("vault_assets").select("id,asset_kind,title,filename,mime_type,summary,source_type,ai_decision,created_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).eq("retention_status","saved").order("created_at",{ascending:true}),
+    session.db.from("vault_ingestion_jobs").select("state,retrieval_status,analysis_status,vault_status,last_error_code,failed_stage,updated_at").eq("owner_id",session.user.id).eq("source_message_id",parsed.data).order("updated_at",{ascending:false}).limit(1),
+  ]);
   if(error)return NextResponse.json({error:"Bilagorna kunde inte läsas."},{status:500});
   const assets=(data??[]).map(asset=>{const decision=asset.ai_decision&&typeof asset.ai_decision==="object"&&!Array.isArray(asset.ai_decision)?asset.ai_decision as Record<string,unknown>:{};const playable=asset.mime_type.startsWith("audio/")||asset.mime_type.startsWith("video/");return {...asset,previewUrl:(asset.mime_type.startsWith("image/")||playable)?`/api/vault/assets/${asset.id}/preview`:undefined,transcript:playable?(typeof decision.transcript==="string"?decision.transcript:asset.summary||null):null};});
-  return NextResponse.json({assets},{headers:{"Cache-Control":"no-store"}});
+  const job=jobError?null:(jobs??[])[0]??null;
+  return NextResponse.json({assets,lifecycle:job?{state:job.state,retrievalStatus:job.retrieval_status,analysisStatus:job.analysis_status,vaultStatus:job.vault_status,errorCode:job.last_error_code,failedStage:job.failed_stage}:null},{headers:{"Cache-Control":"no-store"}});
  }
  const {data,error}=await session.db.from("vault_assets").select("id,asset_kind,retention_status,title,filename,mime_type,size_bytes,sensitivity,document_type,summary,retention_reason,importance_score,reusable,source_type,source_person_id,source_message_id,ai_decision,external_origin:metadata->>external_origin,created_at").eq("owner_id",session.user.id).eq("retention_status","saved").order("created_at",{ascending:false}).limit(100);
  if(error)return NextResponse.json({error:"Valvet kunde inte läsas."},{status:500});

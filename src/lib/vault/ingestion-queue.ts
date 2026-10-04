@@ -17,6 +17,9 @@ export async function queueVaultIngestion(db:SupabaseClient,input:{
     message_text:(input.messageText??"").slice(0,6000),
     metadata:input.metadata??{},
     state:"pending",
+    retrieval_status:"queued",
+    analysis_status:"queued",
+    vault_status:"not_evaluated",
     updated_at:new Date().toISOString(),
   },{onConflict:"owner_id,provider,connection_id,provider_message_id",ignoreDuplicates:true});
   if(error) throw new Error("vault_ingestion_queue_failed");

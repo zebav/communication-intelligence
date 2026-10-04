@@ -114,7 +114,7 @@ export async function POST(request:NextRequest){
  const jobs=[...(queued??[])].sort((left,right)=>mediaPriority(left)-mediaPriority(right)||Number(left.attempts??0)-Number(right.attempts??0)||String(right.updated_at??"").localeCompare(String(left.updated_at??""))).slice(0,10);
  let processed=0,saved=0,failed=0; const skipped=0;
  for(const job of jobs??[]){
-  const {data:claimed}=await db.from("vault_ingestion_jobs").update({state:"processing",attempts:Number(job.attempts??0)+1,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id).eq("state","pending").select("id").maybeSingle(); if(!claimed)continue;
+  const {data:claimed}=await db.from("vault_ingestion_jobs").update({state:"processing",attempts:Number(job.attempts??0)+1,retrieval_status:"fetching",analysis_status:"processing",updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id).eq("state","pending").select("id").maybeSingle(); if(!claimed)continue;
   try{
    const {data:conn}=await db.from("connections").select("id,provider,encrypted_credentials").eq("owner_id",actor.id).eq("id",job.connection_id).single();
    if(!conn?.encrypted_credentials)throw new Error("connection_missing");
@@ -145,7 +145,7 @@ export async function POST(request:NextRequest){
    if(creds.accessToken!==original.accessToken)await db.from("connections").update({encrypted_credentials:encryptCredential(creds,key),updated_at:new Date().toISOString()}).eq("id",conn.id).eq("owner_id",actor.id);
    const outcome=await ingestTrustedMediaAttachments(db,{...job,source_type:sourceType,attempts:Number(job.attempts??0)} as MediaJob,files.map(file=>({filename:file.name,mimeType:file.mime,bytes:Buffer.from(file.bytes)})));
    saved+=outcome.assetCount;
-   await db.from("vault_ingestion_jobs").update({state:"done",last_error_code:null,failed_stage:null,error_details:{},next_retry_at:null,completed_at:new Date().toISOString(),dead_lettered_at:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
+   await db.from("vault_ingestion_jobs").update({state:"done",retrieval_status:"available",analysis_status:outcome.state==="ready"?"completed":"blocked",vault_status:outcome.assetCount>0?"retained":"rejected",last_error_code:null,failed_stage:null,error_details:{},next_retry_at:null,completed_at:new Date().toISOString(),dead_lettered_at:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
   }catch(e){failed++;await db.from("vault_ingestion_jobs").update(mediaFailureUpdate(e,Number(job.attempts??0)+1)).eq("id",job.id).eq("owner_id",actor.id);}
  }
  return NextResponse.json({processed,saved,skipped,failed,more:(queued??[]).length>jobs.length});

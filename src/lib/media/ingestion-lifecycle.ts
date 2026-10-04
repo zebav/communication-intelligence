@@ -31,6 +31,8 @@ export function nextMediaRetryAt(attempts: number, now = new Date()) {
 export function mediaFailureUpdate(error: unknown, attempts: number, now = new Date()) {
   const failure = classifyMediaFailure(error);
   const exhausted = !failure.retryable || attempts >= maxAutomaticMediaAttempts;
+  const retrievalFailed = failure.stage === "connection" || failure.stage === "download" || failure.stage === "claim";
+  const analysisFailed = failure.stage === "analysis";
   return {
     state: exhausted ? "dead_letter" : "failed",
     last_error_code: failure.code,
@@ -38,6 +40,9 @@ export function mediaFailureUpdate(error: unknown, attempts: number, now = new D
     error_details: { code: failure.code, stage: failure.stage, retryable: failure.retryable, recorded_at: now.toISOString() },
     next_retry_at: exhausted ? null : nextMediaRetryAt(attempts, now),
     dead_lettered_at: exhausted ? now.toISOString() : null,
+    retrieval_status: retrievalFailed ? "failed" : "available",
+    analysis_status: analysisFailed ? "failed" : "blocked",
+    vault_status: failure.stage === "storage" || failure.stage === "persistence" ? "failed" : "not_evaluated",
     updated_at: now.toISOString(),
   };
 }

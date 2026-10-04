@@ -5,6 +5,17 @@ import { FileText, Image as ImageIcon, Music2, Paperclip, Play, ExternalLink } f
 import { AttachmentViewer, type ViewableAttachment } from "./attachment-viewer";
 
 type Asset = ViewableAttachment & { asset_kind: string; title: string; filename: string; summary?: string; source_type: string; previewUrl?: string; transcript?: string | null };
+type Lifecycle = { state: string; retrievalStatus: string; analysisStatus: string; vaultStatus: string; errorCode?: string | null; failedStage?: string | null };
+
+function lifecycleText(lifecycle: Lifecycle | null) {
+  if (!lifecycle) return "Bilagan väntar på säker hämtning från källan.";
+  if (lifecycle.retrievalStatus === "fetching") return "Hämtar bilagan säkert från källan…";
+  if (lifecycle.retrievalStatus === "queued") return "Bilagan står i tur för säker hämtning.";
+  if (lifecycle.retrievalStatus === "failed") return lifecycle.failedStage === "connection" ? "Källans anslutning behöver kontrolleras innan bilagan kan hämtas." : "Kunde inte hämta bilagan från källan. Systemet försöker igen när det är säkert.";
+  if (lifecycle.analysisStatus === "processing" || lifecycle.analysisStatus === "queued") return "Bilagan är tillgänglig för hämtning och analyseras i bakgrunden.";
+  if (lifecycle.vaultStatus === "rejected") return "Bilagan hämtades men sparades inte som ett viktigt dokument.";
+  return "Bilagans status uppdateras.";
+}
 
 function icon(asset: Asset) {
   if (asset.asset_kind === "image") return <ImageIcon size={14} />;
@@ -17,6 +28,7 @@ export function MessageAttachments({ messageId, expected = 0 }: { messageId: str
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [notice, setNotice] = useState("");
   const [viewer, setViewer] = useState<Asset | null>(null);
+  const [lifecycle, setLifecycle] = useState<Lifecycle | null>(null);
   const [open, setOpen] = useState(expected > 0);
 
   useEffect(() => {
@@ -24,9 +36,9 @@ export function MessageAttachments({ messageId, expected = 0 }: { messageId: str
     let active = true;
     void fetch(`/api/vault/assets?messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
       .then(async (response) => {
-        const data = await response.json() as { assets?: Asset[]; error?: string };
+        const data = await response.json() as { assets?: Asset[]; lifecycle?: Lifecycle | null; error?: string };
         if (!response.ok) throw new Error(data.error ?? "Bilagorna kunde inte läsas.");
-        if (active) setAssets(data.assets ?? []);
+        if (active) { setAssets(data.assets ?? []); setLifecycle(data.lifecycle ?? null); }
       })
       .catch((error) => { if (active) setNotice(error instanceof Error ? error.message : "Bilagorna kunde inte läsas."); });
     return () => { active = false; };
@@ -39,7 +51,7 @@ export function MessageAttachments({ messageId, expected = 0 }: { messageId: str
     </button>
     {open && <div className="message-attachment-list">
       {assets === null && !notice && <small>Hämtar säkra bilagor…</small>}
-      {assets?.length === 0 && <small>{expected ? "Bilagan analyseras eller kunde inte hämtas från källan ännu." : "Inga sparade bilagor i denna del av tråden."}</small>}
+      {assets?.length === 0 && <small>{expected ? lifecycleText(lifecycle) : "Inga sparade bilagor i denna del av tråden."}</small>}
       {assets?.map((asset) => <div className={`message-attachment ${asset.mime_type.startsWith("image/") ? "image" : ""}`} key={asset.id}>
         {asset.mime_type.startsWith("image/") && asset.previewUrl ? <img src={asset.previewUrl} alt={asset.summary || asset.title || "Bilaga"} /> : icon(asset)}<div><strong>{asset.title || asset.filename}</strong>{asset.mime_type.startsWith("audio/") && asset.previewUrl ? <audio controls preload="metadata" src={asset.previewUrl} /> : null}{asset.mime_type.startsWith("video/") && asset.previewUrl ? <video controls preload="metadata" src={asset.previewUrl}>Din webbläsare kan inte spela upp videon.</video> : null}{asset.transcript ? <details><summary>Transkribering</summary><p>{asset.transcript}</p></details> : asset.summary && <small>{asset.summary}</small>}</div>
         <button type="button" className="icon-button" title="Förhandsvisa säkert" aria-label={`Förhandsvisa ${asset.title || asset.filename}`} onClick={() => setViewer(asset)}><ExternalLink size={13} /></button>
