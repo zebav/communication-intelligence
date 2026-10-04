@@ -151,7 +151,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   }, [backgroundPaused, router]);
   return <div className="workspace">
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><Bolt size={15} /></span><span>Solvani<br />Smart Assistant</span></div>
+      <div className="brand"><span className="brand-mark"><img src="/brand/solvani-mark-dark.svg" alt="" /></span><span>Solvani<br /><small>Relationships. Organized.</small></span></div>
       <button className="command-button" onClick={() => setCommandOpen(true)}><Search size={13} /> Search or command <kbd>⌘K</kbd></button>
       <div className="nav-label">Workspace</div>
       {navigation.map((item) => item.id === "inbox" ? <div className="inbox-nav-group" key={item.id}>

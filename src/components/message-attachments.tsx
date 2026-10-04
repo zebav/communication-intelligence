@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { FileText, Image as ImageIcon, Music2, Paperclip, Play, ExternalLink } from "lucide-react";
+import { AttachmentViewer, type ViewableAttachment } from "./attachment-viewer";
 
-type Asset = { id: string; asset_kind: string; title: string; filename: string; mime_type: string; summary?: string; source_type: string; previewUrl?: string; transcript?: string | null };
+type Asset = ViewableAttachment & { asset_kind: string; title: string; filename: string; summary?: string; source_type: string; previewUrl?: string; transcript?: string | null };
 
 function icon(asset: Asset) {
   if (asset.asset_kind === "image") return <ImageIcon size={14} />;
@@ -15,6 +16,7 @@ function icon(asset: Asset) {
 export function MessageAttachments({ messageId, expected = 0 }: { messageId: string; expected?: number }) {
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [notice, setNotice] = useState("");
+  const [viewer, setViewer] = useState<Asset | null>(null);
   const [open, setOpen] = useState(expected > 0);
 
   useEffect(() => {
@@ -30,13 +32,6 @@ export function MessageAttachments({ messageId, expected = 0 }: { messageId: str
     return () => { active = false; };
   }, [assets, messageId, open]);
 
-  async function openAsset(id: string) {
-    const response = await fetch(`/api/vault/assets?assetId=${encodeURIComponent(id)}`, { cache: "no-store" });
-    const data = await response.json() as { url?: string; error?: string };
-    if (!response.ok || !data.url) { setNotice(data.error ?? "Filen kunde inte öppnas."); return; }
-    window.open(data.url, "_blank", "noopener,noreferrer");
-  }
-
   if (!expected && !open) return null;
   return <div className="message-attachments">
     <button type="button" className="message-attachment-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
@@ -47,9 +42,10 @@ export function MessageAttachments({ messageId, expected = 0 }: { messageId: str
       {assets?.length === 0 && <small>{expected ? "Bilagan analyseras eller kunde inte hämtas från källan ännu." : "Inga sparade bilagor i denna del av tråden."}</small>}
       {assets?.map((asset) => <div className={`message-attachment ${asset.mime_type.startsWith("image/") ? "image" : ""}`} key={asset.id}>
         {asset.mime_type.startsWith("image/") && asset.previewUrl ? <img src={asset.previewUrl} alt={asset.summary || asset.title || "Bilaga"} /> : icon(asset)}<div><strong>{asset.title || asset.filename}</strong>{asset.mime_type.startsWith("audio/") && asset.previewUrl ? <audio controls preload="metadata" src={asset.previewUrl} /> : null}{asset.mime_type.startsWith("video/") && asset.previewUrl ? <video controls preload="metadata" src={asset.previewUrl}>Din webbläsare kan inte spela upp videon.</video> : null}{asset.transcript ? <details><summary>Transkribering</summary><p>{asset.transcript}</p></details> : asset.summary && <small>{asset.summary}</small>}</div>
-        <button type="button" className="icon-button" title="Öppna säkert" aria-label={`Öppna ${asset.title || asset.filename}`} onClick={() => void openAsset(asset.id)}><ExternalLink size={13} /></button>
+        <button type="button" className="icon-button" title="Förhandsvisa säkert" aria-label={`Förhandsvisa ${asset.title || asset.filename}`} onClick={() => setViewer(asset)}><ExternalLink size={13} /></button>
       </div>)}
       {notice && <small className="negative">{notice}</small>}
     </div>}
+    {viewer && <AttachmentViewer asset={viewer} onClose={() => setViewer(null)} />}
   </div>;
 }
