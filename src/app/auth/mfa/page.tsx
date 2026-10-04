@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Bolt } from "lucide-react";
+import { AuthShell } from "@/components/auth-shell";
 import { MfaGate } from "@/components/mfa-gate";
 import { createClient } from "@/lib/supabase/server";
 
@@ -10,5 +10,5 @@ export default async function MfaPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  return <main className="auth-page"><section className="auth-card mfa-card"><div className="auth-brand"><span className="brand-mark"><Bolt size={15} /></span><span>Solvani</span></div><MfaGate /><small>MFA is enforced in both the application and database access policies.</small></section></main>;
+  return <AuthShell mode="mfa"><MfaGate /></AuthShell>;
 }

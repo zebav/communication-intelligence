@@ -30,3 +30,22 @@ Primary workspace: Overview, Inbox (including source channels and Sent), Calenda
 ## Accessibility and verification
 
 All new overlays require an accessible name, close action and keyboard escape behaviour. Every status needs readable text in addition to color. Visual completion is not acceptance: Gmail, Outlook, WhatsApp and Instagram attachment retrieval must be verified separately with real provider media before claiming end-to-end support.
+# Authentication — Solvani reference screen
+
+## Current problems addressed
+
+The former login used the old internal-security-dashboard treatment: a generic bolt/shield brand icon, green focus and primary action colors, `Private workspace` language and the obsolete “communication command center” positioning. It did not represent Solvani’s broader product or its future mobile experience.
+
+## Approved implementation
+
+Authentication now uses the reusable Solvani S mark and wordmark, semantic `--solvani-*` design tokens and a blue primary action. Desktop uses a quiet split brand/authentication composition; mobile switches to a dedicated single-column layout rather than compressing the split view. The form remains e-mail, password and mandatory MFA only—no public registration and no unsupported OAuth controls were introduced.
+
+## Components and assets
+
+- `SolvaniMark` and `SolvaniLogo` are shared components backed by canonical SVG files in `public/brand`.
+- `AuthShell` is shared by credential and MFA screens, so the security transition stays visually continuous.
+- `src/app/icon.svg`, `src/app/apple-icon.svg` and `public/manifest.webmanifest` use the mark without wordmark text.
+
+## Accessibility and mobile behavior
+
+Inputs retain browser/password-manager autocomplete, visible blue focus, keyboard submission and correctly associated errors. The password visibility control has an accessible label. At 860px and below, brand content becomes a compact mobile header, touch targets remain at least 48px for the primary action, and the form has no nested desktop-card layout.

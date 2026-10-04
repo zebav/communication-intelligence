@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, LoaderCircle, ShieldCheck } from "lucide-react";
+import { LoaderCircle, ShieldCheck } from "lucide-react";
 import { verifyMfa } from "@/app/auth/actions";
 import { createClient } from "@/lib/supabase/client";
 
@@ -34,7 +34,7 @@ export function MfaGate() {
       }
 
       if (factorsError) {
-        setError("MFA setup could not be loaded. Please sign in again.");
+        setError("MFA kunde inte laddas. Logga in igen.");
         setMode("verify");
         return;
       }
@@ -52,7 +52,7 @@ export function MfaGate() {
       });
       if (!active) return;
       if (enrollError || !enrollment.totp) {
-        setError("A new authenticator could not be created. Please try again.");
+        setError("En ny autentiseringsapp kunde inte skapas. Försök igen.");
         setMode("verify");
         return;
       }
@@ -65,20 +65,17 @@ export function MfaGate() {
     return () => { active = false; };
   }, [router]);
 
-  if (mode === "loading") return <div className="mfa-loading"><LoaderCircle size={22} className="spin" /><span>Preparing secure sign-in…</span></div>;
+  if (mode === "loading") return <div className="mfa-loading"><LoaderCircle size={22} className="spin" /><span>Förbereder säker inloggning…</span></div>;
 
   return <div className="mfa-content">
-    <div className="auth-icon"><KeyRound size={22} /></div>
-    <span className="eyebrow">Required security step</span>
-    <h1>{mode === "enroll" ? "Set up your authenticator" : "Verify it’s you"}</h1>
-    <p>{mode === "enroll" ? "Scan this QR code with your authenticator app, then enter its six-digit code." : "Enter the six-digit code from your authenticator app."}</p>
-    {mode === "enroll" && qrCode && <div className="mfa-qr"><Image src={qrCode} alt="QR code for authenticator enrollment" width={220} height={220} unoptimized /><details><summary>Can’t scan the QR code?</summary><code>{secret}</code></details></div>}
+    <div className="auth-heading"><span className="eyebrow">Säker inloggning</span><h1>{mode === "enroll" ? "Ställ in din autentiseringsapp" : "Verifiera att det är du"}</h1><p>{mode === "enroll" ? "Skanna QR-koden med din autentiseringsapp och ange sedan den sexsiffriga koden." : "Ange den sexsiffriga koden från din autentiseringsapp för att fortsätta."}</p></div>
+    {mode === "enroll" && qrCode && <div className="mfa-qr"><Image src={qrCode} alt="QR-kod för att ställa in autentiseringsapp" width={220} height={220} unoptimized /><details><summary>Kan du inte skanna QR-koden?</summary><code>{secret}</code></details></div>}
     <form className="auth-form" action={verifyAction}>
-      <label htmlFor="code">Six-digit code</label>
+      <label htmlFor="code">Sexsiffrig kod</label>
       <input type="hidden" name="factorId" value={factorId} />
       <input id="code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} required autoFocus={mode === "verify"} />
       {(error || verification?.error) && <div className="auth-error" role="alert">{error || verification?.error}</div>}
-      <button className="auth-submit" type="submit" disabled={pending || code.length !== 6 || !factorId}>{pending ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{pending ? "Verifying…" : "Verify and continue"}</button>
+      <button className="auth-submit" type="submit" disabled={pending || code.length !== 6 || !factorId}>{pending ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}{pending ? "Verifierar…" : "Verifiera och fortsätt"}</button>
     </form>
   </div>;
 }
