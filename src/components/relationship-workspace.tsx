@@ -24,9 +24,8 @@ export function RelationshipWorkspace() {
   }, [category]);
   useEffect(() => {
     const controller = new AbortController();
-    setData(null); setError("");
     void load(controller.signal).then((payload) => {
-      if (!controller.signal.aborted) setData(payload);
+      if (!controller.signal.aborted) { setData(payload); setError(""); }
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Relationsunderlaget kunde inte hämtas.");
     });
