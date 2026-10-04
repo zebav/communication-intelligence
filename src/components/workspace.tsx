@@ -49,7 +49,7 @@ export type View = "today" | "cases" | "inbox" | "people" | "followups" | "clean
 const navigation: { id: View; label: string; icon: typeof Inbox; group: string; count?: number }[] = [
   { id: "today", label: "Today", icon: LayoutDashboard, group: "TODAY" },
   { id: "inbox", label: "Inbox", icon: Inbox, group: "COMMUNICATION" },
-  { id: "assistant", label: "Notifications", icon: CheckCircle2, group: "COMMUNICATION" },
+  { id: "assistant", label: "Notiscenter", icon: CheckCircle2, group: "COMMUNICATION" },
   { id: "calendar", label: "Calendar", icon: Clock3, group: "ORGANIZE" },
   { id: "relationships", label: "Relationships", icon: Users, group: "ORGANIZE" },
   { id: "people", label: "Contacts", icon: Users, group: "ORGANIZE" },
