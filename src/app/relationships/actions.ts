@@ -55,7 +55,13 @@ export async function startRelationshipBackfill() {
     total_people: count ?? 0,
     cost_budget_cents: 0,
   });
-  if (error) return { error: "Historisk analys kunde inte startas." };
+  if (error) {
+    // The read API can tolerate a staggered additive migration. Let owners
+    // still create a durable legacy job during that short window rather than
+    // reporting a false failure before the progress fields are installed.
+    const legacy = await database.from("relationship_backfill_jobs").insert({ owner_id: user.id, status: "pending", cost_budget_cents: 0 });
+    if (legacy.error) return { error: "Historisk analys kunde inte startas." };
+  }
   revalidatePath("/relationships");
   return { success: true, alreadyActive: false };
 }

@@ -81,3 +81,27 @@ Before another broad UI merge:
 3. Run functionality checks for Inbox reply/scheduled send, Notification Center dismiss, Contacts edit/photo, relationship ranking/backfill, Calendar edit, document viewer, connector management and Settings navigation.
 4. Test direct `/relationships` route and the in-workspace Relationships view under MFA; test API failure/retry and empty data.
 5. Only then present a single, focused preview for owner review. No production promotion is implied by this audit.
+
+## P0 repair update — 4 October 2026
+
+The current branch now establishes the approved light semantic token system at the
+root and explicitly scopes the inverse treatment to the application shell. Shared
+surfaces, controls, form fields, badges, progress indicators and Settings panels
+use semantic tokens. Settings is now grouped into Personal, Data, Integrations,
+System and Account; Outcomes is presented inside Learning & Memory rather than as
+a top-level destination. Connections has responsive, wrap-safe rows and keeps
+provider/account/status/capability/action information readable at narrow widths.
+
+Relationship Intelligence was also checked against the real production schema
+without reading message contents. The observed state is not a zero-data result:
+a durable historical backfill job is queued with no processed people and no
+relationship snapshots. The production schema is also behind the branch's
+observability migration. The UI now reports a queued/indeterminate state rather
+than showing invented `0 / ?` progress, Operations can read the legacy job shape,
+and creation falls back safely during a staged migration. Actual historical
+ranking remains blocked until a controlled production release applies the existing
+observability migration and schedules the already-present backfill worker.
+
+Automated verification for this repair: typecheck, 544 tests, lint, build and
+diff whitespace validation. Authenticated visual review remains a release gate;
+it cannot be claimed from an unauthenticated preview.

@@ -5,7 +5,7 @@ import { RelationshipWorkspace } from "./relationship-workspace";
 
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 vi.mock("./contact-avatar", () => ({ ContactAvatar: ({ name }: { name: string }) => <span>{name}</span> }));
-vi.mock("./relationship-backfill-control", () => ({ RelationshipBackfillControl: () => <span>Historisk analys</span> }));
+vi.mock("./relationship-backfill-control", () => ({ RelationshipBackfillControl: ({ job }: { job?: { status?: string } | null }) => <span>{job?.status === "pending" ? "Köad. Solvani startar den historiska analysen i bakgrunden." : "Historisk analys"}</span> }));
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -22,5 +22,12 @@ describe("RelationshipWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
     await waitFor(() => expect(screen.getAllByText("Anna").length).toBeGreaterThan(0));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("describes a queued historical analysis without inventing unknown progress", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...payload, job: { status: "pending", processedPeople: 0, skippedPeople: 0, totalPeople: null } }), { status: 200, headers: { "content-type": "application/json" } })));
+    render(<RelationshipWorkspace />);
+    expect(await screen.findByText(/Köad\. Solvani startar den historiska analysen/i)).toBeTruthy();
+    expect(screen.queryByText(/0 av \?/i)).toBeNull();
   });
 });
