@@ -5,6 +5,22 @@ import { ContactProfileEditor } from "@/components/contact-profile-editor";
 import { ContactMergePicker } from "@/components/contact-merge-picker";
 import {ContactCalendar} from "@/components/contact-calendar";
 import { ContactPhotoEditor } from "@/components/contact-photo-editor";
+import { RelationshipFeedback } from "@/components/relationship-feedback";
+import { relationshipCategories, type RelationshipCategory } from "@/lib/relationship-intelligence";
+
+type RelationshipSnapshot = {
+  id: string;
+  category: string;
+  strength_score: number | null;
+  quality_score: number | null;
+  priority_score: number | null;
+  ranking_score: number | null;
+  trend: string | null;
+  confidence: number | null;
+  explanation: string | null;
+  missing_information: unknown;
+  snapshot_date: string;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -19,15 +35,18 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
   if (mergedInto) redirect(`/contacts/${mergedInto.target_id}`);
   const { data: mergedProfiles } = await database.from("contact_merges").select("id,source_profile").eq("owner_id", user.id).eq("target_id", personId).is("undone_at", null);
 
-  const [{ data: person }, { data: identities }, { data: conversations }, { data: memories }, { data: commitments }] = await Promise.all([
+  const [{ data: person }, { data: identities }, { data: conversations }, { data: memories }, { data: commitments }, { data: relationshipRows }] = await Promise.all([
     database.from("people").select("id,display_name,organization,relationship_type,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,manual_priority,overall_priority,first_contact_at,last_contact_at").eq("id", personId).eq("owner_id", user.id).maybeSingle(),
     database.from("identities").select("id,source,external_identifier,username,profile_url,verified_match,confidence").eq("owner_id", user.id).eq("person_id", personId).order("created_at", { ascending: true }),
     database.from("conversations").select("id,title,source,last_message_at,summary,priority_score,recommended_action").eq("owner_id", user.id).eq("person_id", personId).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100),
     database.from("memories").select("id,category,content,confidence,user_verified,created_at").eq("owner_id", user.id).eq("person_id", personId).order("created_at", { ascending: false }).limit(100),
     database.from("commitments").select("id,description,commitment_owner,due_at,status,confidence").eq("owner_id", user.id).eq("person_id", personId).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(50),
+    database.from("relationship_snapshots").select("id,category,strength_score,quality_score,priority_score,ranking_score,trend,confidence,explanation,missing_information,snapshot_date").eq("owner_id", user.id).eq("person_id", personId).order("snapshot_date", { ascending: false }).limit(100),
   ]);
 
   if (!person) notFound();
+  const latestRelationships = new Map<string, RelationshipSnapshot>();
+  for (const item of relationshipRows ?? []) if (!latestRelationships.has(item.category)) latestRelationships.set(item.category, item);
   const priority = Number(person.manual_priority ?? person.overall_priority ?? 0);
   return <main className="page contact-profile-page" style={{ maxWidth: 980, margin: "0 auto" }}>
     <div className="contact-profile-toolbar"><BackToWorkspaceButton /><ContactProfileEditor person={person} /></div>
@@ -44,6 +63,12 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
 
       <ContactCalendar personId={personId} />
       <ContactMergePicker personId={personId} name={person.display_name ?? "kontakten"} />
+
+      <div className="section-title">Relationship Intelligence</div>
+      {latestRelationships.size === 0 ? <div className="empty-card">Ingen kvalificerad relationsbedömning ännu. När relevant kommunikation analyseras byggs detta från bevis och din bekräftade kontext.</div> : <div className="relationship-profile-grid">{[...latestRelationships.values()].map((snapshot) => {
+        const category = relationshipCategories.includes(snapshot.category as RelationshipCategory) ? snapshot.category as RelationshipCategory : "other";
+        return <section className="card relationship-profile-card" key={snapshot.id}><div className="card-top"><span>{category.replaceAll("_", " ")}</span><span className="score">{Math.round(Number(snapshot.ranking_score))}</span></div><div className="relationship-metrics"><span>Strength <b>{Math.round(Number(snapshot.strength_score))}</b></span><span>Quality <b>{Math.round(Number(snapshot.quality_score))}</b></span><span>Priority <b>{Math.round(Number(snapshot.priority_score))}</b></span><span>Confidence <b>{Math.round(Number(snapshot.confidence) * 100)}%</b></span></div><p>{snapshot.explanation}</p>{Array.isArray(snapshot.missing_information) && snapshot.missing_information.length > 0 && <small className="muted">Missing: {snapshot.missing_information.join(" · ")}</small>}<RelationshipFeedback personId={personId} category={category} /></section>;
+      })}</div>}
 
       <div className="section-title">Conversation history</div>{(conversations ?? []).length === 0 ? <div className="empty-card">No conversations linked to this person yet.</div> : <div className="list">{conversations?.map((conversation) => <div className="list-row" key={conversation.id}><div className="avatar">{String(conversation.source).slice(0, 2).toUpperCase()}</div><div><strong>{conversation.title || "Untitled conversation"}</strong><small>{conversation.source}</small></div><div><span>{conversation.summary || "No summary yet."}</span><small>{conversation.last_message_at ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(conversation.last_message_at)) : "No message time"}</small></div><div>{conversation.priority_score != null && <span className="score">{Number(conversation.priority_score)}</span>}</div></div>)}</div>}
 

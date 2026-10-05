@@ -159,13 +159,13 @@ export async function ingestTrustedMediaAttachments(database: SupabaseClient, jo
 }
 
 export async function processEmailMediaJob(database: SupabaseClient, job: MediaJob) {
-  const { data: claimed } = await database.from("vault_ingestion_jobs").update({ state: "processing", attempts: job.attempts + 1, updated_at: new Date().toISOString() }).eq("id", job.id).eq("owner_id", job.owner_id).eq("state", "pending").select("id").maybeSingle();
+  const { data: claimed } = await database.from("vault_ingestion_jobs").update({ state: "processing", attempts: job.attempts + 1, retrieval_status: "fetching", analysis_status: "processing", updated_at: new Date().toISOString() }).eq("id", job.id).eq("owner_id", job.owner_id).eq("state", "pending").select("id").maybeSingle();
   if (!claimed) return { processed: false, reason: "already_claimed" };
   try {
     const token = await loadConnectionToken(database, job);
     const attachments = job.provider === microsoftGraphConnector.id ? await outlookAttachments(token, job.provider_message_id) : await gmailAttachments(token, job.provider_message_id);
     const outcome = await ingestTrustedMediaAttachments(database, job, attachments);
-    await database.from("vault_ingestion_jobs").update({ state: "done", last_error_code: null, failed_stage: null, error_details: {}, next_retry_at: null, completed_at: new Date().toISOString(), dead_lettered_at: null, updated_at: new Date().toISOString(), metadata: { ...metadata(job.metadata), stored_assets: outcome.assetIds, result: outcome.state } }).eq("id", job.id).eq("owner_id", job.owner_id);
+    await database.from("vault_ingestion_jobs").update({ state: "done", retrieval_status: "available", analysis_status: outcome.state === "ready" ? "completed" : "blocked", vault_status: outcome.assetCount > 0 ? "retained" : "rejected", last_error_code: null, failed_stage: null, error_details: {}, next_retry_at: null, completed_at: new Date().toISOString(), dead_lettered_at: null, updated_at: new Date().toISOString(), metadata: { ...metadata(job.metadata), stored_assets: outcome.assetIds, result: outcome.state } }).eq("id", job.id).eq("owner_id", job.owner_id);
     return { processed: true, state: outcome.state, assetCount: outcome.assetCount };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "media_worker_failed";

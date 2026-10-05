@@ -6,6 +6,7 @@ import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { storeVaultFile } from "@/lib/vault/vault-service";
 
 export const maxDuration = 60;
 
@@ -131,6 +132,32 @@ async function loadMicrosoftContacts(token: string, cursor?: string) {
     });
   }
   return { contacts: items, cursor: data["@odata.nextLink"] ?? null };
+}
+
+/** Contact photos are optional Graph data. A missing image or an account that
+ * lacks the additional photo permission must never make address-book sync fail. */
+async function importMicrosoftContactPhoto(db: ReturnType<typeof createAdminClient>, input: { ownerId: string; personId: string; contactId: string; token: string }) {
+  const existing = await db.from("person_media").select("id").eq("owner_id", input.ownerId).eq("person_id", input.personId).eq("role", "avatar").maybeSingle();
+  if (existing.data) return "existing" as const;
+  const response = await fetch(`https://graph.microsoft.com/v1.0/me/contacts/${encodeURIComponent(input.contactId)}/photo/$value`, {
+    headers: { authorization: `Bearer ${input.token}` }, signal: AbortSignal.timeout(8_000),
+  });
+  if (response.status === 404 || response.status === 403) return "unavailable" as const;
+  if (!response.ok) return "unavailable" as const;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 10 * 1024 * 1024) return "unavailable" as const;
+  const contentType = response.headers.get("content-type")?.split(";")[0].toLowerCase() ?? "image/jpeg";
+  if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(contentType)) return "unavailable" as const;
+  const asset = await storeVaultFile({
+    ownerId: input.ownerId, bytes, filename: `outlook-contact-${input.contactId}.${contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg"}`,
+    mimeType: contentType, sourceType: "other", sourcePersonId: input.personId, forceKind: "person_image", forceSave: true,
+  });
+  if (!asset || "skipped" in asset) return "unavailable" as const;
+  await db.from("person_media").upsert({
+    owner_id: input.ownerId, person_id: input.personId, asset_id: asset.id, role: "avatar", match_method: "contact_source", confidence: 1, user_verified: false,
+  }, { onConflict: "owner_id,person_id,asset_id" });
+  await db.from("people").update({ avatar_asset_id: asset.id, updated_at: new Date().toISOString() }).eq("owner_id", input.ownerId).eq("id", input.personId);
+  return "imported" as const;
 }
 
 async function loadGoogleContacts(token: string, cursor?: string) {
@@ -318,6 +345,12 @@ export async function POST(request: NextRequest) {
         );
         const personId = resolved.personId;
         const identityConflict = resolved.identityConflict;
+        // A Graph photo is only a visual reference from the matching external
+        // contact. It remains in the owner-scoped vault and can be replaced by
+        // the owner from the Contact profile at any time.
+        if (connection.provider === "microsoft-graph" && !identityConflict) {
+          await importMicrosoftContactPhoto(db, { ownerId: user.id, personId, contactId: contact.id, token: authorized.token }).catch(() => "unavailable");
+        }
         const values = {
           owner_id: user.id,
           connection_id: connection.id,

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createMobileClient } from "@/lib/supabase/mobile";
 import { logOperation } from "@/lib/observability";
 import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, survivesLowerPrioritySender, type Evidence, type Task } from "@/lib/assistant/model";
-import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient } from "@/lib/assistant/repository";
+import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient, type NotificationPeriod } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
 import { chooseAdvisorConversation } from "@/lib/assistant/follow-up";
@@ -44,9 +44,11 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
   try {
     const { db, owner } = await session(request);
-    const cursor = z.coerce.number().int().min(0).max(100000).parse(new URL(request.url).searchParams.get("cursor") ?? 0);
+    const url = new URL(request.url);
+    const cursor = z.coerce.number().int().min(0).max(100000).parse(url.searchParams.get("cursor") ?? 0);
+    const period = z.enum(["today", "yesterday", "seven_days", "recovery"]).catch("seven_days").parse(url.searchParams.get("period")) as NotificationPeriod;
     const [page, tasks, feedback, calendar, relevanceRules, ingestion, suggestedLearning, awaitingAnalysis] = await Promise.all([
-      readCandidates(db, owner, String(cursor)),
+      readCandidates(db, owner, String(cursor), period),
       db.from("assistant_tasks").select("*").eq("owner_id", owner).order("updated_at", { ascending: false }).limit(120),
       db.from("assistant_task_feedback").select("category").eq("owner_id", owner).order("created_at", { ascending: false }).limit(250),
       db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle(),
@@ -118,7 +120,7 @@ export async function GET(request: Request) {
       learningSuggestions: suggestedLearning.error ? 0 : suggestedLearning.count ?? 0,
     };
     logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { messages_scanned: page.messages.length, candidates: candidates.length, notes: notes.length, tasks: stored.length } });
-    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations });
+    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, period: page.period, periodLabel: page.periodLabel, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations });
   } catch (e) {
     logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: e });
     return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503);

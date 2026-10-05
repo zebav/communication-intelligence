@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
-export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
+export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; retrievalPending: number; retrievalFailed: number; analysisPending: number; vaultRetained: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
 export async function readDataIngestionHealth(database: SupabaseClient, ownerId?: string): Promise<IngestionHealth> {
-  let query = database.from("vault_ingestion_jobs").select("connection_id,state,created_at").in("state", ["pending", "processing", "failed", "dead_letter"]).order("created_at", { ascending: true }).limit(200);
+  let query = database.from("vault_ingestion_jobs").select("connection_id,state,created_at,retrieval_status,analysis_status,vault_status").order("created_at", { ascending: true }).limit(200);
   if (ownerId) query = query.eq("owner_id", ownerId);
   const { data, error } = await query;
   if (error) throw new Error("Media queue could not be read.");
@@ -34,5 +34,5 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
       };
     });
   }
-  return { pendingMedia: pending.length, failedMedia: failed.length, deadLetterMedia: deadLetter.length, oldestPendingAt: pending[0]?.created_at ?? null, affectedConnectionIds: [...new Set([...failed, ...deadLetter].map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))], connections };
+  return { pendingMedia: pending.length, failedMedia: failed.length, deadLetterMedia: deadLetter.length, retrievalPending: rows.filter((item) => item.retrieval_status === "queued" || item.retrieval_status === "fetching").length, retrievalFailed: rows.filter((item) => item.retrieval_status === "failed" || item.retrieval_status === "expired").length, analysisPending: rows.filter((item) => item.analysis_status === "queued" || item.analysis_status === "processing").length, vaultRetained: rows.filter((item) => item.vault_status === "retained").length, oldestPendingAt: pending[0]?.created_at ?? null, affectedConnectionIds: [...new Set([...failed, ...deadLetter].map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))], connections };
 }

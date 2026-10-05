@@ -97,25 +97,49 @@ export async function readEvidence(db: SupabaseClient, owner: string, id: string
   if (error || !data) throw new Error("Originalmeddelandet kunde inte läsas. Inget har skickats.");
   return evidenceFromRow(data);
 }
-export async function readCandidates(db: SupabaseClient, owner: string, before?: string) {
+export type NotificationPeriod = "today" | "yesterday" | "seven_days" | "recovery";
+
+function stockholmDayStart(daysAgo: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const value = (name: string) => parts.find((part) => part.type === name)?.value ?? "01";
+  // Noon UTC avoids daylight-saving transitions when calculating the date.
+  const day = new Date(`${value("year")}-${value("month")}-${value("day")}T12:00:00.000Z`);
+  day.setUTCDate(day.getUTCDate() - daysAgo);
+  const year = day.getUTCFullYear(), month = String(day.getUTCMonth() + 1).padStart(2, "0"), date = String(day.getUTCDate()).padStart(2, "0");
+  // Use Stockholm's actual UTC offset for the requested date. A fixed +02:00
+  // made the "Idag" and "Igår" filters drift by an hour during winter time.
+  const offsetParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Stockholm",
+    timeZoneName: "longOffset",
+  }).formatToParts(new Date(`${year}-${month}-${date}T12:00:00.000Z`));
+  const offset = offsetParts.find((part) => part.type === "timeZoneName")?.value?.replace("GMT", "") || "+01:00";
+  return `${year}-${month}-${date}T00:00:00${offset}`;
+}
+
+function periodRange(period: NotificationPeriod) {
+  if (period === "today") return { start: stockholmDayStart(0), end: null, label: "Idag" };
+  if (period === "yesterday") return { start: stockholmDayStart(1), end: stockholmDayStart(0), label: "Igår" };
+  if (period === "seven_days") return { start: new Date(Date.now() - 7 * 86400000).toISOString(), end: null, label: "Senaste 7 dagarna" };
+  return { start: new Date(Date.now() - 90 * 86400000).toISOString(), end: null, label: "Äldre, fortfarande öppna" };
+}
+
+export async function readCandidates(db: SupabaseClient, owner: string, before?: string, period: NotificationPeriod = "seven_days") {
   // The first notification-centre response is intentionally bounded. Loading
   // hundreds of rich messages (including full email bodies) made the decision
   // screen slow even before a person could act on the first card. Older items
   // remain available through the cursor and are still ranked by priority.
-  // A month was too short for a real decision queue: important account,
-  // legal and payout notices can remain unanswered for longer than that.
-  // Keep the payload bounded, but give the ranking model a useful recovery
-  // window for older, still-open messages.
+  // Older, still-open items are intentionally available only through the
+  // explicit recovery view. The default must keep the decision queue fresh.
   const pageSize = 60;
   const offset = Math.max(0, Number(before) || 0);
   const query = () => db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in");
-  const recoveryWindowDays = 90;
-  const recoveryWindowStart = new Date(Date.now() - recoveryWindowDays * 86400000).toISOString();
+  const range = periodRange(period);
+  const applyRange = <T extends { gte: (column: string, value: string) => T; lt: (column: string, value: string) => T }>(query: T) => range.end ? query.gte("sent_at", range.start).lt("sent_at", range.end) : query.gte("sent_at", range.start);
   const [email, other] = await Promise.all([
-    db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email")
-      .gte("sent_at", recoveryWindowStart).order("importance_score", { ascending: false, nullsFirst: false })
+    applyRange(db.from("messages").select(fields).eq("owner_id", owner).eq("direction", "in").eq("source", "email"))
+      .order("importance_score", { ascending: false, nullsFirst: false })
       .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
-    query().neq("source", "email").gte("sent_at", recoveryWindowStart)
+    applyRange(query().neq("source", "email"))
       .order("importance_score", { ascending: false, nullsFirst: false })
       .order("sent_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + pageSize - 1),
   ]);
@@ -134,7 +158,9 @@ export async function readCandidates(db: SupabaseClient, owner: string, before?:
     messages: rows.map(evidenceFromRow).map((evidence) => ({ ...evidence, body: evidence.body.slice(0, 1_200) })),
     next: email.data?.length === pageSize || other.data?.length === pageSize ? String(offset + pageSize) : null,
     scannedBySource: { email: email.data?.length ?? 0, messaging: other.data?.length ?? 0 },
-    emailWindowDays: recoveryWindowDays,
+    emailWindowDays: period === "recovery" ? 90 : period === "seven_days" ? 7 : 1,
+    period,
+    periodLabel: range.label,
   };
 }
 export async function readTask(db: SupabaseClient, owner: string, id: string): Promise<Task> {
