@@ -22,6 +22,23 @@ export type AssistantSnapshot = {
   operations?: { pendingMedia: number; failedMedia: number; actionRequiredConnections: number; awaitingAnalysis: number; learningSuggestions: number; unreadNotifications?: number };
 };
 type Api = (body: Record<string, unknown>) => Promise<void>;
+
+/**
+ * Decisions remain owned by the existing approval pipeline. This label only
+ * explains which bounded capability prepared the recommendation; it never
+ * grants that capability authority to send, book, or perform an external
+ * action by itself.
+ */
+function decisionCapability(kind: TaskKind) {
+  return ({
+    reply: "Kommunikationsintelligens",
+    forward: "Kommunikationsintelligens",
+    follow_up: "Kommunikationsintelligens",
+    meeting: "Kalender & planering",
+    website: "Säker webbuppgift",
+  } as const)[kind];
+}
+
 export function AssistantWorkspace({ people, initialTaskId, onTaskChanged }: { people: CommunicationPersonOption[]; initialTaskId?: string; onTaskChanged?: (task: Task) => void }) {
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState(""), [period, setPeriod] = useState<"today" | "yesterday" | "seven_days" | "recovery">("seven_days");
@@ -148,7 +165,7 @@ function TaskDetail({ task, people, busy, act, snapshot, onRefresh }: { task: Ta
     <div className="assistant-contact-actions"><PersonLink personId={e.personId ?? undefined} name={e.personName} />{e.personId && <a className="btn" href={`/contacts/${encodeURIComponent(e.personId)}`}>Redigera kontakt</a>}</div><p>{e.source} · {e.account}</p>
     <section className={`approval-brief approval-brief-${brief.state}`} aria-label="Godkännandesteg">
       <div className="approval-brief-heading"><div><span>Approval-to-Execution</span><h3>{brief.state === "ready" ? "Redo för ditt godkännande" : brief.state === "blocked" ? "Planen är spärrad" : "Planen behöver granskas"}</h3></div><span className="approval-state">{brief.state === "ready" ? "Redo" : brief.state === "blocked" ? "Spärrad" : "Granska"}</span></div>
-      <div className="approval-brief-grid"><div><span>Ärendet</span><p>{decision.summary}</p></div><div><span>Det systemet gör</span><p>{brief.action}</p></div><div><span>Mål</span><p>{brief.destination}</p></div></div>
+      <div className="approval-brief-grid"><div><span>Ärendet</span><p>{decision.summary}</p></div><div><span>Det systemet gör</span><p>{brief.action}</p></div><div><span>Ansvarig kapacitet</span><p>{decisionCapability(task.kind)}</p></div><div><span>Mål</span><p>{brief.destination}</p></div></div>
       <p className="approval-brief-guard">{brief.guard}</p>
       <details className="decision-card-details"><summary>Visa bakgrund och full effekt av beslutet</summary><div className="decision-card"><div className="decision-card-section"><span>Varför detta är viktigt</span><p>{decision.whyImportant}</p></div><div className="decision-card-section"><span>Föreslagen åtgärd</span><p>{decision.proposedAction}</p>{decision.targetUrl && <a href={decision.targetUrl} target="_blank" rel="noreferrer">{decision.targetUrl}</a>}</div><div className="decision-card-section approval-outcome"><span>Detta händer när du godkänner</span><p>{decision.approvalOutcome}</p></div></div></details>
     </section>
