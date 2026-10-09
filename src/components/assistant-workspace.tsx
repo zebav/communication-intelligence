@@ -17,7 +17,7 @@ export type AssistantSnapshot = {
   notes?: { messageId: string; title: string; personName: string; source: string; account: string; priority: number; unread?: boolean; summary: string }[];
   reviewMessages: { id: string; title: string; person: string }[];
   next: string | null; scanned: number; scannedBySource?: { email: number; messaging: number }; emailWindowDays?: number; period?: "today" | "yesterday" | "seven_days" | "recovery"; periodLabel?: string; tasksLimited: boolean;
-  feedback: { category: string }[]; timezone: string | null; executionEnabled: boolean;
+  timezone: string | null; executionEnabled: boolean;
   browserReadiness?: BrowserReadiness;
   operations?: { pendingMedia: number; failedMedia: number; actionRequiredConnections: number; awaitingAnalysis: number; learningSuggestions: number; unreadNotifications?: number };
 };

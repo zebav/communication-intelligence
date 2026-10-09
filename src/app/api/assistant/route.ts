@@ -55,10 +55,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const cursor = z.coerce.number().int().min(0).max(100000).parse(url.searchParams.get("cursor") ?? 0);
     const period = z.enum(["today", "yesterday", "seven_days", "recovery"]).catch("seven_days").parse(url.searchParams.get("period")) as NotificationPeriod;
-    const [page, tasks, feedback, calendar, relevanceRules, ingestion, suggestedLearning, awaitingAnalysis, notifications] = await Promise.all([
+    const [page, tasks, calendar, relevanceRules, ingestion, suggestedLearning, awaitingAnalysis, notifications] = await Promise.all([
       measureServerTiming(timings, "candidates", () => readCandidates(db, owner, String(cursor), period)),
       measureServerTiming(timings, "tasks", () => db.from("assistant_tasks").select("*").eq("owner_id", owner).order("updated_at", { ascending: false }).limit(120)),
-      measureServerTiming(timings, "feedback", () => db.from("assistant_task_feedback").select("category").eq("owner_id", owner).order("created_at", { ascending: false }).limit(250)),
       measureServerTiming(timings, "calendar", () => db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle()),
       measureServerTiming(timings, "rules", () => db.from("learning_signals").select("person_id,source,evidence").eq("owner_id", owner).eq("signal_type", "category_corrected").eq("status", "approved").limit(250)),
       measureServerTiming(timings, "ingestion", () => readDataIngestionHealth(db, owner).catch(() => null)),
@@ -66,7 +65,7 @@ export async function GET(request: Request) {
       measureServerTiming(timings, "pending", () => db.from("messages").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("direction", "in").is("processed_at", null)),
       measureServerTiming(timings, "notifications", () => db.from("assistant_notifications").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("state", "unread")),
     ]);
-    if (tasks.error || feedback.error || relevanceRules.error) throw new Error("Notiscentrets databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
+    if (tasks.error || relevanceRules.error) throw new Error("Notiscentrets databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
     // Saved tasks retain their complete, auditable original. Candidate rows are
     // deliberately compact previews and must never replace that evidence.
     const stored = tasks.data as Task[];
@@ -130,7 +129,7 @@ export async function GET(request: Request) {
       unreadNotifications: notifications.error ? 0 : notifications.count ?? 0,
     };
     logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { messages_scanned: page.messages.length, candidates: candidates.length, notes: notes.length, tasks: stored.length } });
-    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, period: page.period, periodLabel: page.periodLabel, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations }, 200, timings);
+    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, period: page.period, periodLabel: page.periodLabel, tasksLimited: stored.length === 120, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations }, 200, timings);
   } catch (e) {
     logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: e });
     return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503, timings);

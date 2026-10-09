@@ -56,7 +56,7 @@ function mount(enabled = true, kind: "reply" | "meeting" | "website" = "reply") 
   const evidence = kind === "website" ? websiteEvidence : e;
   const snapshot: AssistantSnapshot = {
     tasks: [{ id: "task", message_id: "m", kind, status: "ready", revision: 2, plan: makePlan(evidence, kind), result: {}, created_at: e.sentAt, updated_at: e.sentAt }],
-    candidates: [], reviewMessages: [], next: null, scanned: 100, tasksLimited: false, feedback: [],
+    candidates: [], reviewMessages: [], next: null, scanned: 100, tasksLimited: false,
     timezone: "Europe/Stockholm", executionEnabled: enabled,
     browserReadiness: managedReadiness,
   };
@@ -68,7 +68,7 @@ function mount(enabled = true, kind: "reply" | "meeting" | "website" = "reply") 
 function mountCandidate() {
   const snapshot: AssistantSnapshot = {
     tasks: [], candidates: [{ messageId: e.messageId, kind: "reply", plan: makePlan(e, "reply") }],
-    reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+    reviewMessages: [], next: null, scanned: 1, tasksLimited: false,
     timezone: "Europe/Stockholm", executionEnabled: false,
   };
   const act = vi.fn(async () => undefined);
@@ -80,7 +80,7 @@ describe("assistant review interface", () => {
   it("reports a persisted decision change to the surrounding workspace", async () => {
     const task: Task = { id: "task", message_id: "m", kind: "reply", status: "decision", revision: 2, plan: makePlan(e, "reply"), result: {}, created_at: e.sentAt, updated_at: e.sentAt };
     const snapshot: AssistantSnapshot = {
-      tasks: [task], candidates: [], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+      tasks: [task], candidates: [], reviewMessages: [], next: null, scanned: 1, tasksLimited: false,
       timezone: "Europe/Stockholm", executionEnabled: false,
     };
     const changed = vi.fn();
@@ -106,7 +106,7 @@ describe("assistant review interface", () => {
   it("shares a dismissed candidate's durable status with the surrounding workspace", async () => {
     const task: Task = { id: "dismissed-task", message_id: "m", kind: "reply", status: "dismissed", revision: 2, plan: makePlan(e, "reply"), result: {}, created_at: e.sentAt, updated_at: e.sentAt };
     const snapshot: AssistantSnapshot = {
-      tasks: [], candidates: [{ messageId: e.messageId, kind: "reply", plan: makePlan(e, "reply") }], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+      tasks: [], candidates: [{ messageId: e.messageId, kind: "reply", plan: makePlan(e, "reply") }], reviewMessages: [], next: null, scanned: 1, tasksLimited: false,
       timezone: "Europe/Stockholm", executionEnabled: false,
     };
     const changed = vi.fn();
@@ -175,7 +175,7 @@ describe("assistant review interface", () => {
     };
     const snapshot: AssistantSnapshot = {
       tasks: [{ id: "direct-task", message_id: "m", kind: "reply", status: "ready", revision: 2, plan: makePlan(direct, "reply"), result: {}, created_at: direct.sentAt, updated_at: direct.sentAt }],
-      candidates: [], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+      candidates: [], reviewMessages: [], next: null, scanned: 1, tasksLimited: false,
       timezone: "Europe/Stockholm", executionEnabled: true,
     };
     render(<AssistantBoard snapshot={snapshot} people={[]} selected="direct-task" onSelect={() => undefined} act={vi.fn(async () => undefined)} busy={false} onMore={() => undefined} onRefresh={async () => undefined} />);
