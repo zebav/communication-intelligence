@@ -8,6 +8,7 @@ import {
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { logOperation } from "@/lib/observability";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ownerAgentForAutomation } from "@/lib/agents/registry";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -38,15 +39,15 @@ export async function GET(request: NextRequest) {
       });
       if (response.ok) {
         await completeAutomationJob(database, job, { status: "completed", httpStatus: response.status });
-        return { operation: job.operation, state: "completed" as const };
+        return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: "completed" as const };
       }
       const status = retryStatusFor(job);
       await completeAutomationJob(database, job, { status, errorCode: `worker_http_${response.status}`, httpStatus: response.status });
-      return { operation: job.operation, state: status };
+      return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: status };
     } catch {
       const status = retryStatusFor(job);
       await completeAutomationJob(database, job, { status, errorCode: "worker_unavailable" });
-      return { operation: job.operation, state: status };
+      return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: status };
     }
   }));
 
