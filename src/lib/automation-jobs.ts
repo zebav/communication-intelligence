@@ -31,6 +31,7 @@ type AutomationJob = {
 
 const MAX_ATTEMPTS = 3;
 const COALESCE_WINDOW_MS = 5 * 60_000;
+const STALE_RUNNING_MS = 3 * 60_000;
 
 export function newTraceId() {
   return randomUUID();
@@ -65,6 +66,46 @@ export async function enqueueOwnerMaintenance(
   });
   if (error) throw error;
   return { traceId, queued: rows.length };
+}
+
+/**
+ * A serverless worker can end after atomically claiming a job but before it
+ * records a result. Reclaim only work that has outlived the function budget;
+ * the same bounded retry policy prevents an invisible infinite loop.
+ */
+export async function reclaimStaleAutomationJobs(database: SupabaseClient, now = new Date()) {
+  const staleBefore = new Date(now.getTime() - STALE_RUNNING_MS).toISOString();
+  const { data, error } = await database
+    .from("automation_jobs")
+    .select("id,attempts")
+    .eq("status", "running")
+    .lt("updated_at", staleBefore)
+    .limit(40);
+  if (error) throw error;
+
+  let retrying = 0;
+  let failed = 0;
+  for (const candidate of data ?? []) {
+    const attempts = Number(candidate.attempts ?? 0);
+    const nextStatus = staleAutomationStatusFor(attempts);
+    const exhausted = nextStatus === "failed";
+    const { error: updateError } = await database
+      .from("automation_jobs")
+      .update({
+        status: nextStatus,
+        available_at: now.toISOString(),
+        completed_at: exhausted ? now.toISOString() : null,
+        last_error_code: "worker_timeout",
+        updated_at: now.toISOString(),
+      })
+      .eq("id", candidate.id)
+      .eq("status", "running")
+      .lt("updated_at", staleBefore);
+    if (updateError) throw updateError;
+    if (exhausted) failed += 1;
+    else retrying += 1;
+  }
+  return { retrying, failed };
 }
 
 export async function claimAutomationJobs(database: SupabaseClient, limit = 8): Promise<AutomationJob[]> {
@@ -125,6 +166,10 @@ export async function completeAutomationJob(
 
 export function retryStatusFor(job: AutomationJob) {
   return job.attempts >= MAX_ATTEMPTS ? "failed" as const : "retrying" as const;
+}
+
+export function staleAutomationStatusFor(attempts: number) {
+  return attempts >= MAX_ATTEMPTS ? "failed" as const : "retrying" as const;
 }
 
 export const automationOperationPath: Record<AutomationOperation, string> = {

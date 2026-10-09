@@ -3,6 +3,7 @@ import {
   automationOperationPath,
   claimAutomationJobs,
   completeAutomationJob,
+  reclaimStaleAutomationJobs,
   retryStatusFor,
 } from "@/lib/automation-jobs";
 import { isAuthorizedCron } from "@/lib/cron-auth";
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest) {
   }
 
   const database = createAdminClient();
+  const reclaimed = await reclaimStaleAutomationJobs(database);
   const jobs = await claimAutomationJobs(database);
   const results = await Promise.all(jobs.map(async (job) => {
     try {
@@ -58,7 +60,7 @@ export async function GET(request: NextRequest) {
     outcome: failed ? "failed" : "completed",
     durationMs: Date.now() - startedAt,
     requestId: request.headers.get("x-vercel-id"),
-    counts: { claimed: jobs.length, completed: results.filter((result) => result.state === "completed").length, retrying: results.filter((result) => result.state === "retrying").length, failed },
+    counts: { claimed: jobs.length, completed: results.filter((result) => result.state === "completed").length, retrying: results.filter((result) => result.state === "retrying").length, failed, recovered_stale: reclaimed.retrying, stale_failed: reclaimed.failed },
   });
-  return NextResponse.json({ ok: true, claimed: jobs.length, results }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, claimed: jobs.length, recovered: reclaimed, results }, { headers: { "Cache-Control": "no-store" } });
 }

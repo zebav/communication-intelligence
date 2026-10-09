@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTOMATION_OPERATIONS, automationOperationPath, retryStatusFor, traceIdFromHeaders } from "./automation-jobs";
+import { AUTOMATION_OPERATIONS, automationOperationPath, retryStatusFor, staleAutomationStatusFor, traceIdFromHeaders } from "./automation-jobs";
 
 describe("automation job safety", () => {
   it("accepts only a well-formed propagated trace id", () => {
@@ -11,6 +11,12 @@ describe("automation job safety", () => {
   it("does not retry a poisoned job indefinitely", () => {
     expect(retryStatusFor({ attempts: 1 } as Parameters<typeof retryStatusFor>[0])).toBe("retrying");
     expect(retryStatusFor({ attempts: 3 } as Parameters<typeof retryStatusFor>[0])).toBe("failed");
+  });
+
+  it("recovers an interrupted worker only within the bounded retry policy", () => {
+    expect(staleAutomationStatusFor(1)).toBe("retrying");
+    expect(staleAutomationStatusFor(2)).toBe("retrying");
+    expect(staleAutomationStatusFor(3)).toBe("failed");
   });
 
   it("routes every queued operation to a bounded existing worker", () => {
