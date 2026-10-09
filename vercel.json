@@ -43,6 +43,10 @@
     {
       "path": "/api/cron/automation-dispatch",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/autonomous-learning",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

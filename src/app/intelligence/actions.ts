@@ -14,12 +14,12 @@ export async function reviewLearningSignal(input: { signalId: string; decision: 
   if (!user) return { error: "Your session has expired. Sign in again." };
   const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return { error: "Two-factor authentication is required." };
-  const { data: signal } = await supabase.from("learning_signals").select("id,status,signal_type,proposed_rule").eq("id", parsed.data.signalId).eq("owner_id", user.id).maybeSingle();
+  const { data: signal } = await supabase.from("learning_signals").select("id,status,signal_type,proposed_rule,correction_count,version").eq("id", parsed.data.signalId).eq("owner_id", user.id).maybeSingle();
   if (!signal) return { error: "This learning signal is no longer available." };
   const nextStatus = parsed.data.decision === "approve" ? "approved" : "dismissed";
   const { error } = parsed.data.decision === "delete"
     ? await supabase.from("learning_signals").delete().eq("id", signal.id).eq("owner_id", user.id)
-    : await supabase.from("learning_signals").update({ status: nextStatus, proposed_rule: parsed.data.proposedRule ?? signal.proposed_rule, updated_at: new Date().toISOString() }).eq("id", signal.id).eq("owner_id", user.id);
+    : await supabase.from("learning_signals").update({ status: nextStatus, learning_mode: parsed.data.decision === "approve" ? "review_required" : "blocked", proposed_rule: parsed.data.proposedRule ?? signal.proposed_rule, correction_count: parsed.data.proposedRule && parsed.data.proposedRule !== signal.proposed_rule ? Number(signal.correction_count ?? 0) + 1 : Number(signal.correction_count ?? 0), version: Number(signal.version ?? 1) + 1, last_validated_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", signal.id).eq("owner_id", user.id);
   if (error) return { error: "The learning decision could not be saved." };
   const auditAction = { approve: "learning.approved", dismiss: "learning.dismissed", delete: "learning.deleted" }[parsed.data.decision];
   await supabase.from("audit_logs").insert({ owner_id: user.id, actor_id: user.id, action: auditAction, object_type: "learning_signal", object_id: signal.id, source: "email", actor_type: "user", previous_value: { status: signal.status }, new_value: { decision: parsed.data.decision, signal_type: signal.signal_type } });

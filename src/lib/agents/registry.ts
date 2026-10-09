@@ -70,6 +70,7 @@ export function mayAgentUseService(agentId: AgentId, serviceId: ServiceId, reque
 
 /** Maps existing durable jobs to their specialist owner without changing how a job executes. */
 export function ownerAgentForAutomation(operation: AutomationOperation): AgentId {
+  if (operation === "autonomous_learning") return "system_orchestrator";
   if (operation === "relationship_backfill") return "relationship_intelligence";
   if (operation === "calendar_sync") return "calendar_scheduling";
   if (operation === "vault_ingestion") return "document_knowledge";
