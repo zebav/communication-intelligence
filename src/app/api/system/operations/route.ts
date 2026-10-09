@@ -42,13 +42,14 @@ export async function GET() {
   const { data: assurance } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
   if (assurance?.currentLevel !== "aal2") return NextResponse.json({ error: "Tvåstegsverifiering krävs." }, { status: 403 });
 
-  const [connections, media, scheduled, calendar, browser, relationshipResult] = await Promise.all([
+  const [connections, media, scheduled, calendar, browser, relationshipResult, automation] = await Promise.all([
     db.from("connections").select("provider,status,health_status,last_sync_at,updated_at,account_identifier,account_name").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(40),
     db.from("vault_ingestion_jobs").select("state,attempts,created_at,updated_at,last_error_code").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80),
     db.from("scheduled_messages").select("status,scheduled_for,updated_at,last_error").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80),
     db.from("calendar_sync_jobs").select("last_attempt_at,last_success_at,last_error,next_run_at").eq("owner_id", user.id).order("last_attempt_at", { ascending: false }).limit(40),
     db.from("assistant_browser_agent_runs").select("status,created_at,updated_at").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80),
     db.from("relationship_backfill_jobs").select("status,current_stage,processed_people,skipped_people,total_people,error,updated_at").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(3),
+    db.from("automation_jobs").select("operation,status,attempts,updated_at,last_error_code,trace_id").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80),
   ]);
 
   // Keep Operations truthful while an additive relationship-progress migration
@@ -63,7 +64,7 @@ export async function GET() {
       relationshipUnavailable = false;
     }
   }
-  const unavailable = [media, scheduled, calendar, browser].filter((result) => result.error).length + Number(relationshipUnavailable);
+  const unavailable = [media, scheduled, calendar, browser, automation].filter((result) => result.error).length + Number(relationshipUnavailable);
   return NextResponse.json({
     connections: {
       total: connections.data?.length ?? 0,
@@ -86,6 +87,14 @@ export async function GET() {
     relationships: {
       states: countByState((relationshipRows ?? []) as Row[], "status"),
       latest: (relationshipRows ?? [])[0] ?? null,
+    },
+    automation: {
+      states: countByState((automation.data ?? []) as Row[]),
+      recentFailures: (automation.data ?? []).filter((item) => item.status === "failed").slice(0, 5).map((item) => ({
+        at: item.updated_at,
+        operation: typeof item.operation === "string" ? item.operation : "unknown",
+        code: typeof item.last_error_code === "string" ? item.last_error_code.slice(0, 100) : "Kunde inte slutföras",
+      })),
     },
     partial: unavailable > 0,
     generatedAt: new Date().toISOString(),

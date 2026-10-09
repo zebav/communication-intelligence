@@ -35,6 +35,14 @@
     {
       "path": "/api/cron/relationship-backfill",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/media-analysis",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/automation-dispatch",
+      "schedule": "* * * * *"
     }
   ]
 }
