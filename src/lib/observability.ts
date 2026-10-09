@@ -5,6 +5,7 @@ type OperationLog = {
   outcome: "completed" | "failed" | "timed_out" | "queued";
   requestId?: string | null;
   traceId?: string | null;
+  agent?: string;
   counts?: Record<string, number>;
   error?: unknown;
 };
@@ -23,6 +24,7 @@ export function logOperation(input: OperationLog) {
     duration_ms: input.durationMs,
     request_id: input.requestId ?? undefined,
     trace_id: input.traceId ?? undefined,
+    agent: input.agent,
     counts: input.counts,
     error: input.error instanceof Error ? input.error.message.slice(0, 180) : typeof input.error === "string" ? input.error.slice(0, 180) : undefined,
   };
