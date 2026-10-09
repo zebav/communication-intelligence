@@ -41,6 +41,31 @@ type WorkspaceMemoryRow = {
   user_verified: boolean;
 };
 
+type WorkspaceConversationSummaryRow = {
+  conversation_id: string;
+  conversation_title: string | null;
+  conversation_source: string;
+  conversation_type: string | null;
+  conversation_created_at: string;
+  conversation_last_message_at: string | null;
+  conversation_summary: string | null;
+  conversation_priority_score: number | null;
+  conversation_recommended_action: unknown;
+  person_id: string | null;
+  person_name: string | null;
+  person_relationship_type: string | null;
+  person_manual_priority: number | null;
+  person_email_handling_rule: string | null;
+  message_id: string | null;
+  message_body_text: string | null;
+  message_sent_at: string | null;
+  message_direction: string | null;
+  message_classification: string | null;
+  message_importance_score: number | null;
+  message_attachment_count: number | null;
+  message_metadata: unknown;
+};
+
 type WorkspaceCommitmentRow = {
   person_id: string | null;
   status: string;
@@ -95,6 +120,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const overviewCutoff = recentWindowStartIso(31);
   const needsPeople = ["people", "inbox", "cases", "settings", "intelligence", "assistant", "calendar"].includes(initialView);
   const needsConversationDetail = ["today", "inbox", "cases", "calendar"].includes(initialView);
+  const needsTodaySummaries = initialView === "today";
   const needsIdentityData = ["people", "inbox", "cases", "settings", "intelligence"].includes(initialView);
   const needsLearning = ["settings", "intelligence"].includes(initialView);
   const needsFollowUps = ["followups", "settings", "intelligence"].includes(initialView);
@@ -118,8 +144,8 @@ export default async function Home({ searchParams }: HomeProps) {
     // The inbox is the record of what arrived, not merely the short overview.
     // Keep enough email threads here that a busy mailbox cannot make recent,
     // actionable messages disappear behind older conversation activity.
-    needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
-    needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(45).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsTodaySummaries ? supabase.rpc("workspace_conversation_summaries", { p_source: "email", p_after: null, p_limit: 100 }).abortSignal(workspaceQuerySignal()) : needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsTodaySummaries ? supabase.rpc("workspace_conversation_summaries", { p_source: "__all_non_email__", p_after: overviewCutoff, p_limit: 45 }).abortSignal(workspaceQuerySignal()) : needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(45).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsIdentityData ? supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(400).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsIdentityData ? supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsFollowUps ? supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
@@ -153,10 +179,25 @@ export default async function Home({ searchParams }: HomeProps) {
     { data: connectionRows, error: connectionError },
     { data: calendarHistoryRows, error: calendarHistoryError },
   ] = workspaceLoad.result;
-  const conversationRows = [...(emailRows ?? []), ...(channelRows ?? [])];
+  const summaryToConversation = (summary: WorkspaceConversationSummaryRow) => ({
+    id: summary.conversation_id,
+    title: summary.conversation_title,
+    source: summary.conversation_source,
+    conversation_type: summary.conversation_type,
+    created_at: summary.conversation_created_at,
+    last_message_at: summary.conversation_last_message_at,
+    summary: summary.conversation_summary,
+    priority_score: summary.conversation_priority_score,
+    recommended_action: summary.conversation_recommended_action,
+    people: summary.person_id ? { id: summary.person_id, display_name: summary.person_name, relationship_type: summary.person_relationship_type, manual_priority: summary.person_manual_priority, email_handling_rule: summary.person_email_handling_rule } : null,
+    messages: summary.message_id ? [{ id: summary.message_id, conversation_id: summary.conversation_id, body_text: summary.message_body_text, sent_at: summary.message_sent_at ?? summary.conversation_created_at, direction: summary.message_direction ?? "in", classification: summary.message_classification, importance_score: summary.message_importance_score, attachment_count: summary.message_attachment_count, metadata: summary.message_metadata }] : [],
+  });
+  const conversationRows = needsTodaySummaries
+    ? [...((emailRows ?? []) as WorkspaceConversationSummaryRow[]), ...((channelRows ?? []) as WorkspaceConversationSummaryRow[]).filter((row) => row.conversation_source !== "email")].map(summaryToConversation)
+    : [...(emailRows ?? []), ...(channelRows ?? [])];
   const conversationIds = conversationRows.map((row) => row.id);
   const messageLoadStartedAt = Date.now();
-  const { data: messageRows, error: messageError } = conversationIds.length && needsConversationDetail
+  const { data: messageRows, error: messageError } = conversationIds.length && needsConversationDetail && !needsTodaySummaries
     ? await supabase.from("messages").select("id,conversation_id,body_text,sent_at,direction,classification,importance_score,attachment_count,metadata").eq("owner_id", user.id).in("conversation_id", conversationIds).order("sent_at", { ascending: false }).limit(400).abortSignal(AbortSignal.timeout(6_000))
     : { data: [], error: null };
   const messageLoadMs = Date.now() - messageLoadStartedAt;
@@ -166,7 +207,7 @@ export default async function Home({ searchParams }: HomeProps) {
     if (current.length < 24) current.push(message);
     messagesByConversation.set(message.conversation_id, current);
   }
-  const rows = conversationRows.map((row) => ({ ...row, messages: messagesByConversation.get(row.id) ?? [] }));
+  const rows = needsTodaySummaries ? conversationRows : conversationRows.map((row) => ({ ...row, messages: messagesByConversation.get(row.id) ?? [] }));
   const workspaceIdentities = (identityRows ?? []) as WorkspaceIdentityRow[];
   const workspaceMemories = (memoryRows ?? []) as WorkspaceMemoryRow[];
   const workspaceCommitments = (commitmentRows ?? []) as WorkspaceCommitmentRow[];
@@ -321,10 +362,10 @@ export default async function Home({ searchParams }: HomeProps) {
     }, new Map<string, (typeof allPersonConversations)[number]>()).values()];
     const responseConversations = personConversations.filter((row) => {
       const messages = Array.isArray(row.messages) ? row.messages : [];
-      const latestInbound = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
-      return latestInbound && messages.some((message) => message.direction === "out" && String(message.sent_at) > String(latestInbound.sent_at));
+      const latestInbound = [...messages].filter((message: { direction?: string | null; sent_at?: string | null }) => message.direction === "in").sort((a: { sent_at?: string | null }, b: { sent_at?: string | null }) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
+      return latestInbound && messages.some((message: { direction?: string | null; sent_at?: string | null }) => message.direction === "out" && String(message.sent_at) > String(latestInbound.sent_at));
     }).length;
-    const contactDates = personConversations.flatMap((row) => Array.isArray(row.messages) ? row.messages.map((message) => String(message.sent_at)) : []).filter(Boolean).sort();
+    const contactDates = personConversations.flatMap((row) => Array.isArray(row.messages) ? row.messages.map((message: { sent_at?: string | null }) => String(message.sent_at)) : []).filter(Boolean).sort();
     return {
       id: person.id, name: person.display_name ?? "Unknown person", organization: person.organization ?? "", relationshipType: person.relationship_type ?? "unknown", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", notes: person.notes ?? "", relationshipSummary: person.relationship_summary ?? "", manualPriority: person.manual_priority == null ? undefined : Number(person.manual_priority), overallPriority: person.overall_priority == null ? undefined : Number(person.overall_priority), firstContactAt: contactDates[0] ?? person.first_contact_at ?? undefined, lastContactAt: contactDates.at(-1) ?? person.last_contact_at ?? undefined,
       identities: (identitiesByPerson.get(person.id) ?? []).map((identity) => ({ id: identity.id, source: identity.source as Source, identifier: identity.external_identifier, verified: identity.verified_match })),
