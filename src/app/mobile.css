@@ -79,7 +79,7 @@
   .command-overlay { padding-top: 8dvh; }
 
   .mobile-bar { display: flex !important; position: fixed; left: 0; right: 0; bottom: 0; min-height: 64px; height: calc(64px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); border-top: 1px solid var(--line); background: #0c0e11f2; backdrop-filter: blur(16px); justify-content: space-around; z-index: 50; }
-  .mobile-bar button { min-width: 58px; min-height: 58px; padding: 7px 5px 5px; border: 0; background: transparent; color: #7f8995; font-size: 9px; display: grid; place-items: center; align-content: center; gap: 3px; }
+  .mobile-bar button { flex: 1 1 0; min-width: 0; min-height: 58px; padding: 7px 3px 5px; border: 0; background: transparent; color: #7f8995; font-size: 9px; display: grid; place-items: center; align-content: center; gap: 3px; }
   .mobile-bar button.active { color: var(--accent); }
 
   .mobile-tools { display: block; position: fixed; right: 10px; top: calc(10px + env(safe-area-inset-top)); z-index: 80; }
@@ -97,5 +97,5 @@
   .page { padding-left: 10px; padding-right: 10px; }
   .summary-bar { gap: 12px; }
   .message { max-width: 94%; }
-  .mobile-bar button { min-width: 52px; }
+  .mobile-bar button { min-width: 0; }
 }

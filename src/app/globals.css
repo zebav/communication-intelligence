@@ -588,7 +588,13 @@ input::placeholder, textarea::placeholder { color: #718096; opacity: 1; }
 /* The phone has the same destinations as desktop; the extra menu avoids hiding
    Contacts and Relationships behind a redirect to Settings. */
 .mobile-more-overlay { display:none; }
+.mobile-channel-switcher { display:none; }
 @media(max-width:760px){
+  .mobile-channel-switcher { position:sticky; top:0; z-index:12; display:flex; gap:7px; overflow-x:auto; margin:0; padding:10px 12px; border-bottom:1px solid #e2e9f3; background:#ffffffed; backdrop-filter:blur(14px); scrollbar-width:none; }
+  .mobile-channel-switcher::-webkit-scrollbar { display:none; }
+  .mobile-channel-switcher button { flex:none; min-height:38px; padding:7px 10px; border:1px solid #dce5f2; border-radius:999px; background:#fff; color:#617087; font:700 11px/1 inherit; white-space:nowrap; }
+  .mobile-channel-switcher button.active { border-color:#b7cafe; background:#edf3ff; color:#315dbc; }
+  .mobile-channel-switcher button span { display:inline-grid; min-width:17px; height:17px; place-items:center; margin-left:5px; border-radius:999px; background:#dfe9ff; color:#315dbc; font-size:9px; }
   .mobile-more-overlay { position:fixed; inset:0; z-index:55; display:flex; align-items:flex-end; padding:16px 12px calc(68px + env(safe-area-inset-bottom)); background:rgba(15,23,42,.32); backdrop-filter:blur(3px); }
   .mobile-more-menu { width:100%; border:1px solid #e2e8f0; border-radius:18px; background:#fff; box-shadow:0 20px 48px rgba(15,23,42,.2); overflow:hidden; }
   .mobile-more-head { display:flex; align-items:center; justify-content:space-between; padding:16px 16px 13px; border-bottom:1px solid #eef2f7; }
