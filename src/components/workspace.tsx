@@ -798,9 +798,10 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     setSyncing(connection.id); setSyncError(""); setSyncResult("");
     try {
       const response = await fetch(`/api/connectors/slack/sync?connectionId=${connection.id}`, { method: "POST" });
-      const result = await response.json() as { imported?: number; error?: string };
+      const result = await response.json() as { imported?: number; unavailableConversations?: number; error?: string };
       if (!response.ok) throw new Error(result.error ?? "Slack-meddelandena kunde inte hämtas.");
-      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported ?? 0} nya Slack-meddelanden hämtades. Relevanta meddelanden analyseras automatiskt.`);
+      const limitedAccess = Number(result.unavailableConversations ?? 0);
+      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported ?? 0} nya Slack-meddelanden hämtades. Relevanta meddelanden analyseras automatiskt.${limitedAccess ? ` ${limitedAccess} konversation${limitedAccess === 1 ? " kunde" : "er kunde"} inte läsas; anslutningen är markerad för automatisk kontroll.` : ""}`);
       await router.refresh();
     } catch (error) { setSyncError(`${accountDisplayLabel(connection)}: ${error instanceof Error ? error.message : "Slack-meddelandena kunde inte hämtas."}`); }
     finally { setSyncing(""); }
