@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
         headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="html"' },
         signal: AbortSignal.timeout(20_000),
       });
-      if (graphResponse.status === 401) return jsonError("Outlook needs to be connected again.", 409);
+      if (graphResponse.status === 401) throw new Error("reconnect_required");
       if (!graphResponse.ok) throw new Error(`graph_${graphResponse.status}`);
       const graph = await graphResponse.json() as GraphMessagesResponse;
       pagesProcessed += 1;
@@ -294,6 +294,13 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Microsoft mailbox sync failed", { reason });
+    // Match Gmail's account-level recovery contract: the automatic worker
+    // keeps retrying transient failures, but a revoked refresh token is
+    // surfaced as a precise reconnect action for this mailbox only.
+    await supabase.from("connections").update({
+      health_status: reason === "reconnect_required" ? "reconnect_required" : "degraded",
+      updated_at: new Date().toISOString(),
+    }).eq("id", connection.id).eq("owner_id", userId);
     if (reason === "reconnect_required") return jsonError("Outlook needs to be connected again.", 409);
     return jsonError("The Outlook messages could not be imported. Try again.");
   }

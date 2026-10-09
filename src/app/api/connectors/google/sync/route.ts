@@ -146,6 +146,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ imported, alreadyStored, syncedAt, moreAvailable: Boolean(list.nextPageToken), initialImportComplete: !list.nextPageToken });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown"; console.error("Gmail sync failed", { reason });
+    // Keep the source account truthful in Connections. The cron worker can
+    // retry a transient problem, while an expired credential becomes an
+    // explicit owner action instead of silently looking healthy.
+    await supabase.from("connections").update({
+      health_status: reason === "reconnect_required" ? "reconnect_required" : "degraded",
+      updated_at: new Date().toISOString(),
+    }).eq("id", connection.id).eq("owner_id", userId);
     if (reason === "reconnect_required") return jsonError("Gmail needs to be connected again.", 409);
     return jsonError("The Gmail messages could not be imported. Try again.");
   }
