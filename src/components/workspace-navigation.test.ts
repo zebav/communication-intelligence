@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { visibleInboxSources } from "./workspace";
+import { shouldAwaitInboxSnapshot, visibleInboxSources } from "./workspace";
 
 describe("mobile inbox source navigation", () => {
   it("shows email plus sources that are connected or already have imported conversations", () => {
@@ -22,5 +22,11 @@ describe("mobile inbox source navigation", () => {
     const sources = visibleInboxSources([], [], null);
 
     expect(sources.map((source) => source.source)).toEqual(["email"]);
+  });
+
+  it("does not present a lightweight view's empty bootstrap as an empty inbox", () => {
+    expect(shouldAwaitInboxSnapshot({ view: "inbox", initialView: "assistant", emailLoadFailed: false, emailCount: 0 })).toBe(true);
+    expect(shouldAwaitInboxSnapshot({ view: "inbox", initialView: "inbox", emailLoadFailed: false, emailCount: 0 })).toBe(false);
+    expect(shouldAwaitInboxSnapshot({ view: "inbox", initialView: "assistant", emailLoadFailed: true, emailCount: 0 })).toBe(false);
   });
 });
