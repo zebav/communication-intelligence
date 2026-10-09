@@ -18,5 +18,6 @@ describe("agent registry boundaries", () => {
     expect(ownerAgentForAutomation("slack_intelligence")).toBe("communication_intelligence");
     expect(ownerAgentForAutomation("relationship_backfill")).toBe("relationship_intelligence");
     expect(ownerAgentForAutomation("vault_ingestion")).toBe("document_knowledge");
+    expect(ownerAgentForAutomation("autonomous_learning")).toBe("system_orchestrator");
   });
 });

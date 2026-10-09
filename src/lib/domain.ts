@@ -132,6 +132,14 @@ export interface LearningSignal {
   proposedRule: string;
   confidence: number;
   status: "suggested" | "approved" | "dismissed";
+  learningMode?: "automatic" | "review_required" | "blocked";
+  factState?: "confirmed" | "inferred" | "uncertain";
+  sensitivity?: "personal" | "sensitive" | "restricted";
+  autonomyLevel?: 0 | 1 | 2 | 3;
+  autoAppliedAt?: string;
+  lastValidatedAt?: string;
+  correctionCount?: number;
+  version?: number;
   evidence?: Record<string, unknown>;
   createdAt: string;
 }

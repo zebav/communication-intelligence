@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { decideAutonomousLearning, repetitionsFromEvidence } from "@/lib/autonomous-learning";
 
 export type DraftLearning = {
   signalType: "draft_accepted" | "draft_edited";
@@ -44,15 +45,40 @@ type LearningSuggestion = {
 };
 
 export async function saveLearningSuggestion(supabase: SupabaseClient, suggestion: LearningSuggestion) {
-  let existingQuery = supabase.from("learning_signals").select("id,evidence,confidence").eq("owner_id", suggestion.ownerId).eq("source", suggestion.source).eq("signal_type", suggestion.signalType).eq("proposed_rule", suggestion.proposedRule).eq("status", "suggested");
+  let existingQuery = supabase.from("learning_signals").select("id,evidence,confidence,status,learning_mode,sensitivity,version,correction_count").eq("owner_id", suggestion.ownerId).eq("source", suggestion.source).eq("signal_type", suggestion.signalType).eq("proposed_rule", suggestion.proposedRule).in("status", ["suggested", "approved"]);
   existingQuery = suggestion.personId ? existingQuery.eq("person_id", suggestion.personId) : existingQuery.is("person_id", null);
   const { data: existing } = await existingQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (existing) {
     const previousEvidence = existing.evidence && typeof existing.evidence === "object" && !Array.isArray(existing.evidence) ? existing.evidence as Record<string, unknown> : {};
-    const repetitions = typeof previousEvidence.repetitions === "number" ? previousEvidence.repetitions + 1 : 2;
-    return supabase.from("learning_signals").update({ observation: suggestion.observation, conversation_id: suggestion.conversationId, evidence: { ...previousEvidence, ...suggestion.evidence, repetitions }, confidence: Math.max(Number(existing.confidence ?? 0), suggestion.confidence), updated_at: new Date().toISOString() }).eq("id", existing.id).eq("owner_id", suggestion.ownerId);
+    const repetitions = repetitionsFromEvidence(previousEvidence) + 1;
+    const confidence = Math.max(Number(existing.confidence ?? 0), suggestion.confidence);
+    const decision = decideAutonomousLearning({ signalType: suggestion.signalType, confidence, repetitions, sensitivity: existing.sensitivity ?? "personal", source: suggestion.source });
+    const automatic = decision.shouldAutoApply && existing.status === "suggested";
+    return supabase.from("learning_signals").update({
+      observation: suggestion.observation,
+      conversation_id: suggestion.conversationId,
+      evidence: { ...previousEvidence, ...suggestion.evidence, repetitions, autonomy_reason: decision.reason, policy_version: 1 },
+      confidence,
+      ...(automatic ? { status: "approved", learning_mode: "automatic", fact_state: decision.factState, autonomy_level: decision.autonomyLevel, auto_applied_at: new Date().toISOString(), last_validated_at: new Date().toISOString() } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq("id", existing.id).eq("owner_id", suggestion.ownerId);
   }
-  const result = await supabase.from("learning_signals").insert({ owner_id: suggestion.ownerId, person_id: suggestion.personId, conversation_id: suggestion.conversationId, source: suggestion.source, signal_type: suggestion.signalType, observation: suggestion.observation, proposed_rule: suggestion.proposedRule, evidence: { ...suggestion.evidence, repetitions: 1 }, confidence: suggestion.confidence, status: "suggested" });
+  const decision = decideAutonomousLearning({ signalType: suggestion.signalType, confidence: suggestion.confidence, repetitions: 1, source: suggestion.source });
+  const result = await supabase.from("learning_signals").insert({
+    owner_id: suggestion.ownerId,
+    person_id: suggestion.personId,
+    conversation_id: suggestion.conversationId,
+    source: suggestion.source,
+    signal_type: suggestion.signalType,
+    observation: suggestion.observation,
+    proposed_rule: suggestion.proposedRule,
+    evidence: { ...suggestion.evidence, repetitions: 1, autonomy_reason: decision.reason, policy_version: 1 },
+    confidence: suggestion.confidence,
+    status: "suggested",
+    learning_mode: decision.learningMode,
+    fact_state: decision.factState,
+    autonomy_level: decision.autonomyLevel,
+  });
   if (result.error?.code === "23505") return { ...result, error: null };
   return result;
 }
