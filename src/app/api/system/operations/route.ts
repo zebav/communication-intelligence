@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeOperationFailureSummary } from "@/lib/operations-status";
 import { createClient } from "@/lib/supabase/server";
 
 type Row = Record<string, unknown>;
@@ -50,7 +51,7 @@ function latestAutomationByOperation(rows: AutomationRow[] | null) {
     status: row.status ?? "unknown",
     attempts: Number(row.attempts ?? 0),
     updatedAt: row.updated_at,
-    error: row.last_error_code ? row.last_error_code.slice(0, 100) : null,
+    error: row.last_error_code ? safeOperationFailureSummary(row.last_error_code) : null,
   }));
 }
 
@@ -103,8 +104,8 @@ export async function GET() {
         syncState: syncState(item.last_sync_at),
       })),
     },
-    media: { states: countByState((media.data ?? []) as Row[]), recentFailures: (media.data ?? []).filter((item) => item.state === "failed").slice(0, 5).map((item) => ({ at: item.updated_at, code: typeof item.last_error_code === "string" ? item.last_error_code.slice(0, 100) : "Kunde inte slutföras" })) },
-    scheduled: { states: countByState((scheduled.data ?? []) as Row[], "status"), recentFailures: (scheduled.data ?? []).filter((item) => item.status === "failed" || item.status === "needs_review").slice(0, 5).map((item) => ({ at: item.updated_at, code: typeof item.last_error === "string" ? item.last_error.slice(0, 100) : "Behöver granskas" })) },
+    media: { states: countByState((media.data ?? []) as Row[]), recentFailures: (media.data ?? []).filter((item) => item.state === "failed" || item.state === "dead_letter").slice(0, 5).map((item) => ({ at: item.updated_at, code: safeOperationFailureSummary(typeof item.last_error_code === "string" ? item.last_error_code : null), terminal: item.state === "dead_letter" })) },
+    scheduled: { states: countByState((scheduled.data ?? []) as Row[], "status"), recentFailures: (scheduled.data ?? []).filter((item) => item.status === "failed" || item.status === "needs_review").slice(0, 5).map((item) => ({ at: item.updated_at, code: safeOperationFailureSummary(typeof item.last_error === "string" ? item.last_error : null) })) },
     calendar: { total: calendar.data?.length ?? 0, successful: (calendar.data ?? []).filter((item) => Boolean(item.last_success_at)).length, failed: (calendar.data ?? []).filter((item) => Boolean(item.last_error)).length, nextRunAt: (calendar.data ?? []).map((item) => item.next_run_at).filter((value): value is string => typeof value === "string").sort().at(0) ?? null },
     browser: { states: countByState((browser.data ?? []) as Row[], "status") },
     relationships: {
@@ -125,7 +126,7 @@ export async function GET() {
       recentFailures: (automation.data ?? []).filter((item) => item.status === "failed").slice(0, 5).map((item) => ({
         at: item.updated_at,
         operation: typeof item.operation === "string" ? item.operation : "unknown",
-        code: typeof item.last_error_code === "string" ? item.last_error_code.slice(0, 100) : "Kunde inte slutföras",
+        code: safeOperationFailureSummary(typeof item.last_error_code === "string" ? item.last_error_code : null),
       })),
     },
     partial: unavailable > 0,
