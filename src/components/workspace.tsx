@@ -70,13 +70,26 @@ const sources: { label: string; source: Source }[] = [
 ];
 const EMAIL_CATEGORIES = ["Relevant", "Filtered out", "All categories", "Critical", "Action Required", "Business", "Customer", "Personal", "Booking / Travel", "Financial", "Legal", "Receipt / Invoice", "Newsletter", "Marketing", "Notification", "Spam", "Information Only"];
 
-function connectionBelongsToSource(connection: ChannelConnection, source: Source) {
+function connectionBelongsToSource(connection: Pick<ChannelConnection, "provider" | "source">, source: Source) {
   if (connection.source === source) return true;
   if (source === "email") return connection.provider === "gmail" || connection.provider === "microsoft-graph";
   if (source === "instagram") return connection.provider === "instagram";
   if (source === "whatsapp") return connection.provider === "whatsapp" || connection.provider === "ycloud";
   if (source === "slack") return connection.provider === "slack";
   return false;
+}
+
+export function visibleInboxSources(
+  connections: Array<Pick<ChannelConnection, "provider" | "source">>,
+  communicationCases: Array<Pick<CommunicationCase, "source">>,
+  selectedSource: Source | null,
+) {
+  return sources.filter((source) => (
+    source.source === "email"
+    || source.source === selectedSource
+    || communicationCases.some((item) => item.source === source.source)
+    || connections.some((connection) => connectionBelongsToSource(connection, source.source))
+  ));
 }
 
 function sourceConnectionStatus(source: Source, connections: ChannelConnection[]) {
@@ -165,12 +178,10 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   // connected or already contain imported conversations. This avoids sending
   // someone through empty, unavailable source views while still preserving a
   // deep-linked source until the user navigates away from it.
-  const availableSources = useMemo(() => sources.filter((source) => (
-    source.source === "email"
-    || source.source === selectedSource
-    || communicationCases.some((item) => item.source === source.source)
-    || connections.some((connection) => connectionBelongsToSource(connection, source.source))
-  )), [communicationCases, connections, selectedSource]);
+  const availableSources = useMemo(
+    () => visibleInboxSources(connections, communicationCases, selectedSource),
+    [communicationCases, connections, selectedSource],
+  );
   useEffect(() => {
     if (!decisionMessageIds.length) return;
     const controller = new AbortController();
