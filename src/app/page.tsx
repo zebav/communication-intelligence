@@ -41,16 +41,20 @@ function isSyntheticTestConversation(row: { title?: unknown; messages?: unknown 
 }
 
 type HomeProps = {
-  searchParams: Promise<{ view?: string | string[] }>;
+  searchParams: Promise<{ view?: string | string[]; source?: string | string[] }>;
 };
 
 const workspaceViews = new Set<View>(["today", "cases", "inbox", "people", "followups", "cleanup", "intelligence", "connections", "settings", "calendar", "assistant", "relationships"]);
+const workspaceSources = new Set<Source>(["email", "imessage", "instagram", "whatsapp", "slack", "messenger", "tinder", "tiktok", "linkedin", "manual"]);
 
 export default async function Home({ searchParams }: HomeProps) {
   const workspaceStartedAt = Date.now();
   const workspaceTraceId = newTraceId();
-  const requestedView = (await searchParams).view;
+  const params = await searchParams;
+  const requestedView = params.view;
+  const requestedSource = params.source;
   const initialView: View = requestedView === "sent" ? "inbox" : requestedView === "duplicates" ? "people" : typeof requestedView === "string" && workspaceViews.has(requestedView as View) ? requestedView as View : "today";
+  const initialSource = typeof requestedSource === "string" && workspaceSources.has(requestedSource as Source) ? requestedSource as Source : null;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -107,7 +111,7 @@ export default async function Home({ searchParams }: HomeProps) {
     logOperation({ route: "/", operation: `workspace_load_${initialView}`, outcome: "timed_out", durationMs: baseLoadMs, traceId: workspaceTraceId });
     return <WorkspaceSnapshot key={user.id} failedSections={["Arbetsytans data"]} data={{
       userEmail: user.email ?? "Private owner", communicationCases: [], connections: [], syncedEmails: [], followUps: [], people: [], learningSignals: [], outcomes: [], calendarHistory: [],
-      persona: defaultUniversalProfile, profilePeople: [], initialView,
+      persona: defaultUniversalProfile, profilePeople: [], initialView, initialSource,
     }} />;
   }
   const [
@@ -274,6 +278,6 @@ export default async function Home({ searchParams }: HomeProps) {
   return <WorkspaceSnapshot key={user.id} failedSections={failedSections} data={{
     userEmail: user.email ?? "Private owner", communicationCases, connections,
     syncedEmails, followUps, people: intelligentPeople, learningSignals, outcomes, calendarHistory,
-    persona, profilePeople, initialView,
+    persona, profilePeople, initialView, initialSource,
   }} />;
 }
