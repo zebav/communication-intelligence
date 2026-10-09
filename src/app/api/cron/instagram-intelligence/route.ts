@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
   const { data: connections } = await connectionQuery.limit(1);
   const reconciliation = await Promise.allSettled((connections ?? []).map((connection) => reconcileInstagramConnection(connection.id)));
   const reconciliationFailed = reconciliation.filter((result) => result.status === "rejected").length;
+  const reconnectRequired = reconciliation.some((result) => result.status === "rejected" && /instagram_reconciliation_(401|403)$/.test(result.reason instanceof Error ? result.reason.message : ""));
   let pendingQuery = database.from("messages").select("id,owner_id,conversation_id,metadata").eq("source", "instagram").eq("direction", "in").is("processed_at", null).order("sent_at", { ascending: true });
   if (ownerId) pendingQuery = pendingQuery.eq("owner_id", ownerId);
   const { data: pending, error } = await pendingQuery.limit(10);
@@ -37,11 +38,11 @@ export async function GET(request: NextRequest) {
   const analyzed = results.filter((result) => result.status === "fulfilled" && result.value.status === "analyzed").length;
   const blockedMedia = results.filter((result) => result.status === "fulfilled" && result.value.status === "blocked_media").length;
   const failed = results.filter((result) => result.status === "rejected").length;
-  if ((failed || reconciliationFailed) && connections?.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
+  if ((failed || reconciliationFailed) && connections?.length) await database.from("connections").update({ health_status: reconnectRequired ? "reconnect_required" : "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   else if (analyzed && connections?.length) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   const health = await readDataIngestionHealth(database).catch(() => null);
   if (health?.affectedConnectionIds.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", health.affectedConnectionIds);
   const outcome = failed || reconciliationFailed ? "failed" : "completed";
   logOperation({ route: "/api/cron/instagram-intelligence", operation: "instagram_import_and_analysis", outcome, durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, analyzed, blocked_media: blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) } });
-  return NextResponse.json({ ok: true, analyzed, blockedMedia, failed, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, health });
+  return NextResponse.json({ ok: true, analyzed, blockedMedia, failed, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, health });
 }
