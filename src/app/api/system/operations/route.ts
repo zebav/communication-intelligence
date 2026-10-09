@@ -114,6 +114,11 @@ export async function GET() {
     automation: {
       states: countByState((automation.data ?? []) as Row[]),
       latestByOperation: latestAutomationByOperation((automation.data ?? []) as AutomationRow[]),
+      recentRecoveries: (automation.data ?? []).filter((item) => item.status === "completed" && Number(item.attempts ?? 0) > 1).slice(0, 5).map((item) => ({
+        at: item.updated_at,
+        operation: typeof item.operation === "string" ? item.operation : "unknown",
+        attempts: Number(item.attempts ?? 0),
+      })),
       recentFailures: (automation.data ?? []).filter((item) => item.status === "failed").slice(0, 5).map((item) => ({
         at: item.updated_at,
         operation: typeof item.operation === "string" ? item.operation : "unknown",
