@@ -40,7 +40,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await reconcileSlackConnection(connection.id);
-    return NextResponse.json({ imported: result.imported }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({
+      imported: result.imported,
+      unavailableConversations: result.unavailableConversations,
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     await database.from("connections").update({
       health_status: reconnectRequired(error) ? "reconnect_required" : "degraded",

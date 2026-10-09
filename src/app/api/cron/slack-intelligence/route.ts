@@ -43,12 +43,14 @@ export async function GET(request: NextRequest) {
   const blockedMedia = analysisResults.filter((result) => result.status === "fulfilled" && result.value.status === "blocked_media").length;
   const failed = results.filter((result) => result.status === "rejected").length + analysisFailed;
   if (failed && connections?.length) await db.from("connections").update({ health_status: reconnectRequired ? "reconnect_required" : "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
-  const imported = results.filter((result): result is PromiseFulfilledResult<{ imported: number }> => result.status === "fulfilled").reduce((sum, result) => sum + result.value.imported, 0);
-  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, analyzed, blocked_media: blockedMedia, pending: pending?.length ?? 0, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : undefined) });
+  const fulfilled = results.filter((result): result is PromiseFulfilledResult<{ imported: number; readableConversations: number; unavailableConversations: number }> => result.status === "fulfilled");
+  const imported = fulfilled.reduce((sum, result) => sum + result.value.imported, 0);
+  const unavailableConversations = fulfilled.reduce((sum, result) => sum + result.value.unavailableConversations, 0);
+  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, unavailable_conversations: unavailableConversations, analyzed, blocked_media: blockedMedia, pending: pending?.length ?? 0, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : undefined) });
   // A non-success status is intentional: the durable dispatcher records it as
   // a retry, rather than presenting a failed Slack import as completed.
   return NextResponse.json(
-    { ok: !failed, imported, analyzed, blockedMedia, failed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), analysisLimit: 3 },
+    { ok: !failed, imported, unavailableConversations, analyzed, blockedMedia, failed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), analysisLimit: 3 },
     { status: failed ? 502 : 200, headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -38,6 +38,8 @@ export async function reconcileSlackConnection(connectionId: string) {
   // member of, rather than the bot's view of the workspace.
   const listed = await slack(credentials.accessToken, "users.conversations", { types, exclude_archived: "true", limit: "100" });
   let imported = 0;
+  let readableConversations = 0;
+  let unavailableConversations = 0;
   const displayNames = new Map<string, string>();
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string; source: "slack" }> = [];
   for (const channel of (listed.channels ?? []).slice(0, 30)) {
@@ -47,9 +49,12 @@ export async function reconcileSlackConnection(connectionId: string) {
       history = await slack(credentials.accessToken, "conversations.history", { channel: channelId, limit: "30" });
     } catch {
       // A shared or archived conversation can be unavailable independently of
-      // the rest of the workspace. Keep importing every other channel.
+      // the rest of the workspace. Keep importing every other channel, but do
+      // not present a completely unreadable workspace as a healthy import.
+      unavailableConversations += 1;
       continue;
     }
+    readableConversations += 1;
     for (const message of history.messages ?? []) {
       const senderId = message.user ?? ""; const text = message.text?.trim() ?? ""; const timestamp = message.ts ?? "";
       if (!senderId || !text || !timestamp || senderId === credentials.slackUserId) continue;
@@ -72,7 +77,14 @@ export async function reconcileSlackConnection(connectionId: string) {
       if (error) throw error; if (saved) { imported += 1; analyses.push({ ownerId: connection.owner_id, conversationId: savedConversation.data.id, messageId: saved.id, source: "slack" }); }
     }
   }
+  if ((listed.channels ?? []).length > 0 && readableConversations === 0) {
+    throw new Error("slack_history_unavailable");
+  }
   await Promise.allSettled(analyses.slice(0, 3).map(analyzeIncomingInstagramMessage));
-  await db.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", connection.id);
-  return { imported };
+  await db.from("connections").update({
+    health_status: unavailableConversations > 0 ? "degraded" : "healthy",
+    last_sync_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq("id", connection.id);
+  return { imported, readableConversations, unavailableConversations };
 }
