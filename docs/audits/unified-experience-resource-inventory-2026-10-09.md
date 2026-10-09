@@ -10,6 +10,36 @@ does not mean a provider account has been authenticated or tested in production.
 | #108 — mobile contacts and settings recovery | Open; 32 commits, preview branch | Release 0 candidate. Contains the current recovery, mobile and decision-state work. |
 | #107 — secure notification preferences | Open; 1 commit | Contains the same migration file as #108: `20261009170000_notification_preferences_v1.sql`. Do **not** merge it separately. Reconcile/close it after the migration is verified through #108. |
 
+## Verified release boundary — 9 October 2026
+
+The Vercel deployment view confirms the following boundary. This must be kept
+explicit during Release 0; a successful Preview is not a production release.
+
+| Environment | Verified revision | State | Meaning |
+| --- | --- | --- | --- |
+| `www.solvani.app` / Production | `96310be` — “Phase 10: durable notification orchestration” | Ready | The live release is on `main`, not the Release 0 candidate. |
+| PR #108 Preview | `9ef8cfb` — “docs: add unified experience release plan” | Ready | This is the current recovery/release candidate and is not yet live. |
+
+### Evidence completed
+
+- PR #107 and #108 were compared: their notification-preferences migration is
+  byte-for-byte identical.
+- Owner scoping and AAL2 checks are present in the reviewed migration set for
+  notifications, automation jobs, assistant tasks, relationship intelligence,
+  calendar and vault metadata.
+- The targeted automated release suite passed: **46 tests across 11 suites**
+  covering decision state, automation jobs, source adapters and media lifecycle.
+
+### Evidence still required before production promotion
+
+- Compare the migration ledger in the connected Supabase project with this
+  branch. The local environment has no Supabase CLI or database management
+  connection, so repository migrations alone cannot prove they ran.
+- Run one approved, low-risk fresh inbound event per connected provider and
+  confirm source → person → analysis → decision → shared UI state.
+- Complete iPhone journeys using an authenticated Preview session.
+- Capture live performance telemetry for login, Inbox and Notiscenter.
+
 ## Resources and truthful operating state
 
 | Resource | Implementation and permissions | Used today | Status that still needs evidence | Best next use |
