@@ -14,7 +14,7 @@ describe("automation job safety", () => {
   });
 
   it("routes every queued operation to a bounded existing worker", () => {
-    expect(Object.values(automationOperationPath)).toHaveLength(9);
+    expect(Object.values(automationOperationPath)).toHaveLength(10);
     expect(Object.values(automationOperationPath).every((path) => path.startsWith("/api/cron/"))).toBe(true);
   });
 });

@@ -13,6 +13,7 @@ export const AUTOMATION_OPERATIONS = [
   "vault_ingestion",
   "relationship_backfill",
   "autonomous_learning",
+  "follow_up_detection",
 ] as const;
 
 export type AutomationOperation = typeof AUTOMATION_OPERATIONS[number];
@@ -135,4 +136,5 @@ export const automationOperationPath: Record<AutomationOperation, string> = {
   vault_ingestion: "/api/cron/vault-ingestion",
   relationship_backfill: "/api/cron/relationship-backfill",
   autonomous_learning: "/api/cron/autonomous-learning",
+  follow_up_detection: "/api/cron/follow-up-detection",
 };
