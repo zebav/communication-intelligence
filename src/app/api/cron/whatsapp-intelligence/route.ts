@@ -38,8 +38,9 @@ export async function GET(request: NextRequest) {
   const results = await Promise.allSettled(candidates.map((message) => analyzeIncomingWhatsAppMessage({
     ownerId: message.owner_id, conversationId: message.conversation_id, messageId: message.id,
   })));
-  const analyzed = results.filter((result) => result.status === "fulfilled").length;
-  const failed = results.length - analyzed;
+  const analyzed = results.filter((result) => result.status === "fulfilled" && result.value.status === "analyzed").length;
+  const blockedMedia = results.filter((result) => result.status === "fulfilled" && result.value.status === "blocked_media").length;
+  const failed = results.filter((result) => result.status === "rejected").length;
   // Analysis is a recovery worker, not evidence that the live webhook is
   // disconnected. A transient AI/media error must not present WhatsApp as
   // requiring reconnection in the UI.
@@ -48,6 +49,6 @@ export async function GET(request: NextRequest) {
     if (ownerId) connectionUpdate = connectionUpdate.eq("owner_id", ownerId);
     await connectionUpdate;
   }
-  logOperation({ route: "/api/cron/whatsapp-intelligence", operation: "whatsapp_analysis_recovery", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { pending: pending?.length ?? 0, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) }, error: failed ? "whatsapp_analysis_failed" : undefined });
-  return NextResponse.json({ ok: true, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3 });
+  logOperation({ route: "/api/cron/whatsapp-intelligence", operation: "whatsapp_analysis_recovery", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { pending: pending?.length ?? 0, analyzed, blocked_media: blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) }, error: failed ? "whatsapp_analysis_failed" : undefined });
+  return NextResponse.json({ ok: true, analyzed, blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3 });
 }
