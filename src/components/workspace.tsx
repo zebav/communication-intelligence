@@ -120,6 +120,7 @@ function AIPlanner({ plan }: { plan?: PlannerSuggestion }) {
 export function Workspace({ userEmail, communicationCases, connections, syncedEmails, emailLoadFailed = false, backgroundPaused = false, followUps, outcomes, calendarHistory, people, learningSignals, persona, profilePeople, initialView = "today", initialSource = null, initialDecisionId }: { userEmail: string; communicationCases: CommunicationCase[]; connections: ChannelConnection[]; syncedEmails: SyncedEmailConversation[]; emailLoadFailed?: boolean; backgroundPaused?: boolean; followUps: FollowUpCommitment[]; outcomes: CommunicationOutcome[]; calendarHistory: CalendarLearningEvent[]; people: IntelligentPerson[]; learningSignals: LearningSignal[]; persona: UniversalCommunicationProfile; profilePeople: CommunicationPersonOption[]; initialView?: View; initialSource?: Source | null; initialDecisionId?: string }) {
   const router = useRouter();
   const automaticSyncStarted = useRef(false);
+  const currentView = useRef<View>(initialView);
   const summary = emailDashboardSummary(syncedEmails);
   const [view, setView] = useState<View>(initialView);
   const [inboxTab, setInboxTab] = useState("received");
@@ -141,6 +142,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
     return () => window.clearTimeout(timer);
   }, []);
   useEffect(() => { setView(initialView); }, [initialView]);
+  useEffect(() => { currentView.current = view; }, [view]);
   const navigateTo = (next: View, source: Source | null = null, decisionId?: string) => {
     setView(next);
     setSelectedSource(source);
@@ -187,11 +189,28 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
     // Start maintenance after the interactive shell is already visible. The
     // server responds immediately and processes sync, media and AI analysis
     // in the background, so logging in never waits for a mailbox import.
-    const start = window.setTimeout(() => {
+    const queueMaintenance = () => {
       void fetch("/api/system/automation", { method: "POST", headers: { "content-type": "application/json" } })
-        .then((response) => response.ok ? window.setTimeout(() => router.refresh(), 8_000) : undefined)
+        .then((response) => {
+          // Do not reset an active inbox, editor or decision review merely
+          // because background maintenance was queued. Today is a read-only
+          // overview, so it alone receives a quiet refresh when it remains
+          // visible long enough for the first maintenance pass to finish.
+          if (!response.ok) return;
+          window.setTimeout(() => {
+            if (document.visibilityState === "visible" && currentView.current === "today") router.refresh();
+          }, 10_000);
+        })
         .catch(() => undefined);
-    }, 350);
+    };
+    // Background data work must never compete with the authentication shell
+    // and primary interaction work. requestIdleCallback is progressively
+    // enhanced for Safari with a bounded timeout fallback.
+    if ("requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(queueMaintenance, { timeout: 5_000 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const start = window.setTimeout(queueMaintenance, 2_500);
     return () => window.clearTimeout(start);
   }, [backgroundPaused, router]);
   return <div className="workspace">
