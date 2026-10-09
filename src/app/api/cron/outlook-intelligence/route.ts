@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
-import { isRelevantEmail } from "@/lib/connectors/email-classification";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { getAIService } from "@/lib/ai/service";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -11,6 +10,7 @@ import { inboundBurst } from "@/lib/ai/inbound-burst";
 import { logOperation } from "@/lib/observability";
 import { z } from "zod";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
+import { emailAnalysisRecoveryCandidates } from "@/lib/email-analysis-recovery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -112,12 +112,26 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // An analyzed message is durable state. Query only the recovery backlog so a
-  // busy mailbox does not repeatedly scan recent, already-prepared threads.
-  let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,sent_at,classification,importance_score,metadata,attachment_count").eq("source", "email").eq("direction", "in").is("processed_at", null).order("sent_at", { ascending: false });
+  // Provider sync and AI preparation are separate durable stages. Look for a
+  // missing analysis payload, rather than `processed_at`: sync routes mark a
+  // message imported immediately, and an interrupted worker must still be
+  // able to prepare that relevant email on a later pass.
+  let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,sent_at,classification,importance_score,metadata,attachment_count").eq("source", "email").eq("direction", "in").contains("metadata", { provider }).order("sent_at", { ascending: false });
   if (ownerId) pendingQuery = pendingQuery.eq("owner_id", ownerId);
-  const { data: pending } = await pendingQuery.limit(ownerId ? 30 : 50);
-  const candidates = (pending ?? []).filter((message) => metadataObject(message.metadata).provider === provider && (isRelevantEmail(message.classification ?? "") || Number(message.importance_score ?? 0) >= 8) && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
+  const { data: pending, error: pendingError } = await pendingQuery.limit(ownerId ? 30 : 50);
+  if (pendingError) {
+    logOperation({
+      route: provider === "gmail" ? "/api/cron/gmail-intelligence" : "/api/cron/outlook-intelligence",
+      operation: "email_import_and_analysis",
+      outcome: "failed",
+      durationMs: Date.now() - startedAt,
+      requestId: request.headers.get("x-vercel-id"),
+      error: "email_analysis_backlog_unavailable",
+    });
+    return NextResponse.json({ error: "Email analysis backlog could not be loaded." }, { status: 500 });
+  }
+  const candidates = emailAnalysisRecoveryCandidates(pending ?? [])
+    .filter((message) => !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))) as Candidate[];
   const analyzed = (await Promise.allSettled(candidates.map((message) => analyzeCandidate(supabase, message)))).filter((result) => result.status === "fulfilled" && result.value).length;
   const synced = syncResults.filter((result) => result.ok).length;
   const outcome = syncResults.some((result) => !result.ok) ? "failed" : "completed";
