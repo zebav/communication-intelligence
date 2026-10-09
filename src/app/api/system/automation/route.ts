@@ -1,4 +1,4 @@
-import { after, NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { enqueueOwnerMaintenance, newTraceId } from "@/lib/automation-jobs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -34,34 +34,10 @@ export async function POST(request: NextRequest) {
     logOperation({ route: "/api/system/automation", operation: "queue_maintenance", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId, counts: { workers: queued.queued } });
     return NextResponse.json({ queued: true, traceId }, { headers: { "Cache-Control": "no-store" } });
   } catch {
-    // This compatibility path keeps imports available during the additive
-    // migration rollout. It is intentionally temporary: once every deployed
-    // database has automation_jobs, the durable dispatcher is authoritative.
-    after(async () => {
-      const headers = {
-        authorization: `Bearer ${cronSecret}`,
-        "x-owner-id": ownerId,
-        "x-maintenance-trigger": "login",
-        "x-solvani-trace-id": traceId,
-      };
-      // Start only bounded workers after the workspace has rendered. Each
-      // worker is independently protected by its cron authorization, and a
-      // temporary provider problem must never delay or break login.
-      await Promise.allSettled([
-        "/api/cron/outlook-intelligence",
-        "/api/cron/gmail-intelligence",
-        "/api/cron/instagram-intelligence",
-        "/api/cron/whatsapp-intelligence",
-        "/api/cron/slack-intelligence",
-        "/api/cron/calendar-sync",
-        "/api/cron/vault-ingestion",
-        "/api/cron/relationship-backfill",
-      ].map((path) => fetch(new URL(path, request.url), {
-        headers,
-        signal: AbortSignal.timeout(55_000),
-      })));
-    });
-    logOperation({ route: "/api/system/automation", operation: "start_maintenance_legacy_fallback", outcome: "queued", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId, counts: { workers: 8 }, error: "automation_queue_unavailable" });
-    return NextResponse.json({ queued: true, traceId, durable: false }, { headers: { "Cache-Control": "no-store" } });
+    // The durable queue migration is installed in production. Never fall back
+    // to an untracked fire-and-forget fan-out: it can be interrupted after the
+    // UI says work has started and cannot provide retries or an audit trail.
+    logOperation({ route: "/api/system/automation", operation: "queue_maintenance", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId, error: "automation_queue_unavailable" });
+    return NextResponse.json({ error: "Bakgrundsarbetet kunde inte köas. Försök igen; inget arbete har startats osynligt." }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }
