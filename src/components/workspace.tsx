@@ -35,11 +35,11 @@ import { reviewLearningSignal } from "@/app/intelligence/actions";
 import { deleteCommunicationOutcome, reviewCommunicationOutcome } from "@/app/outcomes/actions";
 import { formatResponseTime, outcomeAgeDays } from "@/lib/outcomes";
 import { connectorCatalog } from "@/lib/connectors/catalog";
-import { ConversationImportForm } from "@/components/conversation-import-form";
 import { accountDisplayLabel } from "@/lib/connectors/account-label";
 import { relationshipLabels, relationshipTypes } from "@/lib/relationship-types";
 import { PersonLink } from "@/components/person-link";
-import { WhatsAppConnectButton } from "@/components/whatsapp-connect-button";
+const ConversationImportForm = dynamic(() => import("@/components/conversation-import-form").then(module => module.ConversationImportForm), { loading: () => <p className="muted">Öppnar import…</p> });
+const WhatsAppConnectButton = dynamic(() => import("@/components/whatsapp-connect-button").then(module => module.WhatsAppConnectButton), { loading: () => <p className="muted">Hämtar WhatsApp-anslutning…</p> });
 import { communicationPeriods, isWithinCommunicationPeriod, type CommunicationPeriod } from "@/lib/communication-period";
 import { statusLabels, type Task, type TaskKind, type TaskStatus } from "@/lib/assistant/model";
 
