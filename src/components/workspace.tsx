@@ -1,6 +1,5 @@
 "use client";
 
-import { SentMessages } from "@/components/sent-messages";
 import dynamic from "next/dynamic";
 const AssistantWorkspace = dynamic(() => import("@/components/assistant-workspace").then(module => module.AssistantWorkspace), { loading: () => <p>Öppnar handlingsinkorgen…</p> });
 const CalendarWorkspace = dynamic(() => import("@/components/calendar-workspace").then(module => module.CalendarWorkspace), { loading: () => <p>Öppnar kalendern…</p> });
@@ -17,6 +16,7 @@ const PriorityFeedback = dynamic(() => import("@/components/priority-feedback").
 const AccountPlan = dynamic(() => import("@/components/account-plan").then(module => module.AccountPlan), { loading: () => <p>Hämtar abonnemang…</p> });
 const DataIngestionStatus = dynamic(() => import("@/components/data-ingestion-status").then(module => module.DataIngestionStatus), { loading: () => <p className="muted">Kontrollerar datainhämtning…</p> });
 const ScheduledSendControl = dynamic(() => import("@/components/scheduled-send-control").then(module => module.ScheduledSendControl), { loading: () => null });
+const SentMessages = dynamic(() => import("@/components/sent-messages").then(module => module.SentMessages), { loading: () => <p className="muted">Öppnar skickade meddelanden…</p> });
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
