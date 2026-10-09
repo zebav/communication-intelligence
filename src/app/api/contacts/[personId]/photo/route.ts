@@ -32,7 +32,9 @@ export async function GET(_: NextRequest, context: { params: Promise<{ personId:
     if (assetError || !asset) return new NextResponse(null, { status: 404, headers: { "Cache-Control": "no-store" } });
     const { data: signed, error: signedError } = await admin.storage.from(asset.storage_bucket).createSignedUrl(asset.storage_path, 300);
     if (signedError || !signed?.signedUrl) throw new Error("Kontaktbilden kunde inte öppnas.");
-    return NextResponse.redirect(signed.signedUrl, { headers: { "Cache-Control": "private, no-store" } });
+    // The URL remains authenticated and private. A brief browser-only cache avoids
+    // requesting a signed URL again for every avatar surface during one session.
+    return NextResponse.redirect(signed.signedUrl, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Kontaktbilden kunde inte öppnas." }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }

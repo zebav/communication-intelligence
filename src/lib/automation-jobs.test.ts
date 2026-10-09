@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { automationOperationPath, retryStatusFor, traceIdFromHeaders } from "./automation-jobs";
+import { AUTOMATION_OPERATIONS, automationOperationPath, retryStatusFor, traceIdFromHeaders } from "./automation-jobs";
 
 describe("automation job safety", () => {
   it("accepts only a well-formed propagated trace id", () => {
@@ -14,7 +14,7 @@ describe("automation job safety", () => {
   });
 
   it("routes every queued operation to a bounded existing worker", () => {
-    expect(Object.values(automationOperationPath)).toHaveLength(10);
+    expect(Object.values(automationOperationPath)).toHaveLength(AUTOMATION_OPERATIONS.length);
     expect(Object.values(automationOperationPath).every((path) => path.startsWith("/api/cron/"))).toBe(true);
   });
 });

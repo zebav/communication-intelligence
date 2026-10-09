@@ -3,7 +3,6 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import "./mobile.css";
-import { MobileToolsMenu } from "@/components/mobile-tools-menu";
 
 export const metadata: Metadata = {
   title: "Solvani",
@@ -14,5 +13,5 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0F172A", viewportFit: "cover" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}<MobileToolsMenu /><Analytics /><SpeedInsights /></body></html>;
+  return <html lang="sv"><body>{children}<Analytics /><SpeedInsights /></body></html>;
 }
