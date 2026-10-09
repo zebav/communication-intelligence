@@ -206,9 +206,13 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
     // Background data work must never compete with the authentication shell
     // and primary interaction work. requestIdleCallback is progressively
     // enhanced for Safari with a bounded timeout fallback.
-    if ("requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(queueMaintenance, { timeout: 5_000 });
-      return () => window.cancelIdleCallback(idleId);
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const idleId = idleWindow.requestIdleCallback(queueMaintenance, { timeout: 5_000 });
+      return () => idleWindow.cancelIdleCallback?.(idleId);
     }
     const start = window.setTimeout(queueMaintenance, 2_500);
     return () => window.clearTimeout(start);
