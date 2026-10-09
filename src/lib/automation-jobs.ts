@@ -14,6 +14,7 @@ export const AUTOMATION_OPERATIONS = [
   "relationship_backfill",
   "autonomous_learning",
   "follow_up_detection",
+  "notification_orchestration",
 ] as const;
 
 export type AutomationOperation = typeof AUTOMATION_OPERATIONS[number];
@@ -137,4 +138,5 @@ export const automationOperationPath: Record<AutomationOperation, string> = {
   relationship_backfill: "/api/cron/relationship-backfill",
   autonomous_learning: "/api/cron/autonomous-learning",
   follow_up_detection: "/api/cron/follow-up-detection",
+  notification_orchestration: "/api/cron/notification-orchestration",
 };
