@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveManualMcpAccessToken } from "@/lib/manual-mcp-tokens";
 
 export function hashToken(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -25,7 +26,15 @@ export function hasScope(scope: string, required: string) {
 
 export async function resolveMcpAccessToken(authHeader: string | null) {
   if (!authHeader?.startsWith("Bearer ")) return null;
-  const tokenHash = hashToken(authHeader.slice(7));
+  const bearerToken = authHeader.slice(7).trim();
+  if (!bearerToken) return null;
+
+  // A private manual bearer token is deliberately resolved before the existing
+  // OAuth store. OAuth continues to work exactly as before for all other tokens.
+  const manualToken = await resolveManualMcpAccessToken(bearerToken);
+  if (manualToken) return manualToken;
+
+  const tokenHash = hashToken(bearerToken);
   const db = createAdminClient();
   const { data, error } = await db.from("solvani_oauth_tokens")
     .select("owner_id,scope,access_expires_at,revoked_at")

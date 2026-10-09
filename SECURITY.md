@@ -13,6 +13,7 @@
 - Only official, approved provider integrations or explicit manual capture are allowed; the system must not scrape personal messaging accounts or bypass platform access controls.
 - Screenshot text extraction requires an explicit per-image confirmation. Accepted images are size/type limited, sent with API storage disabled, and are not persisted by the application; extracted text remains unsaved until the owner reviews and imports it.
 - Every consequential action must write an audit event.
+- Personal ChatGPT MCP bearer tokens are generated only by the configured owner at MFA AAL2, are stored only as SHA-256 hashes, are never displayed again after initial creation, and can be revoked from Settings. The existing OAuth + PKCE MCP flow remains available separately.
 - Security headers are configured centrally in `next.config.ts`.
 - `.env` variants are ignored; only names are documented in `.env.example`.
 

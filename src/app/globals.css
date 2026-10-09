@@ -241,6 +241,22 @@ h1 { margin: 8px 0 5px; font-size: 29px; letter-spacing: -.04em; line-height: 1.
 
 .person-profile-link { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .person-profile-link:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+
+/* Sensitive personal integrations use a focused page, so secrets and revoke
+   controls are never lost among the broader workspace settings. */
+.mcp-settings-page { min-height:100vh; padding:48px 20px 84px; background:radial-gradient(circle at 88% 0,#18392d 0,transparent 34%),var(--bg); }
+.mcp-settings-shell { width:min(920px,100%); margin:0 auto; }
+.mcp-back-link { display:inline-block; color:#aeb8c3; font-size:13px; text-decoration:none; margin-bottom:28px; }.mcp-back-link:hover { color:#fff; text-decoration:underline; }
+.mcp-settings-shell h1 { font-size:clamp(30px,5vw,44px); margin-top:7px; }.mcp-intro { max-width:650px; color:#aeb8c3; font-size:15px; line-height:1.6; margin:0; }
+.mcp-endpoint-card,.mcp-token-section,.mcp-new-token { border:1px solid var(--line); border-radius:16px; background:color-mix(in srgb,var(--panel) 92%,#15513b 8%); padding:22px; margin-top:24px; }
+.mcp-endpoint-card { display:grid; gap:8px; }.mcp-endpoint-card span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.11em; font-weight:700; }.mcp-endpoint-card code,.mcp-setup-instructions code { color:#c5f7df; overflow-wrap:anywhere; }
+.mcp-section-head { display:flex; gap:18px; align-items:flex-start; justify-content:space-between; }.mcp-section-head h2,.mcp-new-token h2 { font-size:19px; margin:0; }.mcp-section-head p,.mcp-new-token>p { max-width:590px; margin:7px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }.mcp-section-head .btn { flex:none; min-height:36px; }
+.mcp-token-list { display:grid; gap:9px; margin-top:18px; }.mcp-token-row { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px; border:1px solid #2a333d; border-radius:11px; background:#0d1014; }.mcp-token-row>div { min-width:0; display:grid; grid-template-columns:auto auto; column-gap:8px; align-items:center; }.mcp-token-row strong { color:#edf2f6; font-size:13px; letter-spacing:.04em; }.mcp-token-row small { grid-column:1 / -1; color:#89939d; font-size:11px; line-height:1.45; margin-top:4px; overflow-wrap:anywhere; }
+.mcp-token-state { padding:3px 7px; border-radius:999px; font-size:9px; font-weight:750; text-transform:uppercase; letter-spacing:.05em; }.mcp-token-state.active { color:#a8f2ce; border:1px solid #3d8061; background:#112d20; }.mcp-token-state.revoked,.mcp-token-state.expired { color:#d2aab1; border:1px solid #70404b; background:#2b151a; }
+.mcp-empty { margin-top:16px; border:1px dashed #3b4651; border-radius:10px; padding:16px; color:var(--muted); font-size:12px; }.mcp-error,.mcp-success { margin:16px 0 0; padding:10px 12px; border-radius:9px; font-size:12px; line-height:1.5; }.mcp-error { color:#ffc0ca; border:1px solid #733945; background:#2b1419; }.mcp-success { color:#b9f6d4; border:1px solid #397154; background:#10271c; }
+.mcp-new-token { border-color:#3f8062; background:linear-gradient(145deg,#10261d,#101318); }.mcp-plaintext-token { display:block; margin-top:16px; padding:14px; border:1px solid #3e785d; border-radius:10px; background:#070a0b; color:#d6ffea; font-size:13px; line-height:1.6; overflow-wrap:anywhere; user-select:all; }.mcp-action-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.mcp-setup-instructions { margin-top:20px; padding-top:18px; border-top:1px solid #315642; }.mcp-setup-instructions h3 { margin:0; font-size:14px; }.mcp-setup-instructions ol { margin:9px 0; padding-left:21px; color:#ced6dd; font-size:12px; line-height:1.9; }.mcp-setup-instructions p { color:#aeb8c3; font-size:12px; margin:8px 0 0; }
+@media (max-width:640px) { .mcp-settings-page { padding:28px 14px 50px; }.mcp-endpoint-card,.mcp-token-section,.mcp-new-token { padding:17px; }.mcp-section-head,.mcp-token-row { align-items:stretch; flex-direction:column; }.mcp-section-head .btn,.mcp-token-row .btn { width:100%; }.mcp-action-row .btn { flex:1; }.mcp-token-row>div { gap:6px; } }
 /* Sent shares the inbox list/detail structure without leaving the workspace. */
 .sent-workspace { padding: 24px; min-width: 0; }
 .sent-inbox.inbox { display: grid; grid-template-columns: minmax(250px, 38%) minmax(0, 1fr); height: min(70vh, 800px); }

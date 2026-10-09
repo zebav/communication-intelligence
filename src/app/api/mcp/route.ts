@@ -6,6 +6,14 @@ import { hasScope, resolveMcpAccessToken } from "@/lib/mcp-oauth";
 export const runtime = "nodejs";
 
 const PROTOCOL_VERSION = "2025-06-18";
+const mcpReadSecuritySchemes = [
+  { type: "oauth2", scopes: ["contacts.read"] },
+  { type: "http", scheme: "bearer", bearerFormat: "Solvani personal MCP token" },
+];
+const mcpWriteSecuritySchemes = [
+  { type: "oauth2", scopes: ["contacts.write"] },
+  { type: "http", scheme: "bearer", bearerFormat: "Solvani personal MCP token" },
+];
 
 function rpc(id: unknown, result: unknown) {
   return NextResponse.json({ jsonrpc: "2.0", id, result }, { headers: { "Cache-Control": "no-store" } });
@@ -59,7 +67,7 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    securitySchemes: [{ type: "oauth2", scopes: ["contacts.read"] }],
+    securitySchemes: mcpReadSecuritySchemes,
   },
   {
     name: "set_contact_avatar",
@@ -86,7 +94,7 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    securitySchemes: [{ type: "oauth2", scopes: ["contacts.write"] }],
+    securitySchemes: mcpWriteSecuritySchemes,
     _meta: { "openai/fileParams": ["file"] },
   },
 ];
