@@ -144,5 +144,12 @@ export async function GET(request: NextRequest) {
     counts: { accounts: syncResults.length, synced, analyzed, remainingCandidates: Math.max(0, (pending?.length ?? 0) - candidates.length) },
     error: outcome === "failed" ? "email_sync_failed" : undefined,
   });
-  return NextResponse.json({ ok: true, provider, accounts: syncResults.length, synced, analyzed, analysisLimit: 3, ownerId, loginTriggered });
+  // The automation dispatcher uses the response status as its durable retry
+  // signal. Never report a completed job when a connected mailbox failed to
+  // import; otherwise Operations would say "Klar" while the account stays
+  // stale indefinitely.
+  return NextResponse.json(
+    { ok: outcome === "completed", provider, accounts: syncResults.length, synced, analyzed, analysisLimit: 3, ownerId, loginTriggered },
+    { status: outcome === "completed" ? 200 : 502, headers: { "Cache-Control": "no-store" } },
+  );
 }

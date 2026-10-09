@@ -44,5 +44,11 @@ export async function GET(request: NextRequest) {
   if (health?.affectedConnectionIds.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", health.affectedConnectionIds);
   const outcome = failed || reconciliationFailed ? "failed" : "completed";
   logOperation({ route: "/api/cron/instagram-intelligence", operation: "instagram_import_and_analysis", outcome, durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, analyzed, blocked_media: blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) } });
-  return NextResponse.json({ ok: true, analyzed, blockedMedia, failed, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, health });
+  // The dispatcher must see a real failure status so that an interrupted
+  // import is retried and remains visible in Operations instead of becoming a
+  // misleading successful run.
+  return NextResponse.json(
+    { ok: outcome === "completed", analyzed, blockedMedia, failed, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, health },
+    { status: outcome === "completed" ? 200 : 502, headers: { "Cache-Control": "no-store" } },
+  );
 }

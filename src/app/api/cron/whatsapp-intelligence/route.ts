@@ -50,5 +50,8 @@ export async function GET(request: NextRequest) {
     await connectionUpdate;
   }
   logOperation({ route: "/api/cron/whatsapp-intelligence", operation: "whatsapp_analysis_recovery", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { pending: pending?.length ?? 0, analyzed, blocked_media: blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) }, error: failed ? "whatsapp_analysis_failed" : undefined });
-  return NextResponse.json({ ok: true, analyzed, blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3 });
+  return NextResponse.json(
+    { ok: !failed, analyzed, blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3 },
+    { status: failed ? 502 : 200, headers: { "Cache-Control": "no-store" } },
+  );
 }
