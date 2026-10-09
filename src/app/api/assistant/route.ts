@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createMobileClient } from "@/lib/supabase/mobile";
 import { logOperation } from "@/lib/observability";
+import { measureServerTiming, serverTimingHeader, type ServerTiming } from "@/lib/server-timing";
 import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, survivesLowerPrioritySender, type Evidence, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient, type NotificationPeriod } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
@@ -39,23 +40,30 @@ async function session(request?: Request) {
   if (aalError || data?.currentLevel !== "aal2") throw new Error("Tvåfaktorsinloggning krävs.");
   return { db, owner: user.id };
 }
-const json = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { "Cache-Control": "no-store" } });
+const json = (value: unknown, status = 200, serverTiming?: ServerTiming) => NextResponse.json(value, {
+  status,
+  headers: {
+    "Cache-Control": "no-store",
+    ...(serverTiming && serverTimingHeader(serverTiming) ? { "Server-Timing": serverTimingHeader(serverTiming) } : {}),
+  },
+});
 export async function GET(request: Request) {
   const startedAt = Date.now();
+  const timings: ServerTiming = {};
   try {
     const { db, owner } = await session(request);
     const url = new URL(request.url);
     const cursor = z.coerce.number().int().min(0).max(100000).parse(url.searchParams.get("cursor") ?? 0);
     const period = z.enum(["today", "yesterday", "seven_days", "recovery"]).catch("seven_days").parse(url.searchParams.get("period")) as NotificationPeriod;
     const [page, tasks, feedback, calendar, relevanceRules, ingestion, suggestedLearning, awaitingAnalysis] = await Promise.all([
-      readCandidates(db, owner, String(cursor), period),
-      db.from("assistant_tasks").select("*").eq("owner_id", owner).order("updated_at", { ascending: false }).limit(120),
-      db.from("assistant_task_feedback").select("category").eq("owner_id", owner).order("created_at", { ascending: false }).limit(250),
-      db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle(),
-      db.from("learning_signals").select("person_id,source,evidence").eq("owner_id", owner).eq("signal_type", "category_corrected").eq("status", "approved").limit(250),
-      readDataIngestionHealth(db, owner).catch(() => null),
-      db.from("learning_signals").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("status", "suggested"),
-      db.from("messages").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("direction", "in").is("processed_at", null),
+      measureServerTiming(timings, "candidates", () => readCandidates(db, owner, String(cursor), period)),
+      measureServerTiming(timings, "tasks", () => db.from("assistant_tasks").select("*").eq("owner_id", owner).order("updated_at", { ascending: false }).limit(120)),
+      measureServerTiming(timings, "feedback", () => db.from("assistant_task_feedback").select("category").eq("owner_id", owner).order("created_at", { ascending: false }).limit(250)),
+      measureServerTiming(timings, "calendar", () => db.from("calendar_workspace").select("timezone").eq("owner_id", owner).maybeSingle()),
+      measureServerTiming(timings, "rules", () => db.from("learning_signals").select("person_id,source,evidence").eq("owner_id", owner).eq("signal_type", "category_corrected").eq("status", "approved").limit(250)),
+      measureServerTiming(timings, "ingestion", () => readDataIngestionHealth(db, owner).catch(() => null)),
+      measureServerTiming(timings, "learning", () => db.from("learning_signals").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("status", "suggested")),
+      measureServerTiming(timings, "pending", () => db.from("messages").select("id", { count: "exact", head: true }).eq("owner_id", owner).eq("direction", "in").is("processed_at", null)),
     ]);
     if (tasks.error || feedback.error || relevanceRules.error) throw new Error("Notiscentrets databas behöver installeras eller kunde inte läsas. Inga uppdrag har tagits bort.");
     // Saved tasks retain their complete, auditable original. Candidate rows are
@@ -120,10 +128,10 @@ export async function GET(request: Request) {
       learningSuggestions: suggestedLearning.error ? 0 : suggestedLearning.count ?? 0,
     };
     logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { messages_scanned: page.messages.length, candidates: candidates.length, notes: notes.length, tasks: stored.length } });
-    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, period: page.period, periodLabel: page.periodLabel, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations });
+    return json({ tasks: stored, candidates, notes, reviewMessages: page.messages.slice(0, 40).map(e => ({ id: e.messageId, title: e.title, person: e.personName })), next: page.next, scanned: page.messages.length, scannedBySource: page.scannedBySource, emailWindowDays: page.emailWindowDays, period: page.period, periodLabel: page.periodLabel, tasksLimited: stored.length === 120, feedback: feedback.data, timezone: calendar.error ? null : calendar.data?.timezone ?? null, executionEnabled: process.env.ASSISTANT_EXECUTION_ENABLED === "true", browserReadiness: browserReadiness(), operations }, 200, timings);
   } catch (e) {
     logOperation({ route: "/api/assistant", operation: "load_notification_centre", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: e });
-    return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503);
+    return json({ error: e instanceof Error ? e.message : "Uppdragen kunde inte hämtas." }, 503, timings);
   }
 }
 export async function POST(request: NextRequest) {
