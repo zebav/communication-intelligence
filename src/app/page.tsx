@@ -46,7 +46,7 @@ const workspaceViews = new Set<View>(["today", "cases", "inbox", "people", "foll
 
 export default async function Home({ searchParams }: HomeProps) {
   const requestedView = (await searchParams).view;
-  const initialView: View = typeof requestedView === "string" && workspaceViews.has(requestedView as View) ? requestedView as View : "today";
+  const initialView: View = requestedView === "sent" ? "inbox" : requestedView === "duplicates" ? "people" : typeof requestedView === "string" && workspaceViews.has(requestedView as View) ? requestedView as View : "today";
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -59,6 +59,13 @@ export default async function Home({ searchParams }: HomeProps) {
   // Recent message context is loaded below as one bounded payload instead.
   const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule)";
   const overviewCutoff = recentWindowStartIso(31);
+  const needsPeople = ["people", "inbox", "cases", "settings", "intelligence", "assistant", "calendar"].includes(initialView);
+  const needsConversationDetail = ["today", "inbox", "cases", "calendar"].includes(initialView);
+  const needsIdentityData = ["people", "inbox", "cases", "settings", "intelligence"].includes(initialView);
+  const needsLearning = ["settings", "intelligence"].includes(initialView);
+  const needsFollowUps = ["followups", "settings", "intelligence"].includes(initialView);
+  const needsOutcomes = ["settings", "intelligence"].includes(initialView);
+  const needsCalendarHistory = ["calendar", "settings", "intelligence"].includes(initialView);
   // Keep the shared client-side workspace snapshot bounded. Views can be
   // opened without a full server navigation, so selectively omitting a data
   // segment here would make an otherwise working view appear empty. The next
@@ -74,19 +81,19 @@ export default async function Home({ searchParams }: HomeProps) {
   const workspaceQuerySignal = () => AbortSignal.timeout(6_000);
   const workspaceQueries = Promise.all([
     supabase.rpc("get_universal_communication_profile").abortSignal(workspaceQuerySignal()),
-    supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(240).abortSignal(workspaceQuerySignal()),
+    needsPeople ? supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(240).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     // The inbox is the record of what arrived, not merely the short overview.
     // Keep enough email threads here that a busy mailbox cannot make recent,
     // actionable messages disappear behind older conversation activity.
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(workspaceQuerySignal()),
-    supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(45).abortSignal(workspaceQuerySignal()),
-    supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(400).abortSignal(workspaceQuerySignal()),
-    supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()),
-    supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(80).abortSignal(workspaceQuerySignal()),
-    supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,evidence,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()),
-    supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()),
+    needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(45).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsIdentityData ? supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(400).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsIdentityData ? supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsFollowUps ? supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsLearning ? supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,evidence,confidence,status,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsOutcomes ? supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(workspaceQuerySignal()),
-    supabase.from("calendar_holds").select("id,title,starts_at,ends_at,status").eq("owner_id", user.id).eq("status", "confirmed").order("starts_at", { ascending: false }).limit(50).abortSignal(workspaceQuerySignal()),
+    needsCalendarHistory ? supabase.from("calendar_holds").select("id,title,starts_at,ends_at,status").eq("owner_id", user.id).eq("status", "confirmed").order("starts_at", { ascending: false }).limit(50).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
   ]);
   const workspaceLoad = await Promise.race([
     workspaceQueries.then((result) => ({ kind: "loaded" as const, result })),
@@ -113,7 +120,7 @@ export default async function Home({ searchParams }: HomeProps) {
   ] = workspaceLoad.result;
   const conversationRows = [...(emailRows ?? []), ...(channelRows ?? [])];
   const conversationIds = conversationRows.map((row) => row.id);
-  const { data: messageRows, error: messageError } = conversationIds.length
+  const { data: messageRows, error: messageError } = conversationIds.length && needsConversationDetail
     ? await supabase.from("messages").select("id,conversation_id,body_text,sent_at,direction,classification,importance_score,attachment_count,metadata").eq("owner_id", user.id).in("conversation_id", conversationIds).order("sent_at", { ascending: false }).limit(400).abortSignal(AbortSignal.timeout(6_000))
     : { data: [], error: null };
   const messagesByConversation = new Map<string, WorkspaceMessageRow[]>();
