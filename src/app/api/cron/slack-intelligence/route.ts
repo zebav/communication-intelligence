@@ -39,10 +39,11 @@ export async function GET(request: NextRequest) {
     source: "slack",
   })));
   const analysisFailed = pendingError ? 1 : analysisResults.filter((result) => result.status === "rejected").length;
-  const analyzed = analysisResults.filter((result) => result.status === "fulfilled").length;
+  const analyzed = analysisResults.filter((result) => result.status === "fulfilled" && result.value.status === "analyzed").length;
+  const blockedMedia = analysisResults.filter((result) => result.status === "fulfilled" && result.value.status === "blocked_media").length;
   const failed = results.filter((result) => result.status === "rejected").length + analysisFailed;
   if (failed && connections?.length) await db.from("connections").update({ health_status: reconnectRequired ? "reconnect_required" : "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   const imported = results.filter((result): result is PromiseFulfilledResult<{ imported: number }> => result.status === "fulfilled").reduce((sum, result) => sum + result.value.imported, 0);
-  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, analyzed, pending: pending?.length ?? 0, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : undefined) });
-  return NextResponse.json({ ok: true, imported, analyzed, failed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), analysisLimit: 3 });
+  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, analyzed, blocked_media: blockedMedia, pending: pending?.length ?? 0, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : undefined) });
+  return NextResponse.json({ ok: true, imported, analyzed, blockedMedia, failed, reconnectRequired, remaining: Math.max(0, (pending?.length ?? 0) - analysisCandidates.length), analysisLimit: 3 });
 }

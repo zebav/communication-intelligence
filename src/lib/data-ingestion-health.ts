@@ -3,15 +3,42 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
 export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; retrievalPending: number; retrievalFailed: number; analysisPending: number; vaultRetained: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
+function ownerScope(query: any, ownerId?: string): any {
+  return ownerId ? query.eq("owner_id", ownerId) : query;
+}
+
+/**
+ * Return lifecycle status from database counts rather than an arbitrary page
+ * of old jobs. The former implementation could keep surfacing a historical
+ * attachment after it had recovered and hide newer work behind the 200-row
+ * limit, which made the UI operationally misleading.
+ */
 export async function readDataIngestionHealth(database: SupabaseClient, ownerId?: string): Promise<IngestionHealth> {
-  let query = database.from("vault_ingestion_jobs").select("connection_id,state,created_at,retrieval_status,analysis_status,vault_status").order("created_at", { ascending: true }).limit(200);
-  if (ownerId) query = query.eq("owner_id", ownerId);
-  const { data, error } = await query;
-  if (error) throw new Error("Media queue could not be read.");
-  const rows = data ?? [];
-  const pending = rows.filter((item) => item.state === "pending" || item.state === "processing");
-  const failed = rows.filter((item) => item.state === "failed");
-  const deadLetter = rows.filter((item) => item.state === "dead_letter");
+  const count = (filter: (query: any) => any) => filter(ownerScope(database.from("vault_ingestion_jobs").select("id", { count: "exact", head: true }), ownerId));
+  const oldest = ownerScope(database.from("vault_ingestion_jobs").select("created_at"), ownerId)
+    .in("state", ["pending", "processing"])
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const affected = ownerScope(database.from("vault_ingestion_jobs").select("connection_id"), ownerId)
+    .in("state", ["failed", "dead_letter"])
+    .not("connection_id", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(100);
+  const [pendingResult, failedResult, deadLetterResult, retrievalPendingResult, retrievalFailedResult, analysisPendingResult, retainedResult, oldestResult, affectedResult] = await Promise.all([
+    count((query) => query.in("state", ["pending", "processing"])),
+    count((query) => query.eq("state", "failed")),
+    count((query) => query.eq("state", "dead_letter")),
+    count((query) => query.in("retrieval_status", ["queued", "fetching"])),
+    count((query) => query.in("retrieval_status", ["failed", "expired"])),
+    count((query) => query.in("analysis_status", ["queued", "processing"])),
+    count((query) => query.eq("vault_status", "retained")),
+    oldest,
+    affected,
+  ]);
+  if ([pendingResult, failedResult, deadLetterResult, retrievalPendingResult, retrievalFailedResult, analysisPendingResult, retainedResult, oldestResult, affectedResult].some((result) => result.error)) {
+    throw new Error("Media queue could not be read.");
+  }
   let connections: IngestionConnection[] = [];
   if (ownerId) {
     const { data, error: connectionError } = await database.from("connections")
@@ -34,5 +61,16 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
       };
     });
   }
-  return { pendingMedia: pending.length, failedMedia: failed.length, deadLetterMedia: deadLetter.length, retrievalPending: rows.filter((item) => item.retrieval_status === "queued" || item.retrieval_status === "fetching").length, retrievalFailed: rows.filter((item) => item.retrieval_status === "failed" || item.retrieval_status === "expired").length, analysisPending: rows.filter((item) => item.analysis_status === "queued" || item.analysis_status === "processing").length, vaultRetained: rows.filter((item) => item.vault_status === "retained").length, oldestPendingAt: pending[0]?.created_at ?? null, affectedConnectionIds: [...new Set([...failed, ...deadLetter].map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))], connections };
+  return {
+    pendingMedia: pendingResult.count ?? 0,
+    failedMedia: failedResult.count ?? 0,
+    deadLetterMedia: deadLetterResult.count ?? 0,
+    retrievalPending: retrievalPendingResult.count ?? 0,
+    retrievalFailed: retrievalFailedResult.count ?? 0,
+    analysisPending: analysisPendingResult.count ?? 0,
+    vaultRetained: retainedResult.count ?? 0,
+    oldestPendingAt: typeof oldestResult.data?.created_at === "string" ? oldestResult.data.created_at : null,
+    affectedConnectionIds: [...new Set(((affectedResult.data ?? []) as Array<{ connection_id: unknown }>).map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))],
+    connections,
+  };
 }

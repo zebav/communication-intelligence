@@ -6,16 +6,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
+import type { IncomingAnalysisResult } from "@/lib/connectors/instagram-intelligence";
 
-export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; conversationId: string; messageId: string }) {
+export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; conversationId: string; messageId: string }): Promise<IncomingAnalysisResult> {
   const database = createAdminClient();
   const [{ data: conversation }, { data: message }, { data: profile }] = await Promise.all([
     database.from("conversations").select("id,title,person_id").eq("id", input.conversationId).eq("owner_id", input.ownerId).eq("source", "whatsapp").maybeSingle(),
     database.from("messages").select("id,body_text,metadata,direction,sent_at").eq("id", input.messageId).eq("owner_id", input.ownerId).eq("source", "whatsapp").maybeSingle(),
     database.from("profiles").select("preferences").eq("id", input.ownerId).maybeSingle(),
   ]);
-  if (!conversation || !message || message.direction !== "in") return;
-  if (blocksDecisionUntilMediaReady(message.metadata)) return;
+  if (!conversation || !message || message.direction !== "in") return { status: "skipped" };
+  if (blocksDecisionUntilMediaReady(message.metadata)) return { status: "blocked_media" };
   const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }, relationshipIntelligence] = await Promise.all([
     conversation.person_id ? database.from("people").select("display_name,relationship_type,organization,relationship_summary").eq("id", conversation.person_id).eq("owner_id", input.ownerId).maybeSingle() : Promise.resolve({ data: null }),
     database.from("messages").select("direction,body_text,sent_at").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", "whatsapp").order("sent_at", { ascending: false }).limit(100),
@@ -32,7 +33,8 @@ export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; c
   const existingMetadata = message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata) ? message.metadata : {};
   const now = new Date().toISOString();
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, planningSuggestion: analysis.planningSuggestion, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };
-  await database.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...existingMetadata, ai_analysis: storedAnalysis } }).eq("id", message.id).eq("owner_id", input.ownerId);
+  const { error: messageUpdateError } = await database.from("messages").update({ classification: analysis.category, importance_score: analysis.priorityScore, processed_at: now, metadata: { ...existingMetadata, ai_analysis: storedAnalysis } }).eq("id", message.id).eq("owner_id", input.ownerId);
+  if (messageUpdateError) throw new Error("message_analysis_persist_failed");
   await database.from("conversations").update({ priority_score: analysis.priorityScore, summary: analysis.summary, recommended_action: { action: analysis.recommendedAction, reason: analysis.priorityReason, source: "ai" }, updated_at: now }).eq("id", conversation.id).eq("owner_id", input.ownerId);
   if (conversation.person_id) {
     if ((!person?.relationship_type || person.relationship_type === "unknown") && analysis.relationshipSuggestion.confidence >= 0.8 && relationshipTypes.includes(analysis.relationshipSuggestion.type)) await database.from("people").update({ relationship_type: analysis.relationshipSuggestion.type, relationship_summary: analysis.summary, updated_at: now }).eq("id", conversation.person_id).eq("owner_id", input.ownerId);
@@ -41,4 +43,5 @@ export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; c
   }
   if (analysis.commitment.detected && analysis.commitment.confidence >= 0.75 && analysis.commitment.description.trim()) await database.from("commitments").upsert({ owner_id: input.ownerId, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: analysis.commitment.dueAt || null, status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   if (conversation.person_id) await refreshRelationshipIntelligence(database, input.ownerId, conversation.person_id).catch(() => undefined);
+  return { status: "analyzed" };
 }

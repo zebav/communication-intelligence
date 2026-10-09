@@ -8,7 +8,12 @@ import { mediaContextForMessage } from "@/lib/media/context";
 import { inboundBurst } from "@/lib/ai/inbound-burst";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 
-export async function analyzeIncomingInstagramMessage(input: { ownerId: string; conversationId: string; messageId: string; source?: "instagram" | "slack" }) {
+export type IncomingAnalysisResult =
+  | { status: "analyzed" }
+  | { status: "blocked_media" }
+  | { status: "skipped" };
+
+export async function analyzeIncomingInstagramMessage(input: { ownerId: string; conversationId: string; messageId: string; source?: "instagram" | "slack" }): Promise<IncomingAnalysisResult> {
   const source = input.source ?? "instagram";
   const database = createAdminClient();
   const [{ data: conversation }, { data: message }, { data: profile }] = await Promise.all([
@@ -16,8 +21,8 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
     database.from("messages").select("id,body_text,metadata,direction,sent_at").eq("id", input.messageId).eq("owner_id", input.ownerId).eq("source", source).maybeSingle(),
     database.from("profiles").select("preferences").eq("id", input.ownerId).maybeSingle(),
   ]);
-  if (!conversation || !message || message.direction !== "in") return;
-  if (blocksDecisionUntilMediaReady(message.metadata)) return;
+  if (!conversation || !message || message.direction !== "in") return { status: "skipped" };
+  if (blocksDecisionUntilMediaReady(message.metadata)) return { status: "blocked_media" };
   const [{ data: person }, { data: history }, { data: memories }, { data: styleRows }, relationshipIntelligence] = await Promise.all([
     conversation.person_id ? database.from("people").select("display_name,relationship_type,organization,relationship_summary").eq("id", conversation.person_id).eq("owner_id", input.ownerId).maybeSingle() : Promise.resolve({ data: null }),
     database.from("messages").select("id,direction,body_text,sent_at").eq("owner_id", input.ownerId).eq("conversation_id", conversation.id).eq("source", source).order("sent_at", { ascending: false }).limit(30),
@@ -43,7 +48,8 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
   const now = new Date().toISOString();
   const storedAnalysis = { confidence: analysis.confidence, summary: analysis.summary, intent: analysis.intent, priorityReason: analysis.priorityReason, requiresReply: analysis.requiresReply, draftResponse: analysis.draftResponse, draftTone: analysis.draftTone, sendTiming: analysis.sendTiming, assessedMessageIds: burst.messageIds, assessedMessageCount: burst.count, planningSuggestion: analysis.planningSuggestion, relationshipSuggestion: analysis.relationshipSuggestion, forwardingSuggestion: analysis.forwardingSuggestion, actionSuggestion: analysis.actionSuggestion, commitment: analysis.commitment.detected ? analysis.commitment : undefined };
   const mentionPriority = messageMetadata.slack_mentioned_owner === true ? 9 : 0;
-  await database.from("messages").update({ classification: analysis.category, importance_score: Math.max(analysis.priorityScore, mentionPriority), processed_at: now, metadata: { ...existingMetadata, ai_analysis: { ...storedAnalysis, slackRoutine: source === "slack" ? (messageMetadata.slack_mentioned_owner === true ? "owner_mentioned" : slackMode === "work" ? "work_channel" : "private_conversation") : undefined } } }).eq("id", message.id).eq("owner_id", input.ownerId);
+  const { error: messageUpdateError } = await database.from("messages").update({ classification: analysis.category, importance_score: Math.max(analysis.priorityScore, mentionPriority), processed_at: now, metadata: { ...existingMetadata, ai_analysis: { ...storedAnalysis, slackRoutine: source === "slack" ? (messageMetadata.slack_mentioned_owner === true ? "owner_mentioned" : slackMode === "work" ? "work_channel" : "private_conversation") : undefined } } }).eq("id", message.id).eq("owner_id", input.ownerId);
+  if (messageUpdateError) throw new Error("message_analysis_persist_failed");
   await database.from("conversations").update({ priority_score: Math.max(analysis.priorityScore, mentionPriority), summary: analysis.summary, recommended_action: { action: analysis.recommendedAction, reason: analysis.priorityReason, source: "ai" }, updated_at: now }).eq("id", conversation.id).eq("owner_id", input.ownerId);
   if (conversation.person_id) {
     if ((!person?.relationship_type || person.relationship_type === "unknown") && analysis.relationshipSuggestion.confidence >= 0.8 && relationshipTypes.includes(analysis.relationshipSuggestion.type)) {
@@ -56,4 +62,5 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
     await database.from("commitments").upsert({ owner_id: input.ownerId, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: analysis.commitment.dueAt || null, status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
   if (conversation.person_id) await refreshRelationshipIntelligence(database, input.ownerId, conversation.person_id).catch(() => undefined);
+  return { status: "analyzed" };
 }

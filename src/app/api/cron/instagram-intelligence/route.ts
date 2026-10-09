@@ -34,13 +34,14 @@ export async function GET(request: NextRequest) {
   if (error) return NextResponse.json({ error: "Pending Instagram messages could not be loaded." }, { status: 500 });
   const candidates = (pending ?? []).filter((message) => !metadataObject(message.metadata).ai_analysis).slice(0, 3);
   const results = await Promise.allSettled(candidates.map((message) => analyzeIncomingInstagramMessage({ ownerId: message.owner_id, conversationId: message.conversation_id, messageId: message.id })));
-  const analyzed = results.filter((result) => result.status === "fulfilled").length;
-  const failed = results.length - analyzed;
+  const analyzed = results.filter((result) => result.status === "fulfilled" && result.value.status === "analyzed").length;
+  const blockedMedia = results.filter((result) => result.status === "fulfilled" && result.value.status === "blocked_media").length;
+  const failed = results.filter((result) => result.status === "rejected").length;
   if ((failed || reconciliationFailed) && connections?.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   else if (analyzed && connections?.length) await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   const health = await readDataIngestionHealth(database).catch(() => null);
   if (health?.affectedConnectionIds.length) await database.from("connections").update({ health_status: "degraded", updated_at: new Date().toISOString() }).in("id", health.affectedConnectionIds);
   const outcome = failed || reconciliationFailed ? "failed" : "completed";
-  logOperation({ route: "/api/cron/instagram-intelligence", operation: "instagram_import_and_analysis", outcome, durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, analyzed, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) } });
-  return NextResponse.json({ ok: true, analyzed, failed, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, health });
+  logOperation({ route: "/api/cron/instagram-intelligence", operation: "instagram_import_and_analysis", outcome, durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, analyzed, blocked_media: blockedMedia, failed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length) } });
+  return NextResponse.json({ ok: true, analyzed, blockedMedia, failed, reconciled: reconciliation.length - reconciliationFailed, reconciliationFailed, remaining: Math.max(0, (pending?.length ?? 0) - candidates.length), analysisLimit: 3, health });
 }
