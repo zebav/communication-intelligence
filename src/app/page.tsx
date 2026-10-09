@@ -121,6 +121,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const needsPeople = ["people", "inbox", "cases", "settings", "intelligence", "assistant", "calendar"].includes(initialView);
   const needsConversationDetail = ["today", "inbox", "cases", "calendar"].includes(initialView);
   const needsTodaySummaries = initialView === "today";
+  const needsProfile = initialView === "settings";
   const needsIdentityData = ["people", "inbox", "cases", "settings", "intelligence"].includes(initialView);
   const needsLearning = ["settings", "intelligence"].includes(initialView);
   const needsFollowUps = ["followups", "settings", "intelligence"].includes(initialView);
@@ -139,7 +140,7 @@ export default async function Home({ searchParams }: HomeProps) {
   // deadline instead of leaving the user on an indefinite loading screen.
   const workspaceQuerySignal = () => AbortSignal.timeout(6_000);
   const workspaceQueries = Promise.all([
-    supabase.rpc("get_universal_communication_profile").abortSignal(workspaceQuerySignal()),
+    needsProfile ? supabase.rpc("get_universal_communication_profile").abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsPeople ? supabase.from("people").select("id,display_name,relationship_type,organization,entity_type,professional_specialty,jurisdiction,notes,relationship_summary,overall_priority,manual_priority,first_contact_at,last_contact_at").eq("owner_id", user.id).or("relationship_status.is.null,relationship_status.neq.merged").order("last_contact_at", { ascending: false, nullsFirst: false }).limit(240).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     // The inbox is the record of what arrived, not merely the short overview.
     // Keep enough email threads here that a busy mailbox cannot make recent,
