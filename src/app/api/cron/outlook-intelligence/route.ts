@@ -112,7 +112,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,sent_at,classification,importance_score,metadata,attachment_count").eq("source", "email").eq("direction", "in").order("sent_at", { ascending: false });
+  // An analyzed message is durable state. Query only the recovery backlog so a
+  // busy mailbox does not repeatedly scan recent, already-prepared threads.
+  let pendingQuery = supabase.from("messages").select("id,owner_id,conversation_id,body_text,sent_at,classification,importance_score,metadata,attachment_count").eq("source", "email").eq("direction", "in").is("processed_at", null).order("sent_at", { ascending: false });
   if (ownerId) pendingQuery = pendingQuery.eq("owner_id", ownerId);
   const { data: pending } = await pendingQuery.limit(ownerId ? 30 : 50);
   const candidates = (pending ?? []).filter((message) => metadataObject(message.metadata).provider === provider && (isRelevantEmail(message.classification ?? "") || Number(message.importance_score ?? 0) >= 8) && !metadataObject(message.metadata).ai_analysis && !blocksDecisionUntilMediaReady(message.metadata, Number(message.attachment_count ?? 0))).slice(0, 3) as Candidate[];
