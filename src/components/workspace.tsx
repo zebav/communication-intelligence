@@ -15,11 +15,11 @@ const DocumentVault = dynamic(() => import("@/components/document-vault").then(m
 const ServiceToolLayer = dynamic(() => import("@/components/service-tool-layer").then(module => module.ServiceToolLayer), { loading: () => <p>Hämtar tjänster och säkerhetsregler…</p> });
 const OperationsDashboard = dynamic(() => import("@/components/operations-dashboard").then(module => module.OperationsDashboard), { loading: () => <p>Hämtar driftstatus…</p> });
 const RelationshipWorkspace = dynamic(() => import("@/components/relationship-workspace").then(module => module.RelationshipWorkspace), { loading: () => <p>Hämtar relationsanalys…</p> });
-import { MessageAttachments } from "@/components/message-attachments";
-import { PriorityFeedback } from "@/components/priority-feedback";
+const MessageAttachments = dynamic(() => import("@/components/message-attachments").then(module => module.MessageAttachments), { loading: () => null });
+const PriorityFeedback = dynamic(() => import("@/components/priority-feedback").then(module => module.PriorityFeedback), { loading: () => null });
 const AccountPlan = dynamic(() => import("@/components/account-plan").then(module => module.AccountPlan), { loading: () => <p>Hämtar abonnemang…</p> });
-import { DataIngestionStatus } from "@/components/data-ingestion-status";
-import { ScheduledSendControl } from "@/components/scheduled-send-control";
+const DataIngestionStatus = dynamic(() => import("@/components/data-ingestion-status").then(module => module.DataIngestionStatus), { loading: () => <p className="muted">Kontrollerar datainhämtning…</p> });
+const ScheduledSendControl = dynamic(() => import("@/components/scheduled-send-control").then(module => module.ScheduledSendControl), { loading: () => null });
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -31,7 +31,7 @@ import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment,
 import type { DraftTransformation } from "@/lib/ai/service";
 import { emailDashboardExcerpt, emailDashboardSummary, prioritizeEmails } from "@/lib/email-intelligence";
 import { isRelevantEmail } from "@/lib/connectors/email-classification";
-import { PersonaForm } from "@/components/persona-form";
+const PersonaForm = dynamic(() => import("@/components/persona-form").then(module => module.PersonaForm), { loading: () => <p className="muted">Öppnar kommunikationsprofil…</p> });
 import { followUpSection } from "@/lib/commitments";
 import { savePersonIntelligence } from "@/app/people/actions";
 import { reviewLearningSignal } from "@/app/intelligence/actions";
