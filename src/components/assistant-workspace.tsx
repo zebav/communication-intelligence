@@ -22,7 +22,7 @@ export type AssistantSnapshot = {
   operations?: { pendingMedia: number; failedMedia: number; actionRequiredConnections: number; awaitingAnalysis: number; learningSuggestions: number; unreadNotifications?: number };
 };
 type Api = (body: Record<string, unknown>) => Promise<void>;
-export function AssistantWorkspace({ people }: { people: CommunicationPersonOption[] }) {
+export function AssistantWorkspace({ people, initialTaskId }: { people: CommunicationPersonOption[]; initialTaskId?: string }) {
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState(""), [period, setPeriod] = useState<"today" | "yesterday" | "seven_days" | "recovery">("seven_days");
   const maintenanceRefreshScheduled = useRef(false);
@@ -34,7 +34,7 @@ export function AssistantWorkspace({ people }: { people: CommunicationPersonOpti
     if (!r.ok) throw new Error(data.error || "Uppdragen kunde inte hämtas.");
     return data as AssistantSnapshot;
   }, [cursor, period]);
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Notiscentret tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [load]);
+  useEffect(() => { const controller = new AbortController(); void load(controller.signal).then(data => { if (!controller.signal.aborted) { setSnapshot(data); setError(""); if (initialTaskId && data.tasks.some((task) => task.id === initialTaskId)) setSelected(initialTaskId); } }).catch(e => { if (e.name !== "AbortError") setError(e.name === "TimeoutError" ? "Notiscentret tog för lång tid att hämta. Försök igen." : e.message); }); return () => controller.abort(); }, [initialTaskId, load]);
   // The workspace starts maintenance just after login. Refresh once after its
   // bounded first pass so new decisions appear without the user pressing a button.
   useEffect(() => {
