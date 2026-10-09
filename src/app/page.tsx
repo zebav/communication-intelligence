@@ -4,6 +4,8 @@ import type { View } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { defaultUniversalProfile, normalizeUniversalProfile } from "@/lib/communication-profile";
 import { recentWindowStartIso } from "@/lib/recent-window";
+import { logOperation } from "@/lib/observability";
+import { newTraceId } from "@/lib/automation-jobs";
 import type { CalendarLearningEvent, ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +47,8 @@ type HomeProps = {
 const workspaceViews = new Set<View>(["today", "cases", "inbox", "people", "followups", "cleanup", "intelligence", "connections", "settings", "calendar", "assistant", "relationships"]);
 
 export default async function Home({ searchParams }: HomeProps) {
+  const workspaceStartedAt = Date.now();
+  const workspaceTraceId = newTraceId();
   const requestedView = (await searchParams).view;
   const initialView: View = requestedView === "sent" ? "inbox" : requestedView === "duplicates" ? "people" : typeof requestedView === "string" && workspaceViews.has(requestedView as View) ? requestedView as View : "today";
   const supabase = await createClient();
@@ -66,11 +70,10 @@ export default async function Home({ searchParams }: HomeProps) {
   const needsFollowUps = ["followups", "settings", "intelligence"].includes(initialView);
   const needsOutcomes = ["settings", "intelligence"].includes(initialView);
   const needsCalendarHistory = ["calendar", "settings", "intelligence"].includes(initialView);
-  // Keep the shared client-side workspace snapshot bounded. Views can be
-  // opened without a full server navigation, so selectively omitting a data
-  // segment here would make an otherwise working view appear empty. The next
-  // step is view-specific fetching; this safe first step reduces bootstrap
-  // weight without changing what is available after in-app navigation.
+  // The client updates the canonical view URL before switching sections, so
+  // this server component can keep the bootstrap payload limited to what the
+  // active view truly needs. It avoids serializing private data for unused
+  // workspace sections while preserving direct links and back/forward use.
   // Each request needs its own cancellation signal. Reusing one shared signal
   // means that one slow optional query aborts every other workspace query at
   // the same instant, leaving a freshly reloaded workspace with no renderable
@@ -99,7 +102,9 @@ export default async function Home({ searchParams }: HomeProps) {
     workspaceQueries.then((result) => ({ kind: "loaded" as const, result })),
     new Promise<{ kind: "timed-out" }>((resolve) => setTimeout(() => resolve({ kind: "timed-out" }), 6_500)),
   ]);
+  const baseLoadMs = Date.now() - workspaceStartedAt;
   if (workspaceLoad.kind === "timed-out") {
+    logOperation({ route: "/", operation: `workspace_load_${initialView}`, outcome: "timed_out", durationMs: baseLoadMs, traceId: workspaceTraceId });
     return <WorkspaceSnapshot key={user.id} failedSections={["Arbetsytans data"]} data={{
       userEmail: user.email ?? "Private owner", communicationCases: [], connections: [], syncedEmails: [], followUps: [], people: [], learningSignals: [], outcomes: [], calendarHistory: [],
       persona: defaultUniversalProfile, profilePeople: [], initialView,
@@ -120,9 +125,11 @@ export default async function Home({ searchParams }: HomeProps) {
   ] = workspaceLoad.result;
   const conversationRows = [...(emailRows ?? []), ...(channelRows ?? [])];
   const conversationIds = conversationRows.map((row) => row.id);
+  const messageLoadStartedAt = Date.now();
   const { data: messageRows, error: messageError } = conversationIds.length && needsConversationDetail
     ? await supabase.from("messages").select("id,conversation_id,body_text,sent_at,direction,classification,importance_score,attachment_count,metadata").eq("owner_id", user.id).in("conversation_id", conversationIds).order("sent_at", { ascending: false }).limit(400).abortSignal(AbortSignal.timeout(6_000))
     : { data: [], error: null };
+  const messageLoadMs = Date.now() - messageLoadStartedAt;
   const messagesByConversation = new Map<string, WorkspaceMessageRow[]>();
   for (const message of (messageRows ?? []) as WorkspaceMessageRow[]) {
     const current = messagesByConversation.get(message.conversation_id) ?? [];
@@ -138,6 +145,21 @@ export default async function Home({ searchParams }: HomeProps) {
     ["Intelligence", learningError], ["Outcomes", outcomeError], ["Anslutningar", connectionError], ["Kalenderhistorik", calendarHistoryError],
   ] as const;
   const failedSections = loadResults.filter(([, error]) => error).map(([section]) => section);
+  logOperation({
+    route: "/",
+    operation: `workspace_load_${initialView}`,
+    outcome: "completed",
+    durationMs: Date.now() - workspaceStartedAt,
+    traceId: workspaceTraceId,
+    counts: {
+      base_load_ms: baseLoadMs,
+      message_load_ms: messageLoadMs,
+      email_conversations: emailRows?.length ?? 0,
+      channel_conversations: channelRows?.length ?? 0,
+      message_rows: messageRows?.length ?? 0,
+      failed_sections: failedSections.length,
+    },
+  });
   for (const [section, error] of loadResults) {
     if (error) console.error("workspace_load_failed", { section, code: error.code || "request_failed" });
   }
