@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/purity -- Server-side timing is request-scoped observability, never rendered state. */
 import { redirect } from "next/navigation";
 import { WorkspaceSnapshot } from "@/components/workspace-snapshot";
 import type { View } from "@/components/workspace";
@@ -20,6 +21,29 @@ type WorkspaceMessageRow = {
   importance_score: number | null;
   attachment_count: number | null;
   metadata: unknown;
+};
+
+type WorkspaceIdentityRow = {
+  id: string;
+  person_id: string | null;
+  source: string;
+  external_identifier: string;
+  verified_match: boolean;
+};
+
+type WorkspaceMemoryRow = {
+  id: string;
+  person_id: string | null;
+  conversation_id: string | null;
+  category: string;
+  content: string;
+  confidence: number | null;
+  user_verified: boolean;
+};
+
+type WorkspaceCommitmentRow = {
+  person_id: string | null;
+  status: string;
 };
 
 function deduplicateStoredSources(sources: DeepAnalysis["sources"] | undefined) {
@@ -143,6 +167,43 @@ export default async function Home({ searchParams }: HomeProps) {
     messagesByConversation.set(message.conversation_id, current);
   }
   const rows = conversationRows.map((row) => ({ ...row, messages: messagesByConversation.get(row.id) ?? [] }));
+  const workspaceIdentities = (identityRows ?? []) as WorkspaceIdentityRow[];
+  const workspaceMemories = (memoryRows ?? []) as WorkspaceMemoryRow[];
+  const workspaceCommitments = (commitmentRows ?? []) as WorkspaceCommitmentRow[];
+  const identitiesByPerson = new Map<string, WorkspaceIdentityRow[]>();
+  const memoriesByPerson = new Map<string, WorkspaceMemoryRow[]>();
+  const memoriesByConversation = new Map<string, WorkspaceMemoryRow[]>();
+  const conversationsByPerson = new Map<string, typeof rows>();
+  const openCommitmentsByPerson = new Map<string, number>();
+  for (const identity of workspaceIdentities) {
+    if (!identity.person_id) continue;
+    const current = identitiesByPerson.get(identity.person_id) ?? [];
+    current.push(identity);
+    identitiesByPerson.set(identity.person_id, current);
+  }
+  for (const memory of workspaceMemories) {
+    if (memory.person_id) {
+      const current = memoriesByPerson.get(memory.person_id) ?? [];
+      current.push(memory);
+      memoriesByPerson.set(memory.person_id, current);
+    }
+    if (memory.conversation_id) {
+      const current = memoriesByConversation.get(memory.conversation_id) ?? [];
+      current.push(memory);
+      memoriesByConversation.set(memory.conversation_id, current);
+    }
+  }
+  for (const row of rows) {
+    const person = Array.isArray(row.people) ? row.people[0] : row.people;
+    if (!person?.id || isSyntheticTestConversation(row)) continue;
+    const current = conversationsByPerson.get(person.id) ?? [];
+    current.push(row);
+    conversationsByPerson.set(person.id, current);
+  }
+  for (const commitment of workspaceCommitments) {
+    if (commitment.status !== "open" || !commitment.person_id) continue;
+    openCommitmentsByPerson.set(commitment.person_id, (openCommitmentsByPerson.get(commitment.person_id) ?? 0) + 1);
+  }
   const profile = Array.isArray(profileRows) ? profileRows[0] : profileRows;
   const loadResults = [
     ["Profil", profileError], ["Kontakter", personError], ["E-post", emailError],
@@ -197,7 +258,7 @@ export default async function Home({ searchParams }: HomeProps) {
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata) ? latestMessage.metadata as { ai_analysis?: CommunicationCase["analysis"] } : {};
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
-    const whatsappIdentities = (identityRows ?? []).filter((identity) => row.source === "whatsapp" && identity.source === "whatsapp" && identity.person_id === person?.id);
+    const whatsappIdentities = row.source === "whatsapp" && person?.id ? (identitiesByPerson.get(person.id) ?? []).filter((identity) => identity.source === "whatsapp") : [];
     const whatsappRecipient = whatsappIdentities.length === 1 ? whatsappIdentities[0].external_identifier : undefined;
     return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at, attachmentCount: Number(item.attachment_count ?? 0) })).filter((item) => item.body || item.attachmentCount > 0) };
   });
@@ -241,7 +302,7 @@ export default async function Home({ searchParams }: HomeProps) {
       manualPriority: person?.manual_priority == null ? null : Number(person.manual_priority),
       handlingRule: person?.email_handling_rule === "always_priority" || person?.email_handling_rule === "low_priority" ? person.email_handling_rule : "normal",
       relevanceReasons: Array.isArray(relevanceReasons) ? relevanceReasons.filter((reason): reason is string => typeof reason === "string") : ["Priority currently comes from the message category."],
-      memories: (memoryRows ?? []).filter((memory) => memory.conversation_id === row.id && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: memory.user_verified })),
+      memories: (memoriesByConversation.get(row.id) ?? []).filter((memory) => ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: memory.user_verified })),
       threadMessages,
       analysis,
       deepAnalysis,
@@ -249,10 +310,7 @@ export default async function Home({ searchParams }: HomeProps) {
   });
 
   const intelligentPeople: IntelligentPerson[] = (personRows ?? []).map((person) => {
-    const allPersonConversations = (rows ?? []).filter((row) => !isSyntheticTestConversation(row) && (() => {
-      const linked = Array.isArray(row.people) ? row.people[0] : row.people;
-      return linked?.id === person.id;
-    })());
+    const allPersonConversations = conversationsByPerson.get(person.id) ?? [];
     const personConversations = [...allPersonConversations.reduce((grouped, row) => {
       const key = row.source === "email" ? `email:${row.id}` : `${row.source}:imported-thread`;
       const current = grouped.get(key);
@@ -269,10 +327,10 @@ export default async function Home({ searchParams }: HomeProps) {
     const contactDates = personConversations.flatMap((row) => Array.isArray(row.messages) ? row.messages.map((message) => String(message.sent_at)) : []).filter(Boolean).sort();
     return {
       id: person.id, name: person.display_name ?? "Unknown person", organization: person.organization ?? "", relationshipType: person.relationship_type ?? "unknown", entityType: person.entity_type === "person" || person.entity_type === "organization" || person.entity_type === "automated" ? person.entity_type : "unknown", professionalSpecialty: person.professional_specialty ?? "", jurisdiction: person.jurisdiction ?? "", notes: person.notes ?? "", relationshipSummary: person.relationship_summary ?? "", manualPriority: person.manual_priority == null ? undefined : Number(person.manual_priority), overallPriority: person.overall_priority == null ? undefined : Number(person.overall_priority), firstContactAt: contactDates[0] ?? person.first_contact_at ?? undefined, lastContactAt: contactDates.at(-1) ?? person.last_contact_at ?? undefined,
-      identities: (identityRows ?? []).filter((identity) => identity.person_id === person.id).map((identity) => ({ id: identity.id, source: identity.source as Source, identifier: identity.external_identifier, verified: identity.verified_match })),
-      memories: (memoryRows ?? []).filter((memory) => memory.person_id === person.id && memory.user_verified && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: true })),
+      identities: (identitiesByPerson.get(person.id) ?? []).map((identity) => ({ id: identity.id, source: identity.source as Source, identifier: identity.external_identifier, verified: identity.verified_match })),
+      memories: (memoriesByPerson.get(person.id) ?? []).filter((memory) => memory.user_verified && ["relationship", "fact", "preference", "context"].includes(memory.category)).map((memory) => ({ id: memory.id, category: memory.category as "relationship" | "fact" | "preference" | "context", content: memory.content, confidence: Number(memory.confidence ?? 0), verified: true })),
       conversations: personConversations.map((row) => ({ id: row.id, title: row.title ?? "Untitled conversation", source: row.source as Source, lastMessageAt: (Array.isArray(row.messages) ? [...row.messages].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0]?.sent_at : undefined) ?? undefined, summary: typeof row.summary === "string" ? row.summary : "" })).sort((a, b) => String(b.lastMessageAt ?? "").localeCompare(String(a.lastMessageAt ?? ""))),
-      openLoops: (commitmentRows ?? []).filter((commitment) => commitment.person_id === person.id && commitment.status === "open").length,
+      openLoops: openCommitmentsByPerson.get(person.id) ?? 0,
       responseRate: personConversations.length ? Math.round((responseConversations / personConversations.length) * 100) : undefined,
     };
   }).sort((a, b) => (b.lastContactAt ?? "").localeCompare(a.lastContactAt ?? ""));
