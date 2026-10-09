@@ -18,7 +18,7 @@ const AccountPlan = dynamic(() => import("@/components/account-plan").then(modul
 const DataIngestionStatus = dynamic(() => import("@/components/data-ingestion-status").then(module => module.DataIngestionStatus), { loading: () => <p className="muted">Kontrollerar datainhämtning…</p> });
 const ScheduledSendControl = dynamic(() => import("@/components/scheduled-send-control").then(module => module.ScheduledSendControl), { loading: () => null });
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, Bell, Bolt, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MapPin, MessageCircle, MoreHorizontal, PanelRightOpen, Search, Send, Settings, Sparkles, Target, Users, WandSparkles, X } from "lucide-react";
