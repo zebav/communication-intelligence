@@ -1,7 +1,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { AssistantBoard, type AssistantSnapshot } from "./assistant-workspace";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { AssistantBoard, AssistantWorkspace, type AssistantSnapshot } from "./assistant-workspace";
 import { AssistantBrowserStatus } from "./assistant-browser-status";
 import type { Task } from "@/lib/assistant/model";
 import { makePlan, type Evidence } from "@/lib/assistant/model";
@@ -77,6 +77,23 @@ function mountCandidate() {
 }
 
 describe("assistant review interface", () => {
+  it("reports a persisted decision change to the surrounding workspace", async () => {
+    const task: Task = { id: "task", message_id: "m", kind: "reply", status: "decision", revision: 2, plan: makePlan(e, "reply"), result: {}, created_at: e.sentAt, updated_at: e.sentAt };
+    const snapshot: AssistantSnapshot = {
+      tasks: [task], candidates: [], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+      timezone: "Europe/Stockholm", executionEnabled: false,
+    };
+    const changed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(snapshot), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ task: { ...task, revision: 3, status: "ready" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...snapshot, tasks: [{ ...task, revision: 3, status: "ready" }] }), { status: 200 })));
+    render(<AssistantWorkspace people={[]} initialTaskId="task" onTaskChanged={changed} />);
+    await screen.findByRole("button", { name: "Spara för granskning" });
+    fireEvent.click(screen.getByRole("button", { name: "Spara för granskning" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: "task", message_id: "m", status: "ready" })));
+  });
+
   it("removes a not-relevant candidate immediately and uses one relevance action", () => {
     const act = mountCandidate();
     expect(screen.getByText("Anna")).toBeTruthy();

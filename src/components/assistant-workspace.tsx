@@ -22,7 +22,7 @@ export type AssistantSnapshot = {
   operations?: { pendingMedia: number; failedMedia: number; actionRequiredConnections: number; awaitingAnalysis: number; learningSuggestions: number; unreadNotifications?: number };
 };
 type Api = (body: Record<string, unknown>) => Promise<void>;
-export function AssistantWorkspace({ people, initialTaskId }: { people: CommunicationPersonOption[]; initialTaskId?: string }) {
+export function AssistantWorkspace({ people, initialTaskId, onTaskChanged }: { people: CommunicationPersonOption[]; initialTaskId?: string; onTaskChanged?: (task: Task) => void }) {
   const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState("0"), [selected, setSelected] = useState(""), [period, setPeriod] = useState<"today" | "yesterday" | "seven_days" | "recovery">("seven_days");
   const maintenanceRefreshScheduled = useRef(false);
@@ -68,6 +68,7 @@ export function AssistantWorkspace({ people, initialTaskId }: { people: Communic
       const r = await fetch("/api/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Åtgärden misslyckades.");
+      if (data.task?.id) onTaskChanged?.(data.task as Task);
       if (data.task?.id && !optimistic) setSelected(data.task.id);
       // Keep the optimistic removal visible. A server reload here could briefly
       // reinsert a just-dismissed candidate from a stale read replica.
