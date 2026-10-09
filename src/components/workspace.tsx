@@ -126,6 +126,11 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const [contactTab, setContactTab] = useState("directory");
   const [sentVisited, setSentVisited] = useState(false);
   const [assistantTaskId, setAssistantTaskId] = useState(initialDecisionId ?? "");
+  const [decisionStatuses, setDecisionStatuses] = useState<Record<string, InboxDecisionStatus>>({});
+  const decisionMessageIds = useMemo(() => [...new Set([
+    ...syncedEmails.map((email) => email.messageId),
+    ...communicationCases.flatMap((item) => item.threadMessages?.map((message) => message.id) ?? []),
+  ].filter(Boolean))].slice(0, 100), [communicationCases, syncedEmails]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const requested = new URLSearchParams(window.location.search).get("view");
@@ -150,6 +155,21 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   };
   const [selectedSource, setSelectedSource] = useState<Source | null>(initialSource);
   useEffect(() => { setSelectedSource(initialSource); }, [initialSource]);
+  useEffect(() => {
+    if (!decisionMessageIds.length) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    decisionMessageIds.forEach((messageId) => params.append("messageId", messageId));
+    void fetch(`/api/assistant/status?${params.toString()}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json() as { tasks?: InboxDecisionStatus[] };
+        if (!response.ok) throw new Error("Beslutsstatus kunde inte läsas.");
+        if (!controller.signal.aborted) setDecisionStatuses(Object.fromEntries((data.tasks ?? []).map((task) => [task.message_id, task])));
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [decisionMessageIds]);
+  const rememberDecision = (task: InboxDecisionStatus) => setDecisionStatuses((current) => ({ ...current, [task.message_id]: task }));
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activePersona, setActivePersona] = useState(persona);
@@ -178,14 +198,14 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
       </div> : <button className={`nav-button ${view === item.id && selectedSource === null ? "active" : ""}`} onMouseEnter={() => prefetchView(item.id)} onFocus={() => prefetchView(item.id)} onClick={() => { setSelectedSource(null); setSourcesOpen(false); navigateTo(item.id); }}><item.icon size={15} />{item.label}</button>}</Fragment>)}
       <div className="user-chip"><div className="avatar">ZV</div><div className="user-details"><strong>Zebastian</strong><br /><span className="muted" title={userEmail}>{userEmail}</span></div><form action={signOut}><button className="icon-button" type="submit" title="Sign out" aria-label="Sign out"><LogOut size={14} /></button></form></div>
     </aside>
-<main className="main">{view === "assistant" && <AssistantWorkspace people={profilePeople} initialTaskId={assistantTaskId || undefined} />}{view === "relationships" && <RelationshipWorkspace />}{view === "calendar" && <CalendarWorkspace conversations={[...syncedEmails.map(e=>({id:e.id,title:e.title,person:e.personName,text:e.threadMessages.map(m=>m.body).join("\n\n")})),...communicationCases.map(c=>({id:c.id,title:c.title,person:c.personName,text:c.message}))].filter((c,i,all)=>all.findIndex(x=>x.id===c.id)===i)} />}{emailLoadFailed && <div className="empty-card" role="alert"><strong>Mejlen kunde inte hämtas</strong><p>Inkorgen kunde inte läsas just nu. Detta betyder inte att den är tom eller att du behöver importera mejlen igen.</p><button className="btn" onClick={() => router.refresh()}>Försök hämta mejlen igen</button></div>}{view === "today" && !emailLoadFailed && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} channelCases={communicationCases} onOpenInbox={() => navigateTo("inbox", "email")} onOpenSource={(source) => navigateTo("cases", source)} />}{(view === "inbox" || view === "cases") && <nav className="mobile-channel-switcher" aria-label="Välj inkorgskälla">{sources.map((source) => { const targetView = source.source === "email" ? "inbox" : "cases"; const count = source.source === "email" ? summary.total : communicationCases.filter((item) => item.source === source.source).length; return <button key={source.source} type="button" className={selectedSource === source.source || (!selectedSource && source.source === "email" && view === "inbox") ? "active" : ""} aria-pressed={selectedSource === source.source || (!selectedSource && source.source === "email" && view === "inbox")} onClick={() => navigateTo(targetView, source.source)}>{source.label}{count > 0 && <span>{count}</span>}</button>; })}</nav>}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} onOpenAssistant={(taskId) => navigateTo("assistant", null, taskId)} />}{view === "inbox" && <div className="toolbar" aria-label="Inkorgsvyer"><button className={`btn ${inboxTab === "received" ? "primary" : ""}`} onClick={() => setInboxTab("received")}>Inkorg</button><button className={`btn ${inboxTab === "sent" ? "primary" : ""}`} onClick={() => { setInboxTab("sent"); setSentVisited(true); }}>Skickade meddelanden</button></div>}{view === "inbox" && inboxTab === "received" && !emailLoadFailed && <InboxView syncedEmails={syncedEmails} people={profilePeople} onOpenAssistant={(taskId) => navigateTo("assistant", null, taskId)} />}{sentVisited && <div hidden={view !== "inbox" || inboxTab !== "sent"}><SentMessages accounts={connections.map(c => ({ id: c.id, name: c.accountIdentifier || c.accountName || "Konto" }))} /></div>}{view === "people" && <><div className="toolbar"><button className={`btn ${contactTab === "directory" ? "primary" : ""}`} onClick={() => setContactTab("directory")}>Kontakter</button><button className={`btn ${contactTab === "duplicates" ? "primary" : ""}`} onClick={() => setContactTab("duplicates")}>Sammanför kontakter</button></div>{contactTab === "directory" ? <div className="page"><ContactAddressBookSync connections={connections} /><People items={people} /></div> : <div className="page"><ContactDuplicates /></div>}</>}{view === "followups" && <FollowUps items={followUps} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} people={profilePeople} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} learningSignals={learningSignals} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} connections={connections} onSaved={setActivePersona} />}</main>
+<main className="main">{view === "assistant" && <AssistantWorkspace people={profilePeople} initialTaskId={assistantTaskId || undefined} />}{view === "relationships" && <RelationshipWorkspace />}{view === "calendar" && <CalendarWorkspace conversations={[...syncedEmails.map(e=>({id:e.id,title:e.title,person:e.personName,text:e.threadMessages.map(m=>m.body).join("\n\n")})),...communicationCases.map(c=>({id:c.id,title:c.title,person:c.personName,text:c.message}))].filter((c,i,all)=>all.findIndex(x=>x.id===c.id)===i)} />}{emailLoadFailed && <div className="empty-card" role="alert"><strong>Mejlen kunde inte hämtas</strong><p>Inkorgen kunde inte läsas just nu. Detta betyder inte att den är tom eller att du behöver importera mejlen igen.</p><button className="btn" onClick={() => router.refresh()}>Försök hämta mejlen igen</button></div>}{view === "today" && !emailLoadFailed && <Today emails={syncedEmails.filter((email) => isRelevantEmail(email.classification))} channelCases={communicationCases} decisions={decisionStatuses} onOpenInbox={() => navigateTo("inbox", "email")} onOpenSource={(source) => navigateTo("cases", source)} />}{(view === "inbox" || view === "cases") && <nav className="mobile-channel-switcher" aria-label="Välj inkorgskälla">{sources.map((source) => { const targetView = source.source === "email" ? "inbox" : "cases"; const count = source.source === "email" ? summary.total : communicationCases.filter((item) => item.source === source.source).length; return <button key={source.source} type="button" className={selectedSource === source.source || (!selectedSource && source.source === "email" && view === "inbox") ? "active" : ""} aria-pressed={selectedSource === source.source || (!selectedSource && source.source === "email" && view === "inbox")} onClick={() => navigateTo(targetView, source.source)}>{source.label}{count > 0 && <span>{count}</span>}</button>; })}</nav>}{view === "cases" && <CommunicationCases cases={communicationCases} source={selectedSource && selectedSource !== "email" ? selectedSource : undefined} decisions={decisionStatuses} onDecisionChange={rememberDecision} onOpenAssistant={(taskId) => navigateTo("assistant", null, taskId)} />}{view === "inbox" && <div className="toolbar" aria-label="Inkorgsvyer"><button className={`btn ${inboxTab === "received" ? "primary" : ""}`} onClick={() => setInboxTab("received")}>Inkorg</button><button className={`btn ${inboxTab === "sent" ? "primary" : ""}`} onClick={() => { setInboxTab("sent"); setSentVisited(true); }}>Skickade meddelanden</button></div>}{view === "inbox" && inboxTab === "received" && !emailLoadFailed && <InboxView syncedEmails={syncedEmails} people={profilePeople} decisions={decisionStatuses} onDecisionChange={rememberDecision} onOpenAssistant={(taskId) => navigateTo("assistant", null, taskId)} />}{sentVisited && <div hidden={view !== "inbox" || inboxTab !== "sent"}><SentMessages accounts={connections.map(c => ({ id: c.id, name: c.accountIdentifier || c.accountName || "Konto" }))} /></div>}{view === "people" && <><div className="toolbar"><button className={`btn ${contactTab === "directory" ? "primary" : ""}`} onClick={() => setContactTab("directory")}>Kontakter</button><button className={`btn ${contactTab === "duplicates" ? "primary" : ""}`} onClick={() => setContactTab("duplicates")}>Sammanför kontakter</button></div>{contactTab === "directory" ? <div className="page"><ContactAddressBookSync connections={connections} /><People items={people} /></div> : <div className="page"><ContactDuplicates /></div>}</>}{view === "followups" && <FollowUps items={followUps} />}{view === "cleanup" && <CleanUp />}{view === "intelligence" && <Intelligence items={learningSignals} people={profilePeople} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} />}{view === "connections" && <Connections connections={connections} />}{view === "settings" && <SettingsView persona={activePersona} people={profilePeople} learningSignals={learningSignals} followUps={followUps} outcomes={outcomes} calendarHistory={calendarHistory} connections={connections} onSaved={setActivePersona} />}</main>
     {mobileMenuOpen && <div className="mobile-more-overlay" onClick={() => setMobileMenuOpen(false)}><section className="mobile-more-menu" aria-label="Fler delar av Solvani" onClick={(event) => event.stopPropagation()}><div className="mobile-more-head"><div><span>Solvani</span><strong>Mer att utforska</strong></div><button className="icon-button" aria-label="Stäng meny" onClick={() => setMobileMenuOpen(false)}>×</button></div><div className="mobile-more-grid">{navigation.filter((item) => !mobilePrimaryViews.includes(item.id)).map((item) => <button key={item.id} className={view === item.id && selectedSource === null ? "active" : ""} onClick={() => { navigateTo(item.id); setMobileMenuOpen(false); }}><item.icon size={18} /><span>{item.label}</span></button>)}</div></section></div>}
     <nav className="mobile-bar">{navigation.filter((item) => mobilePrimaryViews.includes(item.id)).map((item) => <button key={item.id} className={view === item.id && selectedSource === null ? "active" : ""} onClick={() => { setMobileMenuOpen(false); navigateTo(item.id); }}><item.icon size={17} />{item.label}</button>)}<button className={mobileMenuOpen ? "active" : ""} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)}><MoreHorizontal size={17} />More</button></nav>
     {commandOpen && <CommandBar close={() => setCommandOpen(false)} go={(next) => { setSelectedSource(null); navigateTo(next); setCommandOpen(false); }} />}
   </div>;
 }
 
-function CommunicationCases({ cases, source, onOpenAssistant }: { cases: CommunicationCase[]; source?: Source; onOpenAssistant: (taskId?: string) => void }) {
+function CommunicationCases({ cases, source, decisions, onDecisionChange, onOpenAssistant }: { cases: CommunicationCase[]; source?: Source; decisions: Record<string, InboxDecisionStatus>; onDecisionChange: (task: InboxDecisionStatus) => void; onOpenAssistant: (taskId?: string) => void }) {
   const visibleCases = source ? cases.filter((item) => item.source === source) : cases;
   const sourceLabel = sources.find((item) => item.source === source)?.label;
   const grouped = Object.entries(visibleCases.reduce<Record<string, Record<string, CommunicationCase[]>>>((sources, item) => {
@@ -198,20 +218,20 @@ function CommunicationCases({ cases, source, onOpenAssistant }: { cases: Communi
   }, {}));
   return <div className="page"><PageHeader eyebrow={sourceLabel ? `${sourceLabel} conversations` : "Manual & Imported Conversation Connector V1"} title={sourceLabel ?? "Analyze a conversation"} subtitle={sourceLabel ? `Messages imported from ${sourceLabel}, with automatic analysis and suggested replies.` : "Paste text or upload a screenshot. The app identifies the context and automatically creates analysis and a suggested reply."} />
     {!source && <><div className="section-title"><FileUp size={14} color="#34d399" /> Add text, screenshot or exported file</div><ConversationImportForm /></>}
-    {source && <><div className="section-title">{sourceLabel} conversations <span className="count">{visibleCases.length}</span></div>{grouped.length === 0 ? <div className="empty-card">No {sourceLabel} conversations have been imported yet.</div> : <div className="source-folders">{grouped.map(([groupSource, people]) => <section className="source-folder" key={groupSource}><div className="source-folder-head"><MessageCircle size={15} /><strong>{groupSource}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); return <CommunicationCaseCard item={ordered[0]} key={`${groupSource}-${ordered[0].personName}`} onOpenAssistant={onOpenAssistant} />; })}</div></section>)}</div>}</>}
+    {source && <><div className="section-title">{sourceLabel} conversations <span className="count">{visibleCases.length}</span></div>{grouped.length === 0 ? <div className="empty-card">No {sourceLabel} conversations have been imported yet.</div> : <div className="source-folders">{grouped.map(([groupSource, people]) => <section className="source-folder" key={groupSource}><div className="source-folder-head"><MessageCircle size={15} /><strong>{groupSource}</strong><span>{Object.keys(people).length} people</span></div><div className="case-list">{Object.values(people).map((items) => { const ordered = [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)); return <CommunicationCaseCard item={ordered[0]} key={`${groupSource}-${ordered[0].personName}`} decisions={decisions} onDecisionChange={onDecisionChange} onOpenAssistant={onOpenAssistant} />; })}</div></section>)}</div>}</>}
   </div>;
 }
 
-function CommunicationCaseCard({ item, onOpenAssistant }: { item: CommunicationCase; onOpenAssistant: (taskId?: string) => void }) {
+function CommunicationCaseCard({ item, decisions, onDecisionChange, onOpenAssistant }: { item: CommunicationCase; decisions: Record<string, InboxDecisionStatus>; onDecisionChange: (task: InboxDecisionStatus) => void; onOpenAssistant: (taskId?: string) => void }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(item.analysis?.draftResponse ?? "");
   const [status, setStatus] = useState("");
   const [preparing, setPreparing] = useState(false);
   const [decisionWorking, setDecisionWorking] = useState(false);
-  const [decision, setDecision] = useState<InboxDecisionStatus>();
   const preparedConversation = useRef<string | null>(null);
   const latestInbound = item.threadMessages?.filter((entry) => entry.direction === "in").at(-1);
+  const decision = latestInbound?.id ? decisions[latestInbound.id] : undefined;
   useEffect(() => {
     if (!expanded || !["instagram", "slack"].includes(item.source) || item.analysis || preparing || preparedConversation.current === item.id) return;
     preparedConversation.current = item.id;
@@ -221,18 +241,6 @@ function CommunicationCaseCard({ item, onOpenAssistant }: { item: CommunicationC
       .catch((error) => setStatus(error instanceof Error ? error.message : "Svarsförslaget kunde inte förberedas."))
       .finally(() => setPreparing(false));
   }, [expanded, item.analysis, item.id, item.source, preparing, router]);
-  useEffect(() => {
-    if (!expanded || !latestInbound?.id) return;
-    const controller = new AbortController();
-    void fetch(`/api/assistant/status?messageId=${encodeURIComponent(latestInbound.id)}`, { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        const data = await response.json() as { tasks?: InboxDecisionStatus[] };
-        if (!response.ok) throw new Error("Beslutsstatus kunde inte läsas.");
-        if (!controller.signal.aborted) setDecision(data.tasks?.[0]);
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [expanded, latestInbound?.id]);
   const prepareDecision = async () => {
     if (!latestInbound?.id) return;
     setDecisionWorking(true); setStatus("");
@@ -247,7 +255,7 @@ function CommunicationCaseCard({ item, onOpenAssistant }: { item: CommunicationC
         if (!saved.ok) throw new Error(savedData.error ?? "Utkastet kunde inte sparas i beslutet.");
         task = savedData.task ?? task;
       }
-      setDecision(task); onOpenAssistant(task.id);
+      onDecisionChange(task); onOpenAssistant(task.id);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Beslutet kunde inte förberedas."); }
     finally { setDecisionWorking(false); }
   };
@@ -256,7 +264,7 @@ function CommunicationCaseCard({ item, onOpenAssistant }: { item: CommunicationC
   return <article className="case-item communication-case-card"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div className="case-card-content"><div className="case-title"><PersonLink personId={item.personId} name={item.personName} /><span className="tag">1 {item.source} thread</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><button className="case-card-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span className="case-person">{item.title} · {formatMessageTime(item.createdAt)}</span><p>{item.message}</p></button>{expanded && <div className="case-intelligence">{latestInbound?.id && <PriorityFeedback messageId={latestInbound.id} initialScore={item.priorityScore ?? 5} />}{item.threadMessages && item.threadMessages.length > 0 && <div className="case-thread">{item.threadMessages.slice(-24).map((entry) => <div key={entry.id} className={`message ${entry.direction === "out" ? "out" : ""}`}><div className="message-bubble"><ReadableMessage text={entry.body} /><MessageAttachments messageId={entry.id} expected={entry.attachmentCount} /></div><div className="message-meta">{entry.direction === "out" ? "Du" : item.personName} · {channelLabel} · {formatMessageTime(entry.sentAt)}</div></div>)}</div>}{item.analysis ? <><div className="intel-label">AI-bedömning</div><strong>{item.analysis.summary}</strong><p><b>Intent:</b> {item.analysis.intent || "Inte fastställt"}</p><p>{item.analysis.priorityReason}</p>{item.recommendedAction && <span className="pill">{actionLabels[item.recommendedAction as RecommendedAction] ?? item.recommendedAction}</span>}{item.analysis.sendTiming && <div className="learning-notice"><div><strong>Föreslagen svarstid: {timingLabel[item.analysis.sendTiming.recommendation]}</strong><p>{item.analysis.sendTiming.rationale}</p></div></div>}<AIPlanner plan={item.analysis.planningSuggestion} /><div className="intel-label case-reply-label">Föreslaget svar · {item.analysis.draftTone || "Naturlig ton"}</div><textarea value={draft} onChange={(event) => { setDraft(event.target.value); setStatus(""); }} aria-label={`Föreslaget svar till ${item.personName}`} />{decision ? <div className="decision-status-row"><span className="pill">Beslutsstatus: {statusLabels[decision.status]}</span><button className="btn primary" onClick={() => onOpenAssistant(decision.id)}>Öppna sparat beslut</button></div> : <button className="btn primary" disabled={decisionWorking || !latestInbound?.id || !draft.trim()} onClick={() => void prepareDecision()}><Send size={12} />{decisionWorking ? "Sparar beslut…" : "Fortsätt till godkännande"}</button>}{latestInbound?.id && <ScheduledSendControl conversationId={item.id} messageId={latestInbound.id} source={item.source} body={draft} suggestedTiming={item.analysis.sendTiming?.recommendation} suggestedTimingReason={item.analysis.sendTiming?.rationale} disabled={decisionWorking} onScheduled={() => router.refresh()} />}{status && <p className="negative">{status}</p>}</> : <div className="learning-notice"><div><strong>{preparing ? "Tar fram ett svarsförslag…" : "Svarsförslag förbereds"}</strong><p>{preparing ? `Solvani läser den öppnade ${channelLabel}-tråden och sparar ett redigerbart utkast.` : "Öppna tråden igen för att försöka förbereda svaret."}</p></div></div>}{status && !item.analysis && <p className="negative">{status}</p>}</div>}</div></article>;
 }
 
-function Today({ emails, channelCases, onOpenInbox, onOpenSource }: { emails: SyncedEmailConversation[]; channelCases: CommunicationCase[]; onOpenInbox: () => void; onOpenSource: (source: Source) => void }) {
+function Today({ emails, channelCases, decisions, onOpenInbox, onOpenSource }: { emails: SyncedEmailConversation[]; channelCases: CommunicationCase[]; decisions: Record<string, InboxDecisionStatus>; onOpenInbox: () => void; onOpenSource: (source: Source) => void }) {
   const [period, setPeriod] = useState<CommunicationPeriod>("today");
   const pendingEmails = emails.filter((email) => email.threadMessages.at(-1)?.direction === "in");
   const visibleEmails = pendingEmails.filter((email) => isWithinCommunicationPeriod(email.receivedAt, period));
@@ -277,19 +285,19 @@ function Today({ emails, channelCases, onOpenInbox, onOpenSource }: { emails: Sy
     <div className="overview-periods" aria-label="Communication time period">{communicationPeriods.map((item) => <button type="button" className={period === item.id ? "active" : ""} aria-pressed={period === item.id} key={item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
     <div className="summary-bar"><div className="summary-stat"><strong>{summary.unread}</strong><span>unread</span></div><div className="summary-stat"><strong>{summary.needsResponse}</strong><span>needs a response</span></div><div className="summary-stat"><strong>{summary.critical}</strong><span>urgent</span></div><div className="summary-stat"><strong>{summary.lowAttention}</strong><span>for awareness</span></div></div>
     {totalPending === 0 && <div className="empty-card">No unanswered relevant messages for {periodLabel.toLowerCase()}.</div>}
-    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#e15d6f" /> Handle now <span className="count">{critical.length}</span></div><div className="cards">{critical.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
-    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#3b82f6" /> Ready for you <span className="count">{respond.length}</span></div><div className="cards">{respond.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
-    {otherChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#8b5cf6" /> Other conversations <span className="count">{otherChannels.length}</span></div><div className="cards">{otherChannels.map((item) => <article className="card email-card" key={item.id}><div className="card-top"><span>{item.title}</span>{item.priorityScore != null && <span className="priority-badge">{item.priorityScore >= 8 ? "High" : "Normal"}</span>}</div><div className="card-person"><ContactAvatar personId={item.personId} name={item.personName} size={32} /><div><PersonLink personId={item.personId} name={item.personName} /><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{item.analysis?.summary || item.message}</p><button className="pill" onClick={() => onOpenSource(item.source)}>Open conversation <ChevronRight size={10} /></button></article>)}</div></>}
-    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> For awareness <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.map((email) => <LiveEmailCard key={email.id} email={email} onClick={onOpenInbox} />)}</div></>}
+    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#e15d6f" /> Handle now <span className="count">{critical.length}</span></div><div className="cards">{critical.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}</div></>}
+    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#3b82f6" /> Ready for you <span className="count">{respond.length}</span></div><div className="cards">{respond.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}</div></>}
+    {otherChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#8b5cf6" /> Other conversations <span className="count">{otherChannels.length}</span></div><div className="cards">{otherChannels.map((item) => { const messageId = item.threadMessages?.filter((message) => message.direction === "in").at(-1)?.id; const decision = messageId ? decisions[messageId] : undefined; return <article className="card email-card" key={item.id}><div className="card-top"><span>{item.title}</span>{item.priorityScore != null && <span className="priority-badge">{item.priorityScore >= 8 ? "High" : "Normal"}</span>}</div><div className="card-person"><ContactAvatar personId={item.personId} name={item.personName} size={32} /><div><PersonLink personId={item.personId} name={item.personName} /><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{item.analysis?.summary || item.message}</p><button className="pill" onClick={() => onOpenSource(item.source)}>{decision ? `Beslut: ${statusLabels[decision.status]}` : "Öppna konversation"} <ChevronRight size={10} /></button></article>; })}</div></>}
+    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> For awareness <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}</div></>}
   </div>;
 }
 
-function LiveEmailCard({ email, onClick }: { email: SyncedEmailConversation; onClick: () => void }) { const action = actionLabels[email.recommendedAction as RecommendedAction] ?? email.recommendedAction; const urgency = email.priorityScore >= 9 ? "Urgent" : email.priorityScore >= 7 ? "High" : "Normal"; return <article className="card email-card"><div className="card-top"><span>{email.title}</span><span className={`priority-badge ${urgency.toLowerCase()}`}>{urgency}</span></div><div className="card-person"><ContactAvatar personId={email.personId} name={email.personName} size={32} /><div><PersonLink personId={email.personId} name={email.personName} /><span>{email.classification}</span></div></div><p>{emailDashboardExcerpt(email)}</p><button className="pill" onClick={onClick}>{action} <ChevronRight size={10} /></button></article> }
+function LiveEmailCard({ email, decision, onClick }: { email: SyncedEmailConversation; decision?: InboxDecisionStatus; onClick: () => void }) { const action = actionLabels[email.recommendedAction as RecommendedAction] ?? email.recommendedAction; const urgency = email.priorityScore >= 9 ? "Urgent" : email.priorityScore >= 7 ? "High" : "Normal"; return <article className="card email-card"><div className="card-top"><span>{email.title}</span><span className={`priority-badge ${urgency.toLowerCase()}`}>{urgency}</span></div><div className="card-person"><ContactAvatar personId={email.personId} name={email.personName} size={32} /><div><PersonLink personId={email.personId} name={email.personName} /><span>{email.classification}</span></div></div><p>{emailDashboardExcerpt(email)}</p><button className="pill" onClick={onClick}>{decision ? `Beslut: ${statusLabels[decision.status]}` : action} <ChevronRight size={10} /></button></article> }
 
 function ConversationCard({ conversation, onClick }: { conversation: Conversation; onClick: () => void }) { return <button className="card" onClick={onClick} style={{textAlign:"left",cursor:"pointer"}}><div className="card-top"><span>{conversation.subject}</span><span className="score">{conversation.attention.score}</span></div><div className="card-person"><div className="avatar">{conversation.person.initials}</div><div><strong>{conversation.person.name}</strong><span>{conversation.person.organization ?? conversation.person.role}</span></div></div><p>{conversation.preview}</p><span className="pill">{actionLabels[conversation.action]} <ChevronRight size={10} /></span></button> }
 
-function InboxView({ syncedEmails, people, onOpenAssistant }: { syncedEmails: SyncedEmailConversation[]; people: CommunicationPersonOption[]; onOpenAssistant: (taskId?: string) => void }) {
-  if (syncedEmails.length > 0) return <SyncedInbox emails={syncedEmails} people={people} onOpenAssistant={onOpenAssistant} />;
+function InboxView({ syncedEmails, people, decisions, onDecisionChange, onOpenAssistant }: { syncedEmails: SyncedEmailConversation[]; people: CommunicationPersonOption[]; decisions: Record<string, InboxDecisionStatus>; onDecisionChange: (task: InboxDecisionStatus) => void; onOpenAssistant: (taskId?: string) => void }) {
+  if (syncedEmails.length > 0) return <SyncedInbox emails={syncedEmails} people={people} decisions={decisions} onDecisionChange={onDecisionChange} onOpenAssistant={onOpenAssistant} />;
   return <div className="page"><PageHeader eyebrow="Email" title="Inbox" subtitle="Mejl från dina anslutna konton." /><div className="empty-card">Inga sparade mejl hittades. Du kan kontrollera kontonas synkronisering under Connections.</div></div>;
 }
 
@@ -326,7 +334,7 @@ function MockInbox() {
 
 type InboxDecisionStatus = { id: string; message_id: string; kind: TaskKind; status: TaskStatus; revision: number; updated_at: string };
 
-function SyncedInbox({ emails, people, onOpenAssistant }: { emails: SyncedEmailConversation[]; people: CommunicationPersonOption[]; onOpenAssistant: (taskId?: string) => void }) {
+function SyncedInbox({ emails, people, decisions, onDecisionChange, onOpenAssistant }: { emails: SyncedEmailConversation[]; people: CommunicationPersonOption[]; decisions: Record<string, InboxDecisionStatus>; onDecisionChange: (task: InboxDecisionStatus) => void; onOpenAssistant: (taskId?: string) => void }) {
   const router = useRouter();
   const [category, setCategory] = useState("Relevant");
   const [selectedId, setSelectedId] = useState(emails[0].id);
@@ -356,25 +364,9 @@ function SyncedInbox({ emails, people, onOpenAssistant }: { emails: SyncedEmailC
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [decisionWorking, setDecisionWorking] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState("");
-  const [decisionStatuses, setDecisionStatuses] = useState<Record<string, InboxDecisionStatus>>({});
   const [insightOpen, setInsightOpen] = useState(false);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const automaticallyPrepared = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const messageIds = [...new Set(emails.map((email) => email.messageId).filter(Boolean))].slice(0, 100);
-    if (!messageIds.length) return;
-    const controller = new AbortController();
-    const params = new URLSearchParams();
-    messageIds.forEach((messageId) => params.append("messageId", messageId));
-    void fetch(`/api/assistant/status?${params.toString()}`, { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        const data = await response.json() as { tasks?: InboxDecisionStatus[] };
-        if (!response.ok) throw new Error("Beslutsstatus kunde inte hämtas.");
-        if (!controller.signal.aborted) setDecisionStatuses(Object.fromEntries((data.tasks ?? []).map((task) => [task.message_id, task])));
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [emails]);
   const filtered = prioritizeEmails(category === "All categories" ? emails : category === "Relevant" ? emails.filter((email) => isRelevantEmail(email.classification)) : category === "Filtered out" ? emails.filter((email) => !isRelevantEmail(email.classification)) : emails.filter((email) => email.classification === category));
   const selected = filtered.find((email) => email.id === selectedId) ?? filtered[0];
   useEffect(() => {
@@ -389,7 +381,7 @@ function SyncedInbox({ emails, people, onOpenAssistant }: { emails: SyncedEmailC
   }, [router, selected]);
   if (!selected) return <div className="page"><PageHeader eyebrow="Live Outlook inbox" title="Inbox" subtitle="Filter synchronized messages by category." /><div className="inbox-head"><select className="filter" aria-label="Email category" value={category} onChange={(event) => setCategory(event.target.value)}>{EMAIL_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></div><div className="empty-card">No messages match this category.</div></div>;
   const replyDraft = replyDrafts[selected.id] ?? selected.analysis?.draftResponse ?? "";
-  const currentDecision = selected.messageId ? decisionStatuses[selected.messageId] : undefined;
+  const currentDecision = selected.messageId ? decisions[selected.messageId] : undefined;
   const replyTone = replyTones[selected.id] ?? selected.analysis?.draftTone ?? "";
   const forwardSuggestion = selected.analysis?.forwardingSuggestion;
   const roleMatches = people.filter((person) => person.relationship === forwardSuggestion?.recipientRole).sort((a, b) => { const spanish = /spanish|spain|spansk|españa/i.test(`${forwardSuggestion?.reason} ${forwardSuggestion?.introduction}`); if (!spanish) return 0; const score = (person: CommunicationPersonOption) => /spanish|spain|spansk|españa/i.test(`${person.professionalSpecialty} ${person.jurisdiction}`) ? 1 : 0; return score(b) - score(a); });
@@ -442,7 +434,7 @@ function SyncedInbox({ emails, people, onOpenAssistant }: { emails: SyncedEmailC
         if (!saved.ok) throw new Error(savedData.error ?? "Utkastet kunde inte sparas i beslutet.");
         task = savedData.task ?? task;
       }
-      if (task) setDecisionStatuses((current) => ({ ...current, [task.message_id]: task }));
+      if (task) onDecisionChange(task);
       onOpenAssistant(task?.id);
     } catch (error) {
       setDecisionMessage(error instanceof Error ? error.message : "Beslutet kunde inte förberedas.");
