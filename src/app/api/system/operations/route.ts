@@ -12,6 +12,14 @@ type ConnectionRow = {
   account_name?: string | null;
 };
 
+type AutomationRow = {
+  operation: string | null;
+  status: string | null;
+  attempts: number | null;
+  updated_at: string | null;
+  last_error_code: string | null;
+};
+
 type SyncState = "current" | "delayed" | "unknown";
 
 function syncState(lastSyncAt: string | null): SyncState {
@@ -29,6 +37,21 @@ function countByState(rows: Row[] | null, field = "state") {
     counts[key] = (counts[key] ?? 0) + 1;
     return counts;
   }, {});
+}
+
+function latestAutomationByOperation(rows: AutomationRow[] | null) {
+  const latest = new Map<string, AutomationRow>();
+  for (const row of rows ?? []) {
+    const operation = row.operation ?? "unknown";
+    if (!latest.has(operation)) latest.set(operation, row);
+  }
+  return [...latest.entries()].map(([operation, row]) => ({
+    operation,
+    status: row.status ?? "unknown",
+    attempts: Number(row.attempts ?? 0),
+    updatedAt: row.updated_at,
+    error: row.last_error_code ? row.last_error_code.slice(0, 100) : null,
+  }));
 }
 
 /**
@@ -90,6 +113,7 @@ export async function GET() {
     },
     automation: {
       states: countByState((automation.data ?? []) as Row[]),
+      latestByOperation: latestAutomationByOperation((automation.data ?? []) as AutomationRow[]),
       recentFailures: (automation.data ?? []).filter((item) => item.status === "failed").slice(0, 5).map((item) => ({
         at: item.updated_at,
         operation: typeof item.operation === "string" ? item.operation : "unknown",
