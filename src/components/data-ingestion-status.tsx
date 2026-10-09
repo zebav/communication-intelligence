@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, RefreshCw, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
-type ConnectionStatus = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
+type ConnectionStatus = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; lastInboundAt: string | null; needsAttention: boolean };
 type Status = { pendingMedia: number; failedMedia: number; deadLetterMedia?: number; retrievalPending?: number; retrievalFailed?: number; analysisPending?: number; vaultRetained?: number; connections?: ConnectionStatus[]; error?: string };
 
 function providerLabel(provider: string) {
@@ -18,6 +18,12 @@ function syncLabel(connection: ConnectionStatus) {
   if (minutes < 2) return "Synkad nyss";
   if (minutes < 60) return `Synkad för ${minutes} min sedan`;
   return `Synkad ${new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(connection.lastSyncAt))}`;
+}
+function inboundLabel(value: string | null) {
+  if (!value) return "Inget inkommande meddelande registrerat ännu";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Senaste inkommande meddelande okänt";
+  return `Senaste inkommande: ${new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(date)}`;
 }
 export function DataIngestionStatus({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
@@ -70,5 +76,5 @@ export function DataIngestionStatus({ compact = false }: { compact?: boolean }) 
   const attention = status.pendingMedia > 0 || status.failedMedia > 0 || terminal > 0;
   const message = terminal ? `${terminal} bilag${terminal === 1 ? "a behöver" : "or behöver"} en kontrollerad återkörning. Övriga bilagor hanteras automatiskt.` : status.retrievalFailed ? `${status.retrievalFailed} bilag${status.retrievalFailed === 1 ? "a" : "or"} kunde inte hämtas ännu; systemet försöker igen enligt säker återförsökspolicy.` : status.failedMedia ? `Solvani återställer automatiskt ${status.failedMedia} bilag${status.failedMedia === 1 ? "a" : "or"}. Du behöver bara agera om en anslutning behöver loggas in igen.` : status.retrievalPending ? `Hämtar ${status.retrievalPending} bilag${status.retrievalPending === 1 ? "a" : "or"} och analyserar ${status.analysisPending ?? 0} i bakgrunden.` : "Meddelanden och sparade bilagor är i synk.";
   const stale = status.connections?.filter((connection) => connection.needsAttention) ?? [];
-  return <div className={`ingestion-status ${attention || stale.length ? "warning" : ""} ${compact ? "compact" : ""}`} aria-live="polite"><div>{attention || stale.length ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} />}<span><strong>Datainhämtning</strong><small>{syncMessage || message}{!compact && !syncMessage && stale.length ? ` · ${stale.length} anslut${stale.length === 1 ? "ning behöver" : "ningar behöver"} synk eller kontroll.` : ""}</small></span></div><div className="ingestion-status-actions">{terminal > 0 && <button className="btn" onClick={() => void retryFailed()} disabled={refreshing || processing}>{processing ? "Återställer…" : "Återkör säkert"}</button>}<button className="btn" onClick={() => void refresh()} disabled={refreshing || processing}>{refreshing ? "Kontrollerar…" : "Kontrollera nu"}</button></div>{!compact && stale.length > 0 && <small className="ingestion-stale">Kontrollera: {stale.slice(0, 3).map((connection) => connection.account).join(" · ")}{stale.length > 3 ? ` + ${stale.length - 3} till` : ""}</small>}{!compact && (status.connections?.length ?? 0) > 0 && <details className="ingestion-connection-details"><summary>Visa status per källa</summary><ul>{status.connections?.map((connection) => <li key={connection.id}><strong>{providerLabel(connection.provider)}</strong><span>{connection.account}</span><small className={connection.needsAttention ? "negative" : ""}>{syncLabel(connection)}</small></li>)}</ul></details>}</div>;
+  return <div className={`ingestion-status ${attention || stale.length ? "warning" : ""} ${compact ? "compact" : ""}`} aria-live="polite"><div>{attention || stale.length ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} />}<span><strong>Datainhämtning</strong><small>{syncMessage || message}{!compact && !syncMessage && stale.length ? ` · ${stale.length} anslut${stale.length === 1 ? "ning behöver" : "ningar behöver"} synk eller kontroll.` : ""}</small></span></div><div className="ingestion-status-actions">{terminal > 0 && <button className="btn" onClick={() => void retryFailed()} disabled={refreshing || processing}>{processing ? "Återställer…" : "Återkör säkert"}</button>}<button className="btn" onClick={() => void refresh()} disabled={refreshing || processing}>{refreshing ? "Kontrollerar…" : "Kontrollera nu"}</button></div>{!compact && stale.length > 0 && <small className="ingestion-stale">Kontrollera: {stale.slice(0, 3).map((connection) => connection.account).join(" · ")}{stale.length > 3 ? ` + ${stale.length - 3} till` : ""}</small>}{!compact && (status.connections?.length ?? 0) > 0 && <details className="ingestion-connection-details"><summary>Visa status per källa</summary><ul>{status.connections?.map((connection) => <li key={connection.id}><strong>{providerLabel(connection.provider)}</strong><span>{connection.account}</span><small className={connection.needsAttention ? "negative" : ""}>{syncLabel(connection)} · {inboundLabel(connection.lastInboundAt)}</small></li>)}</ul></details>}</div>;
 }

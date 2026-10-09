@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; needsAttention: boolean };
+export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; lastInboundAt: string | null; needsAttention: boolean };
 export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; retrievalPending: number; retrievalFailed: number; analysisPending: number; vaultRetained: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
 function ownerScope(query: any, ownerId?: string): any {
@@ -41,10 +41,24 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
   }
   let connections: IngestionConnection[] = [];
   if (ownerId) {
-    const { data, error: connectionError } = await database.from("connections")
-      .select("id,provider,account_identifier,account_name,status,health_status,last_sync_at")
-      .eq("owner_id", ownerId).in("status", ["connected", "reconnect_required", "error"]).order("updated_at", { ascending: false }).limit(30);
+    // A successful sync does not prove that source material is arriving. Read
+    // only timestamps and already-linked connection ids: message content has
+    // no place in a health UI.
+    const [connectionResult, inboundResult] = await Promise.all([
+      database.from("connections").select("id,provider,account_identifier,account_name,status,health_status,last_sync_at")
+        .eq("owner_id", ownerId).in("status", ["connected", "reconnect_required", "error"]).order("updated_at", { ascending: false }).limit(30),
+      database.from("messages").select("sent_at,conversations!inner(connection_id)")
+        .eq("owner_id", ownerId).eq("direction", "in").order("sent_at", { ascending: false }).limit(500),
+    ]);
+    const { data, error: connectionError } = connectionResult;
     if (connectionError) throw new Error("Connection health could not be read.");
+    // A transient join error must not hide the remaining health data.
+    const latestInboundByConnection = new Map<string, string>();
+    if (!inboundResult.error) for (const row of inboundResult.data ?? []) {
+      const conversation = row.conversations as { connection_id?: unknown } | null;
+      const connectionId = conversation?.connection_id;
+      if (typeof connectionId === "string" && typeof row.sent_at === "string" && !latestInboundByConnection.has(connectionId)) latestInboundByConnection.set(connectionId, row.sent_at);
+    }
     connections = (data ?? []).map((connection) => {
       const lastSyncAt = typeof connection.last_sync_at === "string" ? connection.last_sync_at : null;
       const health = typeof connection.health_status === "string" ? connection.health_status : "unknown";
@@ -55,6 +69,7 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
         status: connection.status,
         health,
         lastSyncAt,
+        lastInboundAt: latestInboundByConnection.get(connection.id) ?? null,
         // The automation handles a stale timestamp and bounded retries. Only
         // a disconnected credential needs intervention from the owner.
         needsAttention: connection.status !== "connected" || health === "reconnect_required",
