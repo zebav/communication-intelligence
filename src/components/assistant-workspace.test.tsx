@@ -103,6 +103,21 @@ describe("assistant review interface", () => {
     expect(screen.queryByRole("button", { name: "Prioritera inte avsändaren" })).toBeNull();
   });
 
+  it("shares a dismissed candidate's durable status with the surrounding workspace", async () => {
+    const task: Task = { id: "dismissed-task", message_id: "m", kind: "reply", status: "dismissed", revision: 2, plan: makePlan(e, "reply"), result: {}, created_at: e.sentAt, updated_at: e.sentAt };
+    const snapshot: AssistantSnapshot = {
+      tasks: [], candidates: [{ messageId: e.messageId, kind: "reply", plan: makePlan(e, "reply") }], reviewMessages: [], next: null, scanned: 1, tasksLimited: false, feedback: [],
+      timezone: "Europe/Stockholm", executionEnabled: false,
+    };
+    const changed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(snapshot), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ saved: true, task }), { status: 200 })));
+    render(<AssistantWorkspace people={[]} onTaskChanged={changed} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inte relevant" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: "dismissed-task", message_id: "m", status: "dismissed" })));
+  });
+
   it("offers managed Browserbase execution for approved website tasks", () => {
     const act = mount(true, "website");
     expect(screen.getByText(/Managed Agent aktiv/)).toBeTruthy();

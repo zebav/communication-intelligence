@@ -213,7 +213,10 @@ export async function POST(request: NextRequest) {
         // click is therefore a harmless duplicate rather than an error.
         if (learningError && learningError.code !== "23505") throw new Error("Meddelandet sorterades bort men lärandespåret kunde inte sparas.");
       }
-      return json({ saved: true });
+      // Return the canonical task as well as the acknowledgement. The three
+      // workspace surfaces use this durable state to remove the same message
+      // immediately, rather than waiting for a later full-page refresh.
+      return json({ saved: true, task });
     }
     if (a.action === "start") {
       const e = await readEvidence(db, owner, a.messageId);
