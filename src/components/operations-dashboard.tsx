@@ -25,7 +25,7 @@ function stateText(states: Record<string, number>) {
 }
 function time(value: string | null) { return value ? new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—"; }
 function providerName(provider: string) {
-  return ({ gmail: "Gmail", "microsoft-graph": "Outlook", slack: "Slack", instagram_professional: "Instagram", "instagram-professional": "Instagram", whatsapp: "WhatsApp" } as Record<string, string>)[provider] ?? provider;
+  return ({ gmail: "Gmail", "microsoft-graph": "Outlook", slack: "Slack", instagram_professional: "Instagram", "instagram-professional": "Instagram", whatsapp: "WhatsApp", "whatsapp-business": "WhatsApp" } as Record<string, string>)[provider] ?? provider;
 }
 function accountState(account: ConnectionAccount) {
   if (account.status !== "connected" || account.health === "reconnect_required") return "Inloggning krävs";

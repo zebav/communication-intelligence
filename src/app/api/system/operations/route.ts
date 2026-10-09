@@ -112,7 +112,10 @@ export async function GET() {
       latest: (relationshipRows ?? [])[0] ?? null,
     },
     automation: {
-      states: countByState((automation.data ?? []) as Row[]),
+      // Automation jobs use `status` (unlike the media job table's `state`).
+      // Reading the wrong field made a healthy queue appear as “unknown” in
+      // Operations and hid the retry/completed split from the owner.
+      states: countByState((automation.data ?? []) as Row[], "status"),
       latestByOperation: latestAutomationByOperation((automation.data ?? []) as AutomationRow[]),
       recentRecoveries: (automation.data ?? []).filter((item) => item.status === "completed" && Number(item.attempts ?? 0) > 1).slice(0, 5).map((item) => ({
         at: item.updated_at,
