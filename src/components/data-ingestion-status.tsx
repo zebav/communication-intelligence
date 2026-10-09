@@ -43,29 +43,21 @@ export function DataIngestionStatus({ compact = false }: { compact?: boolean }) 
       setStatus({ pendingMedia: 0, failedMedia: 0, error: error instanceof Error ? error.message : "Synkroniseringen kunde inte startas." });
     } finally { setRefreshing(false); }
   };
-  const processPending = async () => {
-    setProcessing(true);
-    try {
-      // One owner action can safely drain a short queue. Each request claims
-      // jobs atomically, so this cannot process the same attachment twice.
-      for (let batch = 0; batch < 3; batch += 1) {
-        const response = await fetch("/api/vault/process-ingestion", { method: "POST", headers: { "content-type": "application/json" } });
-        const data = await response.json() as { more?: boolean; error?: string };
-        if (!response.ok) throw new Error(data.error ?? "Bilagorna kunde inte bearbetas.");
-        if (!data.more) break;
-      }
-      await load();
-    } catch (error) {
-      setStatus((current) => ({ pendingMedia: current?.pendingMedia ?? 0, failedMedia: current?.failedMedia ?? 0, error: error instanceof Error ? error.message : "Bilagorna kunde inte bearbetas." }));
-    } finally { setProcessing(false); }
-  };
   const retryFailed = async () => {
     setProcessing(true);
     try {
       const retry = await fetch("/api/system/data-health", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retry_failed_media" }) });
-      const result = await retry.json() as { error?: string };
+      const result = await retry.json() as { error?: string; retried?: number };
       if (!retry.ok) throw new Error(result.error ?? "Bilagorna kunde inte återställas.");
-      await processPending();
+      // Media retrieval, transcription, and document analysis can each take
+      // longer than a responsive UI request. Resume through the durable
+      // automation queue instead of blocking this screen on several batches.
+      const queued = await fetch("/api/system/automation", { method: "POST", headers: { "content-type": "application/json" } });
+      const queueResult = await queued.json().catch(() => ({})) as { error?: string; queued?: boolean };
+      if (!queued.ok) throw new Error(queueResult.error ?? "Bilagorna återställdes men bakgrundsarbetet kunde inte startas.");
+      setSyncMessage(result.retried ? `${result.retried} bilagor är återställda och behandlas nu i bakgrunden.` : "Inga fler bilagor behövde återställas.");
+      await load();
+      window.setTimeout(() => router.refresh(), 8_000);
     } catch (error) {
       setStatus((current) => ({ pendingMedia: current?.pendingMedia ?? 0, failedMedia: current?.failedMedia ?? 0, connections: current?.connections, error: error instanceof Error ? error.message : "Bilagorna kunde inte återställas." }));
     } finally { setProcessing(false); }
