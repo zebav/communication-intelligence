@@ -146,10 +146,17 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
   const [sentVisited, setSentVisited] = useState(false);
   const [assistantTaskId, setAssistantTaskId] = useState(initialDecisionId ?? "");
   const [decisionStatuses, setDecisionStatuses] = useState<Record<string, InboxDecisionStatus>>({});
-  const decisionMessageIds = useMemo(() => [...new Set([
-    ...syncedEmails.map((email) => email.messageId),
-    ...communicationCases.flatMap((item) => item.threadMessages?.map((message) => message.id) ?? []),
-  ].filter(Boolean))].slice(0, 100), [communicationCases, syncedEmails]);
+  // Decision status is only rendered by Today, Inbox and the notification
+  // workspace. Avoid a status request (and a 100-message payload) on every
+  // other route, particularly Settings and Contacts.
+  const needsDecisionStatus = view === "today" || view === "inbox" || view === "cases";
+  const decisionMessageIds = useMemo(() => {
+    if (!needsDecisionStatus) return [];
+    return [...new Set([
+      ...syncedEmails.map((email) => email.messageId),
+      ...communicationCases.flatMap((item) => item.threadMessages?.map((message) => message.id) ?? []),
+    ].filter(Boolean))].slice(0, 100);
+  }, [communicationCases, needsDecisionStatus, syncedEmails]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const requested = new URLSearchParams(window.location.search).get("view");
@@ -183,7 +190,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
     [communicationCases, connections, selectedSource],
   );
   useEffect(() => {
-    if (!decisionMessageIds.length) return;
+    if (!needsDecisionStatus || !decisionMessageIds.length) return;
     const controller = new AbortController();
     const params = new URLSearchParams();
     decisionMessageIds.forEach((messageId) => params.append("messageId", messageId));
@@ -195,7 +202,7 @@ export function Workspace({ userEmail, communicationCases, connections, syncedEm
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [decisionMessageIds]);
+  }, [decisionMessageIds, needsDecisionStatus]);
   const rememberDecision = (task: InboxDecisionStatus) => setDecisionStatuses((current) => ({ ...current, [task.message_id]: task }));
   const handleAssistantTaskChanged = useCallback((task: Task) => {
     setDecisionStatuses((current) => ({ ...current, [task.message_id]: task }));
