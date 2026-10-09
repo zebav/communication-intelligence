@@ -8,6 +8,8 @@ type OperationLog = {
   agent?: string;
   counts?: Record<string, number>;
   error?: unknown;
+  /** Responsible policy-bound role, never an end-user identifier. */
+  agent?: string;
 };
 
 /**
@@ -26,6 +28,7 @@ export function logOperation(input: OperationLog) {
     trace_id: input.traceId ?? undefined,
     agent: input.agent,
     counts: input.counts,
+    agent: input.agent,
     error: input.error instanceof Error ? input.error.message.slice(0, 180) : typeof input.error === "string" ? input.error.slice(0, 180) : undefined,
   };
   if (event.level === "error") console.error(JSON.stringify(event));
