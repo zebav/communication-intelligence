@@ -14,6 +14,14 @@ message content, provider tokens or private owner data.
   analysis and calendar synchronization completed during the same observed
   window without a source-worker failure.
 - The media worker reported no active queue items in that observed pass.
+- The 11:25 CEST scheduled pass completed every observed source worker without
+  an error. Slack reconciliation completed in 0.86 seconds. Instagram
+  reconciliation completed in 3.67 seconds and correctly skipped six already
+  imported messages before person/conversation processing. The immediately
+  preceding pre-optimization Instagram pass took roughly 12 seconds; the
+  pre-optimization Slack pass observed in the same operational window took
+  roughly 23 seconds. These are production observations, not synthetic timing
+  claims.
 - The follow-up detector previously failed before reading its ledger because
   the server-only worker lacked a table grant. Migration
   `20261010105000_background_decision_worker_grants.sql` restores only the
@@ -32,8 +40,8 @@ message content, provider tokens or private owner data.
 | Slack ingestion | Yes | Yes | Import/analysis completed | Operational for approved read scopes | Confirm a new DM or mention routes to a decision |
 | Media and document lifecycle | Yes | Account-dependent | Worker healthy and queue empty in observed pass | Degraded until a real current asset completes end-to-end | Confirm image, PDF, audio and video rendering/analysis |
 | Canonical decision state | Yes | N/A | Live Today decision surface | Operational for persisted tasks | Verify one decision state transition across Inbox, Notiscenter and Decision Center |
-| Follow-up detection | Yes | N/A | Permission repair applied | Awaiting next scheduled run | Confirm successful post-repair worker run |
-| Autonomous learning | Yes | N/A | Safe diagnostics deployed | Awaiting next scheduled run | Confirm successful post-repair worker run or actionable safe diagnostic |
+| Follow-up detection | Yes | N/A | Permission repair and duplicate-race recovery applied | Operational, subject to live task-transition test | Confirm a newly eligible follow-up appears once |
+| Autonomous learning | Yes | N/A | Completed safely after permission repair | Operational, review-gated | Confirm a new owner correction produces the expected learning candidate |
 | Native iOS push | Architecture only | No | No | Not active | Device registration, permission, delivery and deep-link verification |
 
 ## Current constraints
