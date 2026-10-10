@@ -56,6 +56,9 @@ export async function POST(request: NextRequest) {
   if (!connectionId) return jsonError("Choose a Gmail account.", 400);
   const { data: connection } = await supabase.from("connections").select("id,account_identifier,encrypted_credentials,token_metadata,last_sync_at").eq("id", connectionId).eq("owner_id", userId).eq("provider", googleGmailConnector.id).eq("status", "connected").maybeSingle();
   if (!connection?.encrypted_credentials || !connection.account_identifier) return jsonError("Connect Gmail before importing messages.", 409);
+  const connectionMetadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
+    ? connection.token_metadata as Record<string, unknown>
+    : {};
   if (request.headers.get("x-sync-trigger") === "automatic" && connection.last_sync_at && Date.now() - new Date(connection.last_sync_at).getTime() < 5 * 60 * 1000) {
     return NextResponse.json({ imported: 0, skipped: true, syncedAt: connection.last_sync_at });
   }
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
   try {
     const stored = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
     const authorized = await accessToken(stored, request.nextUrl.origin);
-    const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata) ? connection.token_metadata as Record<string, unknown> : {};
+    const metadata = connectionMetadata;
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     listUrl.searchParams.set("maxResults", "50"); listUrl.searchParams.append("labelIds", "INBOX"); listUrl.searchParams.set("q", "newer_than:1y");
     // Every scheduled pass begins at the newest Inbox page. The old cursor was
@@ -134,18 +137,21 @@ export async function POST(request: NextRequest) {
     }
 
     const syncedAt = new Date().toISOString();
-    const nextMetadata = { ...metadata, expires_at: authorized.credentials.expiresAt, gmail_backfill_page_token: list.nextPageToken ?? null, gmail_initial_import_complete: !list.nextPageToken };
+    const nextMetadata = { ...metadata, expires_at: authorized.credentials.expiresAt, gmail_backfill_page_token: list.nextPageToken ?? null, gmail_initial_import_complete: !list.nextPageToken, last_sync_error_code: null, last_sync_error_at: null };
     const update: Record<string, unknown> = { last_sync_at: syncedAt, health_status: "healthy", token_metadata: nextMetadata, updated_at: syncedAt };
     if (authorized.refreshed) update.encrypted_credentials = encryptCredential(authorized.credentials, encryptionKey);
-    await supabase.from("connections").update(update).eq("id", connection.id).eq("owner_id", userId);
+    const { error: connectionUpdateError } = await supabase.from("connections").update(update).eq("id", connection.id).eq("owner_id", userId);
+    if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
     return NextResponse.json({ imported, alreadyStored, syncedAt, moreAvailable: Boolean(list.nextPageToken), initialImportComplete: !list.nextPageToken });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown"; console.error("Gmail sync failed", { reason });
     // Keep the source account truthful in Connections. The cron worker can
     // retry a transient problem, while an expired credential becomes an
     // explicit owner action instead of silently looking healthy.
+    const errorCode = reason === "reconnect_required" ? "gmail_reconnect_required" : reason === "sync_cursor_save_failed" ? "gmail_cursor_save_failed" : "gmail_sync_failed";
     await supabase.from("connections").update({
       health_status: reason === "reconnect_required" ? "reconnect_required" : "degraded",
+      token_metadata: { ...connectionMetadata, last_sync_error_code: errorCode, last_sync_error_at: new Date().toISOString() },
       updated_at: new Date().toISOString(),
     }).eq("id", connection.id).eq("owner_id", userId);
     if (reason === "reconnect_required") return jsonError("Gmail needs to be connected again.", 409);

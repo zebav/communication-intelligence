@@ -125,6 +125,9 @@ export async function POST(request: NextRequest) {
   if (requestedConnectionId) connectionQuery = connectionQuery.eq("id", requestedConnectionId);
   const { data: connection, error: connectionError } = await connectionQuery.order("updated_at", { ascending: false }).limit(1).maybeSingle();
   if (connectionError || !connection?.encrypted_credentials) return jsonError("Connect Outlook before importing messages.", 409);
+  const connectionMetadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
+    ? connection.token_metadata as Record<string, unknown>
+    : {};
   if (request.headers.get("x-sync-trigger") === "automatic" && connection.last_sync_at && Date.now() - new Date(connection.last_sync_at).getTime() < 5 * 60 * 1000) {
     return NextResponse.json({ imported: 0, skipped: true, syncedAt: connection.last_sync_at });
   }
@@ -137,15 +140,13 @@ export async function POST(request: NextRequest) {
     if (token.refreshed) {
       const { error } = await supabase.from("connections").update({
         encrypted_credentials: encryptCredential(token.credentials, encryptionKey),
-        token_metadata: { ...(connection.token_metadata as object ?? {}), expires_at: token.credentials.expiresAt },
+        token_metadata: { ...connectionMetadata, expires_at: token.credentials.expiresAt },
         updated_at: new Date().toISOString(),
       }).eq("id", connection.id);
       if (error) throw new Error("credential_update_failed");
     }
 
-    const metadata = connection.token_metadata && typeof connection.token_metadata === "object" && !Array.isArray(connection.token_metadata)
-      ? connection.token_metadata as Record<string, unknown>
-      : {};
+    const metadata = connectionMetadata;
     // Existing cursors were created before full bodies were selected. Restart
     // once from the bounded 30-day window so existing previews are upgraded.
     const needsHistoryBackfill = metadata.relationship_history_v1 !== true;
@@ -316,6 +317,8 @@ export async function POST(request: NextRequest) {
         inbox_delta_ready: deltaReady,
         full_body_sync_v1: true,
         relationship_history_v1: true,
+        last_sync_error_code: null,
+        last_sync_error_at: null,
       },
       updated_at: syncedAt,
     }).eq("id", connection.id);
@@ -328,12 +331,14 @@ export async function POST(request: NextRequest) {
     // Match Gmail's account-level recovery contract: the automatic worker
     // keeps retrying transient failures, but a revoked refresh token is
     // surfaced as a precise reconnect action for this mailbox only.
+    const safeCode = safeMicrosoftSyncCode(reason);
     await supabase.from("connections").update({
       health_status: safeMicrosoftSyncError(reason).reconnect ? "reconnect_required" : "degraded",
+      token_metadata: { ...connectionMetadata, last_sync_error_code: safeCode, last_sync_error_at: new Date().toISOString() },
       updated_at: new Date().toISOString(),
     }).eq("id", connection.id).eq("owner_id", userId);
     const safeError = safeMicrosoftSyncError(reason);
     logOperation({ route: "/api/connectors/microsoft/sync", operation: "outlook_import", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: reason });
-    return NextResponse.json({ error: safeError.message, code: safeMicrosoftSyncCode(reason) }, { status: safeError.status });
+    return NextResponse.json({ error: safeError.message, code: safeCode }, { status: safeError.status });
   }
 }
