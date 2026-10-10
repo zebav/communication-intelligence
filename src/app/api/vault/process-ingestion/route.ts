@@ -23,7 +23,7 @@ async function owner(request:NextRequest){
 }
 type Attachment={name:string;mime:string;bytes:Uint8Array;isInline?:boolean;contentId?:string;contentDisposition?:string};
 
-async function fetchExternalMedia(url:string,apiKey?:string):Promise<Attachment[]>{
+async function fetchExternalMedia(url:string,apiKey?:string, fallback?:{mimeType?:unknown;filename?:unknown}):Promise<Attachment[]>{
  const parsed=new URL(url);
  if(parsed.protocol!=="https:"||parsed.username||parsed.password||(parsed.port&&parsed.port!=="443"))throw new Error("unsafe_media_url");
  // YCloud's signed webhook URLs are intentionally short-lived. Its API key is
@@ -33,9 +33,16 @@ async function fetchExternalMedia(url:string,apiKey?:string):Promise<Attachment[
  const r=await fetch(parsed.href,{redirect:"error",signal:AbortSignal.timeout(30_000),headers:{accept:"image/*,video/*,audio/*,application/pdf,application/octet-stream",...(apiKey?{"x-api-key":apiKey}:{})}});
  if(!r.ok)throw new Error(`media_fetch_${r.status}`);
  const length=Number(r.headers.get("content-length")??0); if(length>100*1024*1024)throw new Error("media_too_large");
- const mime=(r.headers.get("content-type")??"application/octet-stream").split(";")[0].trim();
+ const responseMime=(r.headers.get("content-type")??"application/octet-stream").split(";")[0].trim().toLowerCase();
+ // Some provider download endpoints deliberately return a generic octet-stream
+ // even though the authenticated webhook reference included the media type.
+ // Only use that provider-supplied metadata as a fallback; never infer a type
+ // from the filename or from untrusted page content.
+ const fallbackMime=typeof fallback?.mimeType==="string"?fallback.mimeType.trim().toLowerCase():"";
+ const mime=responseMime==="application/octet-stream"&&fallbackMime?fallbackMime:responseMime;
  const bytes=new Uint8Array(await r.arrayBuffer()); if(bytes.length>100*1024*1024)throw new Error("media_too_large");
- const name=decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop()??"media").slice(0,180)||"media";
+ const fallbackName=typeof fallback?.filename==="string"?fallback.filename.trim():"";
+ const name=(fallbackName||decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop()??"media")).slice(0,180)||"media";
  return [{name,mime,bytes}];
 }
 async function metaWhatsAppMedia(token:string,mediaId:string,metadata:Record<string,unknown>):Promise<Attachment[]>{
@@ -90,7 +97,7 @@ export async function POST(request:NextRequest){
        if(provider==="ycloud"&&typeof ref.media_reference==="string"&&ref.media_reference.startsWith("https://")){
         const apiKey=process.env.YCLOUD_API_KEY?.trim();
         if(!apiKey)throw new Error("ycloud_api_key_missing");
-        files.push(...await fetchExternalMedia(ref.media_reference,apiKey));
+        files.push(...await fetchExternalMedia(ref.media_reference,apiKey,{mimeType:ref.mime_type,filename:ref.filename}));
        }
        else if(provider==="meta-direct"&&typeof ref.media_reference==="string"&&ref.media_reference)files.push(...await metaWhatsAppMedia(original.accessToken,ref.media_reference,{media_mime_type:ref.mime_type,media_filename:ref.filename}));
      }
