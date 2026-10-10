@@ -38,6 +38,12 @@ export async function GET(request: NextRequest) {
   const results = await Promise.all(jobs.map(async (job) => {
     try {
       const response = await fetch(new URL(automationOperationPath[job.operation], request.url), {
+        // Every queued run must reach the source worker. Reusing a previous
+        // internal GET response makes a healthy HTTP status look like a fresh
+        // mailbox pass while no provider request or cursor update occurred.
+        // Cron routes are explicitly dynamic, but setting this here makes the
+        // worker-to-worker boundary unambiguous as well.
+        cache: "no-store",
         headers: {
           authorization: request.headers.get("authorization") ?? "",
           "x-owner-id": job.owner_id,
