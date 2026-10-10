@@ -1,10 +1,10 @@
 export type CommunicationPeriod = "today" | "yesterday" | "7days" | "30days";
 
 export const communicationPeriods: Array<{ id: CommunicationPeriod; label: string }> = [
-  { id: "today", label: "Today" },
-  { id: "yesterday", label: "Yesterday" },
-  { id: "7days", label: "Last 7 days" },
-  { id: "30days", label: "Last 30 days" },
+  { id: "today", label: "I dag" },
+  { id: "yesterday", label: "I går" },
+  { id: "7days", label: "Senaste 7 dagarna" },
+  { id: "30days", label: "Senaste 30 dagarna" },
 ];
 
 function startOfLocalDay(value: Date) {
