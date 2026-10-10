@@ -12,6 +12,11 @@ describe("email classification", () => {
     expect(classifyEmail({ preview: "Manage preferences or unsubscribe" })).toBe("Newsletter");
     expect(recommendedEmailAction("Newsletter")).toBe("ARCHIVE");
   });
+
+  it("recognizes obvious forum and bulk-spam notices before the Business fallback", () => {
+    expect(classifyEmail({ subject: "New forum reply: casino offer", preview: "A new community post is waiting" })).toBe("Spam");
+    expect(classifyEmail({ subject: "Reply to this thread", preview: "A community digest is ready" })).toBe("Notification");
+  });
 });
 
 describe("email relevance", () => {

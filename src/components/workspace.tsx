@@ -28,6 +28,7 @@ import { signOut } from "@/app/auth/actions";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, deeplyAnalyzeEmailWithAI, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
 import type { DraftTransformation } from "@/lib/ai/service";
 import { emailDashboardExcerpt, emailDashboardSummary, prioritizeEmails } from "@/lib/email-intelligence";
+import { selectTodayChannel, selectTodayEmail } from "@/lib/today-decision-selection";
 import { isRelevantEmail } from "@/lib/connectors/email-classification";
 const PersonaForm = dynamic(() => import("@/components/persona-form").then(module => module.PersonaForm), { loading: () => <p className="muted">Öppnar kommunikationsprofil…</p> });
 import { followUpSection } from "@/lib/commitments";
@@ -327,21 +328,29 @@ function Today({ emails, channelCases, decisions, onOpenInbox, onOpenSource }: {
     return item.conversationType !== "imported" && latest?.direction === "in" && isWithinCommunicationPeriod(timestamp, period);
   });
   const ordered = prioritizeEmails(visibleEmails);
-  const summary = emailDashboardSummary(visibleEmails);
-  const critical = ordered.filter((email) => email.classification === "Critical");
-  const respond = ordered.filter((email) => ["RESPOND_NOW", "RESPOND_TODAY", "RESPOND_LATER"].includes(email.recommendedAction) && email.classification !== "Critical" && email.priorityScore >= 4);
-  const lowAttention = ordered.filter((email) => email.priorityScore < 4 && email.classification !== "Critical");
-  const otherChannels = visibleChannelCases.sort((a, b) => (b.threadMessages?.at(-1)?.sentAt ?? b.createdAt).localeCompare(a.threadMessages?.at(-1)?.sentAt ?? a.createdAt));
-  const periodLabel = communicationPeriods.find((item) => item.id === period)?.label ?? "Today";
-  const totalPending = visibleEmails.length + visibleChannelCases.length;
-  return <div className="page solvani-today"><span className="eyebrow">TODAY</span><h1>What needs your attention</h1><p className="subtitle">Relevant messages and decisions, ordered by urgency, relationship context and what is waiting on you.</p>
+  const emailBuckets = new Map(ordered.map((email) => [email.id, selectTodayEmail(email, email.messageId ? decisions[email.messageId] : undefined)]));
+  const channelBuckets = new Map(visibleChannelCases.map((item) => {
+    const messageId = item.threadMessages?.filter((message) => message.direction === "in").at(-1)?.id;
+    return [item.id, selectTodayChannel(item, messageId ? decisions[messageId] : undefined)];
+  }));
+  const actionEmails = ordered.filter((email) => emailBuckets.get(email.id) === "action");
+  const noteEmails = ordered.filter((email) => emailBuckets.get(email.id) === "note");
+  const actionChannels = visibleChannelCases.filter((item) => channelBuckets.get(item.id) === "action").sort((a, b) => (b.threadMessages?.at(-1)?.sentAt ?? b.createdAt).localeCompare(a.threadMessages?.at(-1)?.sentAt ?? a.createdAt));
+  const preparingChannels = visibleChannelCases.filter((item) => channelBuckets.get(item.id) === "preparing").sort((a, b) => (b.threadMessages?.at(-1)?.sentAt ?? b.createdAt).localeCompare(a.threadMessages?.at(-1)?.sentAt ?? a.createdAt));
+  const noteChannels = visibleChannelCases.filter((item) => channelBuckets.get(item.id) === "note").sort((a, b) => (b.threadMessages?.at(-1)?.sentAt ?? b.createdAt).localeCompare(a.threadMessages?.at(-1)?.sentAt ?? a.createdAt));
+  const actionItems = [...actionEmails, ...actionChannels];
+  const noteItems = [...noteEmails, ...noteChannels];
+  const summary = { ...emailDashboardSummary(ordered.filter((email) => emailBuckets.get(email.id) !== "hidden")), needsResponse: actionItems.length, lowAttention: noteItems.length, critical: actionItems.filter((item) => "classification" in item && item.classification === "Critical").length };
+  const periodLabel = communicationPeriods.find((item) => item.id === period)?.label ?? "I dag";
+  const totalPending = actionItems.length + noteItems.length + preparingChannels.length;
+  const renderChannelCard = (item: CommunicationCase, preparing = false) => { const messageId = item.threadMessages?.filter((message) => message.direction === "in").at(-1)?.id; const decision = messageId ? decisions[messageId] : undefined; return <article className="card email-card" key={item.id}><div className="card-top"><span>{item.title}</span><span className={`priority-badge ${preparing ? "normal" : item.priorityScore != null && item.priorityScore >= 8 ? "high" : "normal"}`}>{preparing ? "Förbereds" : item.priorityScore != null && item.priorityScore >= 8 ? "Hög" : "Att notera"}</span></div><div className="card-person"><ContactAvatar personId={item.personId} name={item.personName} size={32} /><div><PersonLink personId={item.personId} name={item.personName} /><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{preparing ? "Solvani förbereder en AI-bedömning och visar ett förslag när den är klar." : item.analysis?.summary || item.message}</p><button className="pill" onClick={() => onOpenSource(item.source)}>{decision ? `Beslut: ${statusLabels[decision.status]}` : "Öppna konversation"} <ChevronRight size={10} /></button></article>; };
+  return <div className="page solvani-today"><span className="eyebrow">I DAG</span><h1>Det här behöver din uppmärksamhet</h1><p className="subtitle">Relevanta beslut och information – ordnade efter vad som behöver din tid, din relation till avsändaren och vad som väntar på dig.</p>
     <div className="overview-periods" aria-label="Kommunikationsperiod">{communicationPeriods.map((item) => <button type="button" className={period === item.id ? "active" : ""} aria-pressed={period === item.id} key={item.id} onClick={() => setPeriod(item.id)}>{item.label}</button>)}</div>
     <div className="summary-bar"><div className="summary-stat"><strong>{summary.unread}</strong><span>olästa</span></div><div className="summary-stat"><strong>{summary.needsResponse}</strong><span>behöver svar</span></div><div className="summary-stat"><strong>{summary.critical}</strong><span>brådskande</span></div><div className="summary-stat"><strong>{summary.lowAttention}</strong><span>att notera</span></div></div>
     {totalPending === 0 && <div className="empty-card">Inga relevanta obesvarade meddelanden för {periodLabel.toLowerCase()}.</div>}
-    {critical.length > 0 && <><div className="section-title"><Bell size={14} color="#e15d6f" /> Hantera nu <span className="count">{critical.length}</span></div><div className="cards">{critical.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}</div></>}
-    {respond.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#3b82f6" /> Redo för dig <span className="count">{respond.length}</span></div><div className="cards">{respond.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}</div></>}
-    {otherChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#8b5cf6" /> Övriga konversationer <span className="count">{otherChannels.length}</span></div><div className="cards">{otherChannels.map((item) => { const messageId = item.threadMessages?.filter((message) => message.direction === "in").at(-1)?.id; const decision = messageId ? decisions[messageId] : undefined; return <article className="card email-card" key={item.id}><div className="card-top"><span>{item.title}</span>{item.priorityScore != null && <span className="priority-badge">{item.priorityScore >= 8 ? "Hög" : "Normal"}</span>}</div><div className="card-person"><ContactAvatar personId={item.personId} name={item.personName} size={32} /><div><PersonLink personId={item.personId} name={item.personName} /><span>{sources.find((source) => source.source === item.source)?.label ?? item.source}</span></div></div><p>{item.analysis?.summary || item.message}</p><button className="pill" onClick={() => onOpenSource(item.source)}>{decision ? `Beslut: ${statusLabels[decision.status]}` : "Öppna konversation"} <ChevronRight size={10} /></button></article>; })}</div></>}
-    {lowAttention.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Bör noteras <span className="count">{lowAttention.length}</span></div><div className="cards">{lowAttention.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}</div></>}
+    {actionItems.length > 0 && <><div className="section-title"><Bell size={14} color="#e15d6f" /> Bör hanteras <span className="count">{actionItems.length}</span></div><div className="cards">{actionEmails.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}{actionChannels.map((item) => renderChannelCard(item))}</div></>}
+    {preparingChannels.length > 0 && <><div className="section-title"><MessageCircle size={14} color="#8b5cf6" /> Förbereds <span className="count">{preparingChannels.length}</span></div><div className="cards">{preparingChannels.map((item) => renderChannelCard(item, true))}</div></>}
+    {noteItems.length > 0 && <><div className="section-title"><Archive size={14} color="#8b939f" /> Bör noteras <span className="count">{noteItems.length}</span></div><div className="cards">{noteEmails.map((email) => <LiveEmailCard key={email.id} email={email} decision={email.messageId ? decisions[email.messageId] : undefined} onClick={onOpenInbox} />)}{noteChannels.map((item) => renderChannelCard(item))}</div></>}
   </div>;
 }
 

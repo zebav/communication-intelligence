@@ -26,6 +26,11 @@ const contains = (value: string, words: readonly string[]) => words.some((word) 
 
 export function classifyEmail(input: ClassificationInput): EmailClassification {
   const text = `${input.subject ?? ""} ${input.preview ?? ""} ${input.sender ?? ""}`.toLowerCase();
+  // Historical imports can contain forum notifications or obvious bulk/spam
+  // content whose provider did not mark it as such. Classify these before the
+  // generic Business fallback so they cannot become reply work by default.
+  if (/\b(casino|betting|crypto giveaway|telegram group|onion)\b/.test(text)) return "Spam";
+  if (/\b(new (?:forum |community )?(?:post|topic|reply)|reply to (?:this )?(?:topic|thread)|community digest|forum digest)\b/.test(text)) return "Notification";
   if (/\b(unsubscribe|nyhetsbrev|newsletter|manage preferences)\b/.test(text) && /\b(discount|sale|campaign|rabatt|erbjudande|offer)\b/.test(text)) return "Marketing";
   if (input.importance === "high" || contains(text, ["urgent", "security alert", "suspicious", "omedelbart", "brådskande"])) return "Critical";
   if (contains(text, ["invoice", "receipt", "kvitto", "faktura", "order confirmation"])) return "Receipt / Invoice";
