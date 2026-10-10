@@ -129,7 +129,11 @@ export async function reconcileSlackConnection(connectionId: string, options: { 
   // race where the same message is analysed twice.
   if (analyzeImportedMessages) await Promise.allSettled(analyses.slice(0, 3).map(analyzeIncomingInstagramMessage));
   await db.from("connections").update({
-    health_status: unavailableConversations > 0 ? "degraded" : "healthy",
+    // A single archived, shared, or permission-restricted channel must not
+    // turn a working Slack account into a degraded source. We only reach this
+    // point after at least one conversation was readable; the all-unreadable
+    // case above remains a failed import and is surfaced to Operations.
+    health_status: "healthy",
     last_sync_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     token_metadata: { ...metadata, slack_conversation_cursor: listed.response_metadata?.next_cursor?.trim() || null },

@@ -44,8 +44,13 @@ export async function GET(request: NextRequest) {
   // Analysis is a recovery worker, not evidence that the live webhook is
   // disconnected. A transient AI/media error must not present WhatsApp as
   // requiring reconnection in the UI.
-  if (analyzed) {
-    let connectionUpdate = database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("provider", whatsappConnector.id).eq("status", "connected");
+  if (!failed) {
+    // A completed recovery pass is sufficient to clear an old analysis/media
+    // incident from the *connection* state. WhatsApp is event-driven, so we
+    // intentionally leave `last_sync_at` unchanged when no new message was
+    // handled; the UI continues to say “Direktuppdatering aktiv” rather than
+    // implying a mailbox poll happened.
+    let connectionUpdate = database.from("connections").update({ health_status: "healthy", updated_at: new Date().toISOString() }).eq("provider", whatsappConnector.id).eq("status", "connected").neq("health_status", "reconnect_required");
     if (ownerId) connectionUpdate = connectionUpdate.eq("owner_id", ownerId);
     await connectionUpdate;
   }
