@@ -7,6 +7,7 @@ import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 import type { IncomingAnalysisResult } from "@/lib/connectors/instagram-intelligence";
+import { materializeInboundDecision } from "@/lib/assistant/repository";
 
 export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; conversationId: string; messageId: string }): Promise<IncomingAnalysisResult> {
   const database = createAdminClient();
@@ -43,5 +44,8 @@ export async function analyzeIncomingWhatsAppMessage(input: { ownerId: string; c
   }
   if (analysis.commitment.detected && analysis.commitment.confidence >= 0.75 && analysis.commitment.description.trim()) await database.from("commitments").upsert({ owner_id: input.ownerId, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: analysis.commitment.dueAt || null, status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   if (conversation.person_id) await refreshRelationshipIntelligence(database, input.ownerId, conversation.person_id).catch(() => undefined);
+  // Keep WhatsApp on the same persisted decision path as mail, Instagram and
+  // Slack. This creates a reviewable task only; it never sends a reply.
+  await materializeInboundDecision(database, input.ownerId, message.id);
   return { status: "analyzed" };
 }

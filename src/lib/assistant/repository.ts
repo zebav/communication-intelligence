@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { emailAnalysisSchema, getAIService } from "@/lib/ai/service";
 import { normalizeUniversalProfile, resolveCommunicationProfile, situationForClassification } from "@/lib/communication-profile";
 import { approvedLearningContext } from "@/lib/learning-feedback";
-import type { Evidence, Plan, Task, TaskStatus } from "./model";
+import { makePlan, propose, sendCapability, type Evidence, type Plan, type Task, type TaskKind, type TaskStatus } from "./model";
 import { verifiedHttpsUrl } from "./browser-url";
 import type { Source } from "@/lib/domain";
 import { blocksDecisionUntilMediaReady, mediaDecisionState } from "@/lib/media/decision-gate";
@@ -172,6 +172,35 @@ export async function changeTask(db: SupabaseClient, owner: string, task: Task, 
   const { data, error } = await db.from("assistant_tasks").update({ status, plan, result }).eq("owner_id", owner).eq("id", task.id).eq("revision", task.revision).eq("status", task.status).select("*").maybeSingle();
   if (error || !data) throw new Error("Uppdraget har ändrats eller behandlas redan. Hämta det igen innan du fortsätter.");
   return data as Task;
+}
+
+/**
+ * Persist the decision that was already prepared by the inbound analysis
+ * worker. This intentionally does not execute anything, run browser research,
+ * or replace an owner-edited task. It makes the same durable task available to
+ * Inbox, Today and Notiscenter before the owner opens the message.
+ */
+export async function materializeInboundDecision(db: SupabaseClient, owner: string, messageId: string) {
+  const evidence = await readEvidence(db, owner, messageId);
+  const kind = propose(evidence)[0] as TaskKind | undefined;
+  if (!kind) return null;
+
+  const plan = makePlan(evidence, kind);
+  const { data: created, error } = await db.from("assistant_tasks")
+    .upsert({ owner_id: owner, message_id: evidence.messageId, kind, status: "decision", plan }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true })
+    .select("*")
+    .maybeSingle();
+  if (error) throw new Error("decision_materialization_failed");
+  if (!created) return null;
+
+  const task = created as Task;
+  // A reply draft returned by the existing analysis is already bound to the
+  // original evidence. Mark it ready only when all deterministic delivery
+  // guards pass; otherwise retain the safe review state.
+  if (kind === "reply" && !sendCapability(plan, kind)) {
+    return changeTask(db, owner, task, "ready", plan);
+  }
+  return task;
 }
 export async function persistDraftAnalysis(db: SupabaseClient, owner: string, messageId: string, draftResponse: string, draftTone = "Natural") {
   const { data: row, error: readError } = await db.from("messages").select("metadata").eq("owner_id", owner).eq("id", messageId).maybeSingle();

@@ -11,6 +11,7 @@ import { logOperation } from "@/lib/observability";
 import { z } from "zod";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 import { emailAnalysisRecoveryCandidates } from "@/lib/email-analysis-recovery";
+import { materializeInboundDecision } from "@/lib/assistant/repository";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -79,6 +80,10 @@ async function analyzeCandidate(supabase: AdminClient, message: Candidate) {
     if (!existingOpen) await supabase.from("commitments").upsert({ owner_id: message.owner_id, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: normalizeCommitmentDueAt(analysis.commitment.dueAt), status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
   if (conversation.person_id) await refreshRelationshipIntelligence(supabase, message.owner_id, conversation.person_id).catch(() => undefined);
+  // Analysis already produced a persisted draft and recommendation. Create the
+  // canonical decision now, rather than waiting for a user to press a second
+  // "prepare" button in a different view.
+  await materializeInboundDecision(supabase, message.owner_id, message.id);
   return true;
 }
 

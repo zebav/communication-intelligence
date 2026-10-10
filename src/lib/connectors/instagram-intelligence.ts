@@ -7,6 +7,7 @@ import { blocksDecisionUntilMediaReady } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
 import { inboundBurst } from "@/lib/ai/inbound-burst";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
+import { materializeInboundDecision } from "@/lib/assistant/repository";
 
 export type IncomingAnalysisResult =
   | { status: "analyzed" }
@@ -62,5 +63,9 @@ export async function analyzeIncomingInstagramMessage(input: { ownerId: string; 
     await database.from("commitments").upsert({ owner_id: input.ownerId, conversation_id: conversation.id, person_id: conversation.person_id, description: analysis.commitment.description.trim(), commitment_owner: analysis.commitment.owner, due_at: analysis.commitment.dueAt || null, status: "suggested", source_message_id: message.id, confidence: analysis.commitment.confidence }, { onConflict: "owner_id,source_message_id,description", ignoreDuplicates: true });
   }
   if (conversation.person_id) await refreshRelationshipIntelligence(database, input.ownerId, conversation.person_id).catch(() => undefined);
+  // The common decision state is prepared as part of analysis so Slack,
+  // Instagram and WhatsApp messages do not require a separate preparation
+  // workflow merely to show an already available draft.
+  await materializeInboundDecision(database, input.ownerId, message.id);
   return { status: "analyzed" };
 }
