@@ -24,6 +24,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Archive, Bell, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Clock3, Command, FileUp, Inbox, LayoutDashboard, Link2, LogOut, Mail, MapPin, MessageCircle, MoreHorizontal, PanelRightOpen, Search, Send, Settings, Sparkles, Target, Users, WandSparkles, X } from "lucide-react";
 import { actionLabels, type CalendarLearningEvent, type ChannelConnection, type CommunicationCase, type CommunicationOutcome, type CommunicationPersonOption, type FollowUpCommitment, type IntelligentPerson, type LearningSignal, type RecommendedAction, type Source, type SyncedEmailConversation, type UniversalCommunicationProfile } from "@/lib/domain";
+import { connectionSyncIssueLabel } from "@/lib/connectors/sync-status";
 import { signOut } from "@/app/auth/actions";
 import { analyzeEmailWithAI, correctEmailClassification, createManualCommitment, deeplyAnalyzeEmailWithAI, reviewCommitment, reviewPersonMemory, reviseEmailDraftWithAI, saveSenderPreferences } from "@/app/inbox/actions";
 import type { DraftTransformation } from "@/lib/ai/service";
@@ -783,6 +784,7 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
   const accountSyncSummary = (connection: ChannelConnection) => {
     if (connection.healthStatus === "reconnect_required") return "Återanslutning krävs";
     if (connection.healthStatus === "error") return "Kontroll behövs";
+    if (connection.healthStatus === "degraded") return connectionSyncIssueLabel(connection.lastSyncIssue) ?? "Solvani kontrollerar synkningen automatiskt";
     // WhatsApp is delivered by its verified webhook, not fetched through a
     // periodic mailbox poll. A missing `last_sync_at` is therefore expected
     // before the first inbound message and must not look like stale data.

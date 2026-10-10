@@ -174,6 +174,7 @@ export interface ChannelConnection {
   status: string;
   healthStatus: string;
   lastSyncAt?: string;
+  lastSyncIssue?: "reconnect" | "temporary" | "recovery" | "unknown";
   capabilities: Record<string, boolean>;
 }
 

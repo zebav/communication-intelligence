@@ -4,6 +4,7 @@ import { WorkspaceSnapshot } from "@/components/workspace-snapshot";
 import type { View } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { defaultUniversalProfile, normalizeUniversalProfile } from "@/lib/communication-profile";
+import { safeConnectionSyncIssue } from "@/lib/connectors/sync-status";
 import { recentWindowStartIso } from "@/lib/recent-window";
 import { deduplicatePersonConversations } from "@/lib/person-conversations";
 import { logOperation } from "@/lib/observability";
@@ -153,7 +154,7 @@ export default async function Home({ searchParams }: HomeProps) {
     needsFollowUps ? supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsLearning ? supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,evidence,confidence,status,learning_mode,fact_state,sensitivity,autonomy_level,auto_applied_at,last_validated_at,correction_count,version,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsOutcomes ? supabase.from("communication_outcomes").select("id,desired_outcome,status,owner_rating,response_time_minutes,user_confirmed,created_at,updated_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("updated_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
-    supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(workspaceQuerySignal()),
+    supabase.from("connections").select("id,provider,source,account_name,account_identifier,status,health_status,last_sync_at,token_metadata,capabilities").eq("owner_id", user.id).eq("status", "connected").order("updated_at", { ascending: false }).abortSignal(workspaceQuerySignal()),
     needsCalendarHistory ? supabase.from("calendar_holds").select("id,title,starts_at,ends_at,status").eq("owner_id", user.id).eq("status", "confirmed").order("starts_at", { ascending: false }).limit(50).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
   ]);
   const workspaceLoad = await Promise.race([
@@ -293,7 +294,23 @@ export default async function Home({ searchParams }: HomeProps) {
     return { id: item.id, sourceMessageId: item.source_message_id ?? undefined, conversationId: item.conversation_id, personName: person?.display_name ?? "Unknown person", conversationTitle: conversation?.title ?? "Untitled conversation", description: item.description, owner: item.commitment_owner === "user" || item.commitment_owner === "sender" ? item.commitment_owner : "unknown", dueAt: item.due_at ?? undefined, status: item.status === "open" ? "open" : "suggested", confidence: Number(item.confidence ?? 0) };
   });
 
-  const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => ({ id: item.id, provider: item.provider, source: item.source as Source | undefined, accountName: item.account_name ?? undefined, accountIdentifier: item.account_identifier ?? undefined, status: item.status, healthStatus: item.health_status, lastSyncAt: item.last_sync_at ?? undefined, capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {} }));
+  const connections: ChannelConnection[] = (connectionRows ?? []).map((item) => {
+    const metadata = item.token_metadata && typeof item.token_metadata === "object" && !Array.isArray(item.token_metadata)
+      ? item.token_metadata as Record<string, unknown>
+      : {};
+    return {
+      id: item.id,
+      provider: item.provider,
+      source: item.source as Source | undefined,
+      accountName: item.account_name ?? undefined,
+      accountIdentifier: item.account_identifier ?? undefined,
+      status: item.status,
+      healthStatus: item.health_status,
+      lastSyncAt: item.last_sync_at ?? undefined,
+      lastSyncIssue: safeConnectionSyncIssue(metadata.last_sync_error_code),
+      capabilities: item.capabilities && typeof item.capabilities === "object" && !Array.isArray(item.capabilities) ? item.capabilities as Record<string, boolean> : {},
+    };
+  });
 
   const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email" && !isSyntheticTestConversation(row)).map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
