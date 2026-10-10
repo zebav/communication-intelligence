@@ -100,10 +100,12 @@ export async function GET(request: NextRequest) {
   const ownerId = requestedOwner.success ? requestedOwner.data : null;
   const loginTriggered = request.headers.get("x-maintenance-trigger") === "login";
   const provider = requestedProvider(request);
-  // Ordering by the oldest successful sync prevents a second connected mailbox
-  // from waiting through several five-minute passes. The small concurrent
-  // batch still keeps every provider run within the function budget.
-  let connectionQuery = supabase.from("connections").select("owner_id,id,provider").eq("provider", provider).eq("status", "connected").order("last_sync_at", { ascending: true, nullsFirst: true });
+  // Rotate by the least recently attempted account, not only the oldest
+  // successful sync. A mailbox with a persistent temporary failure must not
+  // occupy every five-minute pass and starve the other connected accounts.
+  // Each attempt still updates `updated_at`, so retries remain bounded and
+  // every account eventually receives a recovery attempt.
+  let connectionQuery = supabase.from("connections").select("owner_id,id,provider").eq("provider", provider).eq("status", "connected").order("updated_at", { ascending: true, nullsFirst: true }).order("last_sync_at", { ascending: true, nullsFirst: true });
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
   const { data: connections, error } = await connectionQuery.limit(maxConnectionsPerPass);
   if (error) {
