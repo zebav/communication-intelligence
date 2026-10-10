@@ -6,6 +6,11 @@ import { decideVaultRetention } from "./document-retention";
 const allowed = new Set([
   "application/pdf","image/jpeg","image/png","image/webp","image/heic","image/heif","text/plain","text/csv","application/json",
   "audio/mpeg","audio/mp4","audio/m4a","audio/wav","audio/x-wav","audio/ogg","audio/webm",
+  // These are already accepted by the trusted provider-ingestion worker and
+  // rendered through the owner-scoped preview route. Keeping the same allow
+  // list here prevents a user-selected or recovered video from being rejected
+  // merely because it entered through Documents & Media instead of a message.
+  "video/mp4","video/webm","video/quicktime",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
