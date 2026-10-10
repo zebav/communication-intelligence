@@ -26,3 +26,8 @@ export function validatedInboxDeltaUrl(value: unknown) {
   }
   return url;
 }
+
+/** A Graph delta cursor can expire independently of OAuth credentials. */
+export function shouldRestartExpiredInboxCursor(input: { status: number; usingStoredCursor: boolean; alreadyRestarted: boolean }) {
+  return input.status === 410 && input.usingStoredCursor && !input.alreadyRestarted;
+}

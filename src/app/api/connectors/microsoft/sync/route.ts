@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { decryptCredential, encryptCredential } from "@/lib/connectors/credential-crypto";
 import { classifyEmail, emailPriority, recommendedEmailAction } from "@/lib/connectors/email-classification";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
-import { initialInboxDeltaUrl, validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
+import { initialInboxDeltaUrl, shouldRestartExpiredInboxCursor, validatedInboxDeltaUrl } from "@/lib/connectors/microsoft-delta";
 import { extractMicrosoftMessageText, type MicrosoftItemBody } from "@/lib/connectors/microsoft-message";
 import { microsoftConfig } from "@/lib/connectors/microsoft-oauth";
 import { normalizeCommunicationMessage } from "@/lib/connectors/normalization";
@@ -155,6 +155,7 @@ export async function POST(request: NextRequest) {
     let deltaReady = false;
     let pagesProcessed = 0;
     let imported = 0;
+    let restartedExpiredCursor = false;
 
     // Process several pages per request, while retaining Graph's opaque cursor if
     // more pages remain. This keeps server execution bounded and makes each click
@@ -165,6 +166,14 @@ export async function POST(request: NextRequest) {
         signal: AbortSignal.timeout(20_000),
       });
       if (graphResponse.status === 401) throw new Error("reconnect_required");
+      // Delta state is intentionally opaque and can expire server-side. A 410
+      // is not an authentication failure: restart one bounded inbox delta pass
+      // so the connection self-heals instead of remaining stale forever.
+      if (shouldRestartExpiredInboxCursor({ status: graphResponse.status, usingStoredCursor: !needsFullBodyUpgrade, alreadyRestarted: restartedExpiredCursor })) {
+        pageUrl = initialInboxDeltaUrl();
+        restartedExpiredCursor = true;
+        continue;
+      }
       if (!graphResponse.ok) throw new Error(`graph_${graphResponse.status}`);
       const graph = await graphResponse.json() as GraphMessagesResponse;
       pagesProcessed += 1;
@@ -312,7 +321,7 @@ export async function POST(request: NextRequest) {
     }).eq("id", connection.id);
     if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
     logOperation({ route: "/api/connectors/microsoft/sync", operation: "outlook_import", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { imported, styleSamples, pages: pagesProcessed } });
-    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: !needsFullBodyUpgrade && Boolean(metadata.inbox_sync_url), fullBodyUpgrade: needsFullBodyUpgrade, pagesProcessed, moreAvailable: Boolean(nextSyncUrl?.includes("$skiptoken") || nextSyncUrl?.includes("%24skiptoken")) });
+    return NextResponse.json({ imported, styleSamples, syncedAt, incremental: !needsFullBodyUpgrade && !restartedExpiredCursor && Boolean(metadata.inbox_sync_url), cursorRecovered: restartedExpiredCursor, fullBodyUpgrade: needsFullBodyUpgrade, pagesProcessed, moreAvailable: Boolean(nextSyncUrl?.includes("$skiptoken") || nextSyncUrl?.includes("%24skiptoken")) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     console.error("Microsoft mailbox sync failed", { reason });

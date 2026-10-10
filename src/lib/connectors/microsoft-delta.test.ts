@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialInboxDeltaUrl, validatedInboxDeltaUrl } from "./microsoft-delta";
+import { initialInboxDeltaUrl, shouldRestartExpiredInboxCursor, validatedInboxDeltaUrl } from "./microsoft-delta";
 
 describe("Microsoft inbox delta URLs", () => {
   it("loads bounded newest-first pages from the last year for relationship history", () => {
@@ -18,5 +18,11 @@ describe("Microsoft inbox delta URLs", () => {
     expect(validatedInboxDeltaUrl(graphFolderCursor).toString()).toBe(graphFolderCursor);
     expect(() => validatedInboxDeltaUrl("https://example.com/collect")).toThrow("invalid_delta_link");
     expect(() => validatedInboxDeltaUrl("https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=unsafe")).toThrow("invalid_delta_link");
+  });
+
+  it("restarts a stored inbox cursor once when Graph expires it", () => {
+    expect(shouldRestartExpiredInboxCursor({ status: 410, usingStoredCursor: true, alreadyRestarted: false })).toBe(true);
+    expect(shouldRestartExpiredInboxCursor({ status: 410, usingStoredCursor: true, alreadyRestarted: true })).toBe(false);
+    expect(shouldRestartExpiredInboxCursor({ status: 410, usingStoredCursor: false, alreadyRestarted: false })).toBe(false);
   });
 });
