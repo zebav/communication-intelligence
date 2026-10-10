@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; lastInboundAt: string | null; needsAttention: boolean };
+export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; lastInboundAt: string | null; needsAttention: boolean; stale: boolean };
 export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; retrievalPending: number; retrievalFailed: number; analysisPending: number; vaultRetained: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
 /**
@@ -10,6 +10,13 @@ export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadL
  * limit, which made the UI operationally misleading.
  */
 export async function readDataIngestionHealth(database: SupabaseClient, ownerId?: string): Promise<IngestionHealth> {
+  const now = Date.now();
+  const staleAfterMinutes: Record<string, number> = {
+    gmail: 20,
+    "microsoft-graph": 20,
+    slack: 20,
+    "instagram-professional": 30,
+  };
   const jobsCount = () => {
     const query = database.from("vault_ingestion_jobs").select("id", { count: "exact", head: true });
     return ownerId ? query.eq("owner_id", ownerId) : query;
@@ -63,6 +70,8 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
     connections = (data ?? []).map((connection) => {
       const lastSyncAt = typeof connection.last_sync_at === "string" ? connection.last_sync_at : null;
       const health = typeof connection.health_status === "string" ? connection.health_status : "unknown";
+      const staleAfter = staleAfterMinutes[connection.provider];
+      const syncAge = lastSyncAt ? now - new Date(lastSyncAt).getTime() : Number.NaN;
       return {
         id: connection.id,
         provider: connection.provider,
@@ -74,6 +83,10 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
         // The automation handles a stale timestamp and bounded retries. Only
         // a disconnected credential needs intervention from the owner.
         needsAttention: connection.status !== "connected" || health === "reconnect_required",
+        // Webhook-only and document sources do not have a fixed pull cadence.
+        // For mailbox/chat sources we surface staleness truthfully without
+        // turning a recoverable background delay into an owner action.
+        stale: Boolean(staleAfter && Number.isFinite(syncAge) && syncAge > staleAfter * 60_000),
       };
     });
   }
