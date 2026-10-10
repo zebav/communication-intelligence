@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { analyzeCalendarIntent } from "@/lib/calendar/ai-intent";
+import { analyzeCalendarIntent, calendarIntentFromStoredPlanningSuggestion } from "@/lib/calendar/ai-intent";
 import { calendarSuggestions } from "@/lib/calendar/suggestions-service";
 import { meetingDefaults } from "@/lib/calendar/types";
 import { GooglePlacesRoutes } from "@/lib/calendar/places-routing";
@@ -84,7 +84,13 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan,
     direction: String(message.direction),
     source: String(message.source),
   }));
-  const intent = await analyzeCalendarIntent({ ownerId: owner, timezone: settings.data.timezone, messages: evidence });
+  // The inbound worker normally persisted a planning suggestion already. It is
+  // safe to reuse because it is linked to this exact decision evidence, and it
+  // keeps opening a prepared task from causing another expensive model call.
+  // Older/imported messages without a stored suggestion retain the guarded
+  // calendar analysis fallback.
+  const intent = calendarIntentFromStoredPlanningSuggestion(plan.evidence.analysis.planningSuggestion, evidence)
+    ?? await analyzeCalendarIntent({ ownerId: owner, timezone: settings.data.timezone, messages: evidence });
   const defaults = meetingDefaults[intent.meetingType] ?? meetingDefaults.OTHER;
   const duration = intent.durationMinutes ?? defaults.durationMinutes;
   const suppliedDate = /^\d{4}-\d{2}-\d{2}$/.test(taskInputs.meeting_date ?? "") ? taskInputs.meeting_date : null;

@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from "vitest";
-import {analyzeCalendarIntent,groundCalendarIntent} from "./ai-intent";
+import {analyzeCalendarIntent,calendarIntentFromStoredPlanningSuggestion,groundCalendarIntent} from "./ai-intent";
 const messages=[{id:"one",body:"Kan vi ses 2026-09-21 kl 12?",sentAt:"2026-09-16T10:00:00Z",direction:"incoming",source:"whatsapp"}];
 const proposal={operation:"propose",summary:"Lunch",meetingType:"LUNCH",date:"2026-09-21",timeText:"12",locationText:"",durationMinutes:null,questions:[],evidence:[{messageId:"one",quote:messages[0].body}]};
 afterEach(()=>vi.unstubAllEnvs());
@@ -22,5 +22,17 @@ describe("grounded calendar proposals",()=>{
   expect((await analyzeCalendarIntent({ownerId:"owner",timezone:"Europe/Stockholm",messages},transport)).date).toBe(proposal.date);
   const sent=JSON.parse(transport.mock.calls[0][1].body);
   expect(sent.store).toBe(false);expect(sent.tools).toBeUndefined();expect(sent.safety_identifier).not.toBe("owner");
+ });
+ it("reuses a stored planning suggestion without inventing a date",()=>{
+  const result=calendarIntentFromStoredPlanningSuggestion({
+   detected:true,kind:"meal",objective:"Föreslå en middag",placeQuery:"middag nära Södermalm",travelNeeded:true,calendarNeeded:true,rationale:"De vill ses för middag.",
+  },messages);
+  expect(result).toMatchObject({operation:"propose",meetingType:"DINNER",date:null,locationText:"middag nära Södermalm"});
+  expect(result?.evidence[0]).toEqual({messageId:"one",quote:messages[0].body});
+ });
+ it("does not turn unrelated stored planning into a calendar decision",()=>{
+  expect(calendarIntentFromStoredPlanningSuggestion({
+   detected:true,kind:"travel",objective:"Planera en resa",placeQuery:"",travelNeeded:true,calendarNeeded:false,rationale:"",
+  },messages)).toBeNull();
  });
 });

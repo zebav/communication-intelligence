@@ -1,5 +1,6 @@
 import {createHash} from "node:crypto";
 import {z} from "zod";
+import type {PlanningSuggestion} from "@/lib/domain";
 export type IntentMessage={id:string;body:string;sentAt:string|null;direction:string;source:string};
 export const calendarIntentSchema=z.object({
  operation:z.enum(["propose","change","cancel","none"]),summary:z.string().min(1).max(600),
@@ -10,6 +11,45 @@ export const calendarIntentSchema=z.object({
  evidence:z.array(z.object({messageId:z.string(),quote:z.string().min(1).max(500)})).max(5),
 }).strict();
 export type CalendarIntent=z.infer<typeof calendarIntentSchema>;
+
+/**
+ * The communication pipeline already extracts a bounded planning suggestion
+ * when an inbound message is analysed. Reusing that persisted result avoids a
+ * second model request merely because the owner opens a meeting decision. The
+ * original message remains the evidence: this helper only translates the
+ * stored, reviewable suggestion into the calendar planner's typed contract.
+ */
+export function calendarIntentFromStoredPlanningSuggestion(
+  suggestion: PlanningSuggestion | undefined,
+  messages: IntentMessage[],
+): CalendarIntent | null {
+  if (!suggestion?.detected || !["meeting", "date", "meal"].includes(suggestion.kind)) return null;
+
+  const evidenceMessage = [...messages].reverse().find((message) => message.direction !== "out" && message.body.trim())
+    ?? [...messages].reverse().find((message) => message.body.trim());
+  if (!evidenceMessage) return null;
+
+  const context = `${suggestion.objective}\n${suggestion.rationale}\n${evidenceMessage.body}`.toLocaleLowerCase();
+  const meetingType = suggestion.kind === "date"
+    ? "PERSONAL"
+    : suggestion.kind === "meal"
+      ? (/middag|dinner/.test(context) ? "DINNER" : "LUNCH")
+      : (/fika|coffee/.test(context) ? "COFFEE" : "BUSINESS");
+  const raw = {
+    operation: "propose" as const,
+    summary: suggestion.objective.trim() || suggestion.rationale.trim() || "Förbered mötesalternativ.",
+    meetingType,
+    // A date is intentionally never inferred here. Relative dates are
+    // resolved deterministically by the caller, otherwise the owner is asked.
+    date: null,
+    timeText: "",
+    locationText: suggestion.placeQuery.trim(),
+    durationMinutes: null,
+    questions: [],
+    evidence: [{ messageId: evidenceMessage.id, quote: evidenceMessage.body.trim().slice(0, 500) }],
+  };
+  return groundCalendarIntent(raw, messages);
+}
 export function groundCalendarIntent(raw:unknown,messages:IntentMessage[]):CalendarIntent {
  const result=calendarIntentSchema.parse(raw);
  if(result.operation!=="none"&&!result.evidence.length)throw new Error("Förslaget saknar källunderlag.");
