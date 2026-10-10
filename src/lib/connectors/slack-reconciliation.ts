@@ -2,15 +2,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptCredential } from "@/lib/connectors/credential-crypto";
 import { resolveOrCreateChannelPerson } from "@/lib/connectors/person-resolution";
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
+import { mapWithConcurrency } from "@/lib/bounded-concurrency";
 
 type Credentials = { accessToken?: string; slackUserId?: string; tokenAudience?: "user" | "bot" };
 type SlackChannel = { id?: string; name?: string; is_im?: boolean; is_mpim?: boolean; user?: string };
 type SlackMessage = { ts?: string; user?: string; text?: string };
 type SlackUser = { id?: string; real_name?: string; profile?: { display_name?: string } };
-type SlackResponse = { ok?: boolean; error?: string; channels?: SlackChannel[]; messages?: SlackMessage[]; user?: SlackUser };
+type SlackResponse = { ok?: boolean; error?: string; channels?: SlackChannel[]; messages?: SlackMessage[]; user?: SlackUser; response_metadata?: { next_cursor?: string } };
 type FetchedConversation = { channel: SlackChannel; messages: SlackMessage[] };
 
-const MAX_CONVERSATIONS_PER_RUN = 8;
+const MAX_CONVERSATIONS_PER_RUN = 12;
 const MAX_MESSAGES_PER_RUN = 36;
 const HISTORY_CONCURRENCY = 4;
 const PROFILE_CONCURRENCY = 6;
@@ -22,22 +23,26 @@ async function slack(token: string, method: string, params: Record<string, strin
   if (!response.ok || !body.ok) throw new Error(`slack_${body.error ?? response.status}`); return body;
 }
 
-async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, worker: (item: T) => Promise<Result>) {
-  const results: Result[] = [];
-  let index = 0;
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (index < items.length) {
-      const item = items[index++];
-      results.push(await worker(item));
-    }
-  }));
-  return results;
+function connectionMetadata(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function prioritizedConversations(channels: SlackChannel[]) {
+  // Direct conversations are the most likely place for a response decision.
+  // Keep work channels in the batch too, and rotate the provider cursor for
+  // broader coverage instead of permanently importing whichever eight Slack
+  // returns first.
+  return [...channels].sort((left, right) => {
+    const leftDirect = left.is_im || left.is_mpim ? 0 : 1;
+    const rightDirect = right.is_im || right.is_mpim ? 0 : 1;
+    return leftDirect - rightDirect;
+  }).slice(0, MAX_CONVERSATIONS_PER_RUN);
 }
 
 /** Bounded, read-only import. It never posts to Slack. */
 export async function reconcileSlackConnection(connectionId: string) {
   const db = createAdminClient();
-  const { data: connection } = await db.from("connections").select("id,owner_id,account_name,encrypted_credentials,scopes").eq("id", connectionId).eq("provider", "slack").eq("status", "connected").maybeSingle();
+  const { data: connection } = await db.from("connections").select("id,owner_id,account_name,encrypted_credentials,scopes,token_metadata").eq("id", connectionId).eq("provider", "slack").eq("status", "connected").maybeSingle();
   const key = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!connection?.encrypted_credentials || !key) throw new Error("slack_credentials_unavailable");
   const credentials = decryptCredential<Credentials>(connection.encrypted_credentials, key);
@@ -56,9 +61,13 @@ export async function reconcileSlackConnection(connectionId: string) {
   if (!types) throw new Error("slack_reconnect_required");
   // users.conversations returns the conversations the authorised person is a
   // member of, rather than the bot's view of the workspace.
-  const listed = await slack(accessToken, "users.conversations", { types, exclude_archived: "true", limit: "100" }, 10_000);
+  const metadata = connectionMetadata(connection.token_metadata);
+  const cursor = typeof metadata.slack_conversation_cursor === "string" ? metadata.slack_conversation_cursor : "";
+  const listParams: Record<string, string> = { types, exclude_archived: "true", limit: "100" };
+  if (cursor) listParams.cursor = cursor;
+  const listed = await slack(accessToken, "users.conversations", listParams, 10_000);
   let imported = 0;
-  const requestedChannels = (listed.channels ?? []).slice(0, MAX_CONVERSATIONS_PER_RUN);
+  const requestedChannels = prioritizedConversations(listed.channels ?? []);
   const histories = await mapWithConcurrency(requestedChannels, HISTORY_CONCURRENCY, async (channel): Promise<FetchedConversation | null> => {
     const channelId = channel.id ?? "";
     if (!channelId) return null;
@@ -119,6 +128,7 @@ export async function reconcileSlackConnection(connectionId: string) {
     health_status: unavailableConversations > 0 ? "degraded" : "healthy",
     last_sync_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    token_metadata: { ...metadata, slack_conversation_cursor: listed.response_metadata?.next_cursor?.trim() || null },
   }).eq("id", connection.id);
   return { imported, readableConversations, unavailableConversations };
 }
