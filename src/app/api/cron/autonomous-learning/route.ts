@@ -4,6 +4,7 @@ import { ownerIdFromCronHeaders } from "@/lib/cron-owner";
 import { decideAutonomousLearning, repetitionsFromEvidence } from "@/lib/autonomous-learning";
 import { logOperation } from "@/lib/observability";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { learningQueryFailureCode } from "@/lib/learning-diagnostics";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
   if (ownerId) query = query.eq("owner_id", ownerId);
   const { data, error } = await query;
   if (error) {
-    logOperation({ route: "/api/cron/autonomous-learning", operation: "autonomous_learning", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), error: "learning_signals_unavailable" });
+    logOperation({ route: "/api/cron/autonomous-learning", operation: "autonomous_learning", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), error: learningQueryFailureCode(error) });
     return NextResponse.json({ error: "Learning ledger is unavailable." }, { status: 503 });
   }
 

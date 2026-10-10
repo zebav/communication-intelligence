@@ -5,7 +5,7 @@ import { reconcileSlackConnection } from "@/lib/connectors/slack-reconciliation"
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 import { logOperation } from "@/lib/observability";
 import { ownerIdFromCronHeaders } from "@/lib/cron-owner";
-import { analysisFailureCode } from "@/lib/connectors/analysis-diagnostics";
+import { analysisFailureCode, slackImportFailureCode } from "@/lib/connectors/analysis-diagnostics";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 const maxConnectionsPerPass = 2;
@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
   // The cron owns the durable analysis queue below. Reconciliation therefore
   // imports only here, preventing a duplicate analysis race with fresh items.
   const results = await Promise.allSettled((connections ?? []).map(({ id }) => reconcileSlackConnection(id, { analyze: false })));
-  const failureCodes = results.filter((result): result is PromiseRejectedResult => result.status === "rejected").map((result) => result.reason instanceof Error ? result.reason.message : "slack_unknown_failure");
-  const reconnectRequired = failureCodes.some((code) => /slack_(reconnect_required|invalid_auth|token_revoked|missing_scope|not_authed)/.test(code));
+  const failureCodes = results.filter((result): result is PromiseRejectedResult => result.status === "rejected").map((result) => slackImportFailureCode(result.reason));
+  const reconnectRequired = failureCodes.some((code) => code === "slack_reconnect_required");
   // Reconciliation can finish while a prior AI analysis was interrupted. Pick
   // up that durable backlog on every pass so Slack has the same automatic
   // recovery guarantee as email, Instagram, and WhatsApp. New messages go

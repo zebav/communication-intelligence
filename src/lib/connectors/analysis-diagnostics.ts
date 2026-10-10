@@ -14,3 +14,12 @@ export function analysisFailureCode(error: unknown) {
   if (/decision|task/i.test(message)) return "decision_persist";
   return "analysis_failed";
 }
+
+/** Maps Slack import failures to a small safe vocabulary for cron logs. */
+export function slackImportFailureCode(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (/slack_(reconnect_required|invalid_auth|token_revoked|missing_scope|not_authed)/.test(message)) return "slack_reconnect_required";
+  if (/slack_(conversation|history|members|users)_unavailable/.test(message)) return "slack_resource_unavailable";
+  if (/slack_(rate_limited|too_many_requests)/.test(message)) return "slack_rate_limited";
+  return "slack_import_failed";
+}
