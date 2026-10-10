@@ -43,6 +43,11 @@ export async function POST(request: NextRequest) {
   if (background && !backgroundOwner.success) return jsonError("Missing background owner.", 400);
   if (!background && request.headers.get("origin") !== request.nextUrl.origin) return jsonError("Invalid request origin.", 403);
   const supabase = background ? createAdminClient() : await createClient();
+  // The vault queue deliberately permits service-role writes only. The request
+  // has already been bound to the authenticated owner below; using the server
+  // client here preserves that RLS boundary while allowing a manual sync to
+  // schedule private attachment processing.
+  const vaultQueueDatabase = background ? supabase : createAdminClient();
   let userId = backgroundOwner.success ? backgroundOwner.data : "";
   if (!background) {
     const { data: { user } } = await supabase.auth.getUser();
@@ -121,7 +126,7 @@ export async function POST(request: NextRequest) {
       const { data: savedMessage, error: messageError } = await supabase.from("messages").insert({ owner_id: userId, conversation_id: conversation.data.id, external_message_id: externalMessageId, direction: "in", sender_identity_id: identityId, source: "email", body_text: content, sent_at: sentAt, classification, importance_score: priority, attachment_count: hasAttachments ? 1 : 0, metadata: { provider: googleGmailConnector.id, account: connection.account_identifier, gmail_labels: message.labelIds ?? [], is_read: !unread }, processed_at: new Date().toISOString() }).select("id").single();
       if (messageError || !savedMessage) throw new Error("message_save_failed");
       if (hasAttachments) {
-        await queueVaultIngestion(supabase, {
+        await queueVaultIngestion(vaultQueueDatabase, {
           ownerId:userId,
           connectionId:connection.id,
           provider:googleGmailConnector.id,

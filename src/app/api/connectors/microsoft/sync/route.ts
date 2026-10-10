@@ -107,6 +107,11 @@ export async function POST(request: NextRequest) {
   if (background && !backgroundOwner.success) return jsonError("Missing background owner.", 400);
   if (!background && request.headers.get("origin") !== request.nextUrl.origin) return jsonError("Invalid request origin.", 403);
   const supabase = background ? createAdminClient() : await createClient();
+  // The vault queue deliberately permits service-role writes only. The request
+  // has already been bound to the authenticated owner below; using the server
+  // client here preserves that RLS boundary while allowing a manual sync to
+  // schedule private attachment processing.
+  const vaultQueueDatabase = background ? supabase : createAdminClient();
   let userId: string;
   if (background) {
     userId = backgroundOwner.data!;
@@ -253,7 +258,7 @@ export async function POST(request: NextRequest) {
         if (responseMinutes != null) await supabase.from("communication_outcomes").update({ response_message_id: savedIncoming.id, status: "reply_received", response_time_minutes: responseMinutes, evidence: { provider: microsoftGraphConnector.id, detection: "later_incoming_message" }, updated_at: new Date().toISOString() }).eq("id", waitingOutcome.id).eq("owner_id", userId);
       }
       if (message.hasAttachments && savedIncoming?.id) {
-        await queueVaultIngestion(supabase, {
+        await queueVaultIngestion(vaultQueueDatabase, {
           ownerId:userId,
           connectionId:connection.id,
           provider:microsoftGraphConnector.id,
