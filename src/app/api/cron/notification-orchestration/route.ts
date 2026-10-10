@@ -7,7 +7,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = createAdminClient(), ownerId = ownerIdFromCronHeaders(request.headers);
-  let query = db.from("assistant_tasks").select("id,owner_id,kind,status,plan,created_at").in("status", ["decision", "ready"]).order("updated_at", { ascending: false }).limit(40);
+  // `uncertain` is also an owner-facing decision: a provider may have
+  // received a request but its final state could not be verified. It must not
+  // disappear merely because it is not ready for another execution attempt.
+  let query = db.from("assistant_tasks").select("id,owner_id,kind,status,plan,created_at").in("status", ["decision", "ready", "uncertain"]).order("updated_at", { ascending: false }).limit(40);
   if (ownerId) query = query.eq("owner_id", ownerId);
   const { data: tasks, error } = await query;
   if (error) return NextResponse.json({ error: "Decision queue unavailable." }, { status: 503 });
