@@ -30,7 +30,8 @@ export function presentPersonName(input: {
   const name = input.displayName?.trim();
   if (name && !isImportedPlaceholderName(name)) return name;
 
-  const source = input.source ?? undefined;
+  const inferredSource = name?.match(/^(instagram|whatsapp|slack|email|messenger|linkedin|tiktok) contact/i)?.[1]?.toLowerCase();
+  const source = input.source ?? inferredSource ?? undefined;
   const username = input.identities?.find((identity) => identity.source === source && identity.username?.trim())?.username?.trim();
   if (username && source === "instagram") return `@${username.replace(/^@/, "")}`;
   if (username) return username;

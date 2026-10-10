@@ -7,6 +7,7 @@ import { ContactPhotoEditor } from "@/components/contact-photo-editor";
 import { RelationshipFeedback } from "@/components/relationship-feedback";
 import { relationshipCategories, type RelationshipCategory } from "@/lib/relationship-intelligence";
 import { relationshipLabels, type RelationshipType } from "@/lib/relationship-types";
+import { presentPersonName } from "@/lib/person-presentation";
 
 type RelationshipSnapshot = { id: string; category: string; strength_score: number | null; quality_score: number | null; priority_score: number | null; ranking_score: number | null; trend: string | null; confidence: number | null; explanation: string | null; missing_information: unknown; snapshot_date: string };
 
@@ -48,7 +49,11 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
   const latestRelationships = new Map<string, RelationshipSnapshot>();
   for (const snapshot of relationshipRows ?? []) if (!latestRelationships.has(snapshot.category)) latestRelationships.set(snapshot.category, snapshot);
   const priority = Number(person.manual_priority ?? person.overall_priority ?? 0);
-  const contactName = person.display_name || "Kontakt";
+  const contactName = presentPersonName({
+    displayName: person.display_name,
+    identities: identities ?? [],
+    fallback: "Kontakt",
+  });
   const profileUrl = identities?.find((identity) => identity.profile_url)?.profile_url;
 
   return <main className="page contact-profile-page">
