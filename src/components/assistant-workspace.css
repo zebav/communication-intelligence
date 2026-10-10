@@ -169,6 +169,10 @@
 .assistant-workspace .assistant-task-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-top: 12px; }
 .assistant-workspace .assistant-task-input label { display: grid; gap: 5px; font-weight: 700; }
 .assistant-workspace .assistant-task-input small { color: #64748b; font-weight: 500; }
+.assistant-workspace .assistant-context { margin: 14px 0; color: #475569; }
+.assistant-workspace .assistant-context summary { color: #334155; font-weight: 700; cursor: pointer; }
+.assistant-workspace .assistant-context ul { display: grid; gap: 8px; padding-left: 20px; }
+.assistant-workspace .assistant-context strong { color: #334155; }
 @media (max-width: 520px) { .assistant-workspace .assistant-task-input { grid-template-columns: 1fr; } }
 .assistant-workspace .assistant-alert { border-color: #fed7aa; background: #fffaf4; }
 .assistant-workspace .assistant-operations { border-color: #bfdbfe; border-radius: 16px; background: #f8fbff; }
