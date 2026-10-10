@@ -10,10 +10,16 @@ import { createClient } from "@/lib/supabase/server";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { senderRelevance } from "@/lib/sender-intelligence";
 import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
+import { mapWithConcurrency } from "@/lib/bounded-concurrency";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
 type GmailMessage = { id?: string; threadId?: string; internalDate?: string; snippet?: string; payload?: GmailPayload; labelIds?: string[] };
+
+// Enough parallelism to keep an interactive import responsive, while leaving
+// room for message persistence and preventing one mailbox from consuming an
+// entire serverless invocation.
+const gmailMessageFetchConcurrency = 4;
 
 function jsonError(message: string, status = 500) { return NextResponse.json({ error: message }, { status }); }
 
@@ -77,11 +83,11 @@ export async function POST(request: NextRequest) {
     const storedIds = new Set((storedRows ?? []).map((row) => row.external_message_id));
     alreadyStored = storedIds.size;
     const newIds = listedIds.filter((id) => !storedIds.has(`gmail:${profileId}:${id}`));
-    const messages = await Promise.all(newIds.map(async (id) => {
+    const messages = await mapWithConcurrency(newIds, gmailMessageFetchConcurrency, async (id) => {
       const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`, { headers: { authorization: `Bearer ${authorized.token}` }, signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`gmail_message_${response.status}`);
       return response.json() as Promise<GmailMessage>;
-    }));
+    });
 
     for (const message of messages) {
       const externalMessageId = `gmail:${profileId}:${message.id}`;

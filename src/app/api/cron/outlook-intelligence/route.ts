@@ -12,6 +12,7 @@ import { z } from "zod";
 import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib/relationship-intelligence-service";
 import { emailAnalysisRecoveryCandidates } from "@/lib/email-analysis-recovery";
 import { materializeInboundDecision } from "@/lib/assistant/repository";
+import { mapWithConcurrency } from "@/lib/bounded-concurrency";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -110,16 +111,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });
   }
 
-  const syncResults = [];
-  for (const connection of connections ?? []) {
+  const syncResults = await mapWithConcurrency(connections ?? [], maxConnectionsPerPass, async (connection) => {
     try {
       const path = connection.provider === "gmail" ? "/api/connectors/google/sync" : "/api/connectors/microsoft/sync";
       const response = await fetch(new URL(`${path}?connectionId=${encodeURIComponent(connection.id)}`, request.url), { method: "POST", headers: { authorization: request.headers.get("authorization")!, "x-owner-id": connection.owner_id, "x-sync-trigger": loginTriggered ? "automatic" : "background" }, signal: AbortSignal.timeout(45_000) });
-      syncResults.push({ ownerId: connection.owner_id, ok: response.ok });
+      return { ownerId: connection.owner_id, ok: response.ok };
     } catch {
-      syncResults.push({ ownerId: connection.owner_id, ok: false });
+      return { ownerId: connection.owner_id, ok: false };
     }
-  }
+  });
 
   // Provider sync and AI preparation are separate durable stages. Look for a
   // missing analysis payload, rather than `processed_at`: sync routes mark a

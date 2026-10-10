@@ -791,19 +791,18 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     const providerPath = connection.provider === "gmail" ? "google" : "microsoft";
     const response = await fetch(`/api/connectors/${providerPath}/sync?connectionId=${connection.id}`, { method: "POST" });
     const result = await response.json() as { imported?: number; error?: string; moreAvailable?: boolean };
-    const messageImportError = response.ok ? "" : result.error ?? "The message import failed.";
-    const discoveryResponse = await fetch("/api/contacts/discover", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ connectionId: connection.id }) });
-    const discovery = await discoveryResponse.json() as { created?: number; scanned?: number; createdContacts?: Array<{ name: string; address: string }>; moreAvailable?: boolean; error?: string };
-    if (!discoveryResponse.ok) throw new Error([messageImportError, discovery.error ?? "Historical contact discovery failed."].filter(Boolean).join(" "));
-    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false, contactsCreated: discovery.created ?? 0, contactsScanned: discovery.scanned ?? 0, createdContacts: discovery.createdContacts ?? [], moreContactsAvailable: discovery.moreAvailable ?? false, messageImportError };
+    if (!response.ok) throw new Error(result.error ?? "Meddelandena kunde inte hämtas.");
+    // Contact discovery is a separate historical operation. Running it after
+    // every ordinary message sync made a simple refresh wait for a second,
+    // unrelated provider pass and made the UI look stuck. The dedicated
+    // advanced action still performs that safe, owner-triggered enrichment.
+    return { imported: result.imported ?? 0, moreAvailable: result.moreAvailable ?? false };
   };
   const syncOutlook = async (connection: ChannelConnection) => {
     setSyncing(connection.id); setSyncError(""); setSyncResult("");
     try {
       const result = await importAccount(connection);
-      const examples = result.createdContacts.slice(0, 5).map((item) => item.name || item.address).join(", ");
-      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported} messages imported · ${result.contactsScanned} historical contacts checked · ${result.contactsCreated} new contacts created.${examples ? ` New: ${examples}.` : " Existing contacts were matched; no duplicate contacts were created."}${result.moreContactsAvailable ? " More contact history remains; run the import again to continue further back." : " Contact history is complete for this account."}${result.moreAvailable ? " More message history is also available." : ""}`);
-      setSyncError(result.messageImportError);
+      setSyncResult(`${accountDisplayLabel(connection)}: ${result.imported} nya meddelanden hämtades. Relevanta meddelanden analyseras automatiskt.${result.moreAvailable ? " Mer historik finns och hämtas stegvis i bakgrunden." : ""}`);
       await router.refresh();
     } catch (error) { setSyncError(`${accountDisplayLabel(connection)}: ${error instanceof Error ? error.message : "The import failed."}`); }
     finally { setSyncing(""); }
@@ -824,15 +823,15 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
     setSyncing("all"); setSyncError(""); setSyncResult("");
     const results: string[] = []; const errors: string[] = []; let total = 0;
     for (const account of accounts) {
-      try { const result = await importAccount(account); total += result.imported; results.push(`${accountDisplayLabel(account)}: ${result.contactsScanned} historical contacts checked, ${result.contactsCreated} new${result.moreContactsAvailable ? " (more history remains)" : " (history complete)"}`); if (result.messageImportError) errors.push(`${accountDisplayLabel(account)} message import: ${result.messageImportError}`); }
-      catch (error) { errors.push(`${accountDisplayLabel(account)}: ${error instanceof Error ? error.message : "Import failed"}`); }
+      try { const result = await importAccount(account); total += result.imported; results.push(`${accountDisplayLabel(account)}: ${result.imported} nya meddelanden`); }
+      catch (error) { errors.push(`${accountDisplayLabel(account)}: ${error instanceof Error ? error.message : "Importen misslyckades"}`); }
     }
-    setSyncResult(`All ${accounts.length} accounts checked · ${total} messages imported. ${results.join(" · ")}`);
+    setSyncResult(`${accounts.length} konton kontrollerades · ${total} nya meddelanden hämtades. ${results.join(" · ")}`);
     setSyncError(errors.join(" · "));
     router.refresh(); setSyncing("");
   };
   const capabilityLabels = { fullSync: "Historik", incrementalSync: "Nya meddelanden", pushNotifications: "Direktuppdatering", sendWithApproval: "Skicka efter godkännande" } as const;
-  return <div className="page"><PageHeader eyebrow="ANSLUTNA TJÄNSTER" title="Connections" subtitle="Konton hålls åtskilda, behörigheter är krypterade och Solvani hämtar nya meddelanden automatiskt." /><DataIngestionStatus />{syncResult && <div className="empty-card">{syncResult}</div>}{syncError && <div className="empty-card negative">{syncError}</div>}{connectedEmailAccounts.length > 0 && <details className="connector-global-actions"><summary>Avancerad import och kontaktsynk</summary><div><button className="btn primary" onClick={() => void discoverAllContacts()} disabled={Boolean(syncing)}>{syncing === "contacts" ? "Kontrollerar historiska kontakter…" : `Kontrollera historiska kontakter (${connectedEmailAccounts.length} konton)`}</button>{connectedEmailAccounts.length > 1 && <button className="btn" onClick={() => void syncAllOutlook(connectedEmailAccounts)} disabled={Boolean(syncing)}>{syncing === "all" ? "Importerar alla konton…" : `Importera äldre meddelanden (${connectedEmailAccounts.length} konton)`}</button>}</div></details>}<div className="list">{connectorCatalog.map((connector) => {
+  return <div className="page"><PageHeader eyebrow="ANSLUTNA TJÄNSTER" title="Anslutningar" subtitle="Konton hålls åtskilda, behörigheter är krypterade och Solvani hämtar nya meddelanden automatiskt." /><DataIngestionStatus />{syncResult && <div className="empty-card">{syncResult}</div>}{syncError && <div className="empty-card negative">{syncError}</div>}{connectedEmailAccounts.length > 0 && <details className="connector-global-actions"><summary>Avancerad import och kontaktsynk</summary><div><button className="btn primary" onClick={() => void discoverAllContacts()} disabled={Boolean(syncing)}>{syncing === "contacts" ? "Kontrollerar historiska kontakter…" : `Kontrollera historiska kontakter (${connectedEmailAccounts.length} konton)`}</button>{connectedEmailAccounts.length > 1 && <button className="btn" onClick={() => void syncAllOutlook(connectedEmailAccounts)} disabled={Boolean(syncing)}>{syncing === "all" ? "Importerar alla konton…" : `Importera äldre meddelanden (${connectedEmailAccounts.length} konton)`}</button>}</div></details>}<div className="list">{connectorCatalog.map((connector) => {
     const matchingConnections = connections.filter((item) => item.provider === connector.id);
     const connection = matchingConnections[0];
     const connected = connection?.status === "connected";
