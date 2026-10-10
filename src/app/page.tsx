@@ -9,6 +9,7 @@ import { recentWindowStartIso } from "@/lib/recent-window";
 import { deduplicatePersonConversations } from "@/lib/person-conversations";
 import { logOperation } from "@/lib/observability";
 import { newTraceId } from "@/lib/automation-jobs";
+import { presentPersonName } from "@/lib/person-presentation";
 import type { CalendarLearningEvent, ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ type WorkspaceIdentityRow = {
   person_id: string | null;
   source: string;
   external_identifier: string;
+  username: string | null;
   verified_match: boolean;
 };
 
@@ -149,7 +151,7 @@ export default async function Home({ searchParams }: HomeProps) {
     // actionable messages disappear behind older conversation activity.
     needsTodaySummaries ? supabase.rpc("workspace_conversation_summaries", { p_source: "email", p_after: null, p_limit: 100 }).abortSignal(workspaceQuerySignal()) : needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).eq("source", "email").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsTodaySummaries ? supabase.rpc("workspace_conversation_summaries", { p_source: "__all_non_email__", p_after: overviewCutoff, p_limit: 45 }).abortSignal(workspaceQuerySignal()) : needsConversationDetail ? supabase.from("conversations").select(conversationFields).eq("owner_id", user.id).neq("source", "email").gte("last_message_at", overviewCutoff).order("last_message_at", { ascending: false, nullsFirst: false }).limit(45).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
-    needsIdentityData ? supabase.from("identities").select("id,person_id,source,external_identifier,verified_match").eq("owner_id", user.id).limit(400).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
+    needsIdentityData ? supabase.from("identities").select("id,person_id,source,external_identifier,username,verified_match").eq("owner_id", user.id).limit(400).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsIdentityData ? supabase.from("memories").select("id,person_id,conversation_id,category,content,confidence,user_verified").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsFollowUps ? supabase.from("commitments").select("id,person_id,conversation_id,source_message_id,description,commitment_owner,due_at,status,confidence,people(display_name),conversations(title)").eq("owner_id", user.id).in("status", ["suggested", "open"]).order("due_at", { ascending: true, nullsFirst: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
     needsLearning ? supabase.from("learning_signals").select("id,source,signal_type,observation,proposed_rule,evidence,confidence,status,learning_mode,fact_state,sensitivity,autonomy_level,auto_applied_at,last_validated_at,correction_count,version,created_at,people(display_name),conversations(title)").eq("owner_id", user.id).order("created_at", { ascending: false }).limit(80).abortSignal(workspaceQuerySignal()) : Promise.resolve({ data: [], error: null }),
@@ -314,13 +316,14 @@ export default async function Home({ searchParams }: HomeProps) {
 
   const rawCommunicationCases: CommunicationCase[] = (rows ?? []).filter((row) => row.source !== "email" && !isSyntheticTestConversation(row)).map((row) => {
     const person = Array.isArray(row.people) ? row.people[0] : row.people;
+    const personName = presentPersonName({ displayName: person?.display_name, source: row.source as Source, identities: person?.id ? identitiesByPerson.get(person.id) : undefined, fallback: "Okänd kontakt" });
     const messages = Array.isArray(row.messages) ? row.messages : [];
     const latestMessage = [...messages].filter((message) => message.direction === "in").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
     const metadata = latestMessage?.metadata && typeof latestMessage.metadata === "object" && !Array.isArray(latestMessage.metadata) ? latestMessage.metadata as { ai_analysis?: CommunicationCase["analysis"] } : {};
     const recommendedAction = row.recommended_action && typeof row.recommended_action === "object" && !Array.isArray(row.recommended_action) ? String((row.recommended_action as { action?: unknown }).action ?? "") : "";
     const whatsappIdentities = row.source === "whatsapp" && person?.id ? (identitiesByPerson.get(person.id) ?? []).filter((identity) => identity.source === "whatsapp") : [];
     const whatsappRecipient = whatsappIdentities.length === 1 ? whatsappIdentities[0].external_identifier : undefined;
-    return { whatsappRecipient, id: row.id, personId: person?.id, personName: person?.display_name ?? "Unknown person", title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at, attachmentCount: Number(item.attachment_count ?? 0) })).filter((item) => item.body || item.attachmentCount > 0) };
+    return { whatsappRecipient, id: row.id, personId: person?.id, personName, title: row.title ?? "Untitled communication", source: row.source as Source, message: latestMessage?.body_text ?? "", createdAt: row.created_at, priorityScore: row.priority_score == null ? undefined : Number(row.priority_score), recommendedAction, analysis: metadata.ai_analysis, conversationType: row.conversation_type ?? undefined, threadMessages: [...messages].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at))).map((item) => ({ id: item.id, direction: item.direction as "in" | "out", body: item.body_text ?? "", sentAt: item.sent_at, attachmentCount: Number(item.attachment_count ?? 0) })).filter((item) => item.body || item.attachmentCount > 0) };
   });
   const communicationCases = [...rawCommunicationCases.reduce((grouped, item) => {
     const messageFingerprint = normalizedConversationText(item.message);
