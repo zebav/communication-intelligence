@@ -59,7 +59,18 @@ export async function GET(request: NextRequest) {
         .select("*")
         .maybeSingle();
       if (insertError || !task) {
+        // A source retry and this detector may reach the same unresolved
+        // outcome together. The unique task is the intended idempotency key:
+        // reuse the winner instead of reporting a healthy race as a failed
+        // follow-up that needs the owner's attention.
+        const code = insertError && typeof insertError === "object" && "code" in insertError ? String(insertError.code) : "";
+        if (code === "23505") {
+          const { data: raced } = await database.from("assistant_tasks").select("id")
+            .eq("owner_id", outcome.owner_id).eq("message_id", outcome.trigger_message_id).eq("kind", "follow_up").maybeSingle();
+          if (raced) continue;
+        }
         failed += 1;
+        logOperation({ route: "/api/cron/follow-up-detection", operation: "follow_up_preparation", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), error: databaseQueryFailureCode("follow_up_task", insertError) });
         continue;
       }
       created += 1;
@@ -67,10 +78,11 @@ export async function GET(request: NextRequest) {
       if (!sendCapability(plan, "follow_up")) {
         await changeTask(database, outcome.owner_id, task as Task, "ready", plan);
       }
-    } catch {
+    } catch (preparationError) {
       // Do not persist a failed partial task. The bounded worker will retry on
       // its next pass, while diagnostics retain the failure count.
       failed += 1;
+      logOperation({ route: "/api/cron/follow-up-detection", operation: "follow_up_preparation", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), error: databaseQueryFailureCode("follow_up_prepare", preparationError) });
     }
   }
   logOperation({ route: "/api/cron/follow-up-detection", operation: "follow_up_detection", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { scanned: outcomes?.length ?? 0, created, prepared, failed } });
