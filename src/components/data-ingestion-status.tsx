@@ -6,7 +6,14 @@ type ConnectionStatus = { id: string; provider: string; account: string; status:
 type Status = { pendingMedia: number; failedMedia: number; deadLetterMedia?: number; retrievalPending?: number; retrievalFailed?: number; analysisPending?: number; vaultRetained?: number; connections?: ConnectionStatus[]; error?: string };
 
 function providerLabel(provider: string) {
-  return ({ gmail: "Gmail", "microsoft-graph": "Outlook", slack: "Slack", instagram: "Instagram", "whatsapp-business": "WhatsApp" } as Record<string, string>)[provider] ?? provider;
+  return ({
+    gmail: "Gmail",
+    "microsoft-graph": "Outlook",
+    slack: "Slack",
+    instagram: "Instagram",
+    "instagram-professional": "Instagram",
+    "whatsapp-business": "WhatsApp",
+  } as Record<string, string>)[provider] ?? "Ansluten tjänst";
 }
 
 function syncLabel(connection: ConnectionStatus) {
