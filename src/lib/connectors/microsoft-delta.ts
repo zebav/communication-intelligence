@@ -16,7 +16,11 @@ export function initialInboxDeltaUrl(now = Date.now()) {
 export function validatedInboxDeltaUrl(value: unknown) {
   if (typeof value !== "string") return initialInboxDeltaUrl();
   const url = new URL(value);
-  const inboxDeltaPath = /^\/v1\.0\/me\/mailFolders(?:\/inbox|\(['"]inbox['"]\))\/messages\/delta$/i;
+  // Microsoft turns the friendly `inbox` segment into the opaque folder id in
+  // its own nextLink/deltaLink values. The cursor still has to remain on the
+  // signed-in user's mail-folder delta endpoint at Graph; accepting only the
+  // literal word `inbox` caused every resumed Outlook sync to be rejected.
+  const inboxDeltaPath = /^\/v1\.0\/me\/mailFolders(?:\/inbox|\(['"](?:inbox|[A-Za-z0-9._~+\/=\-]+)['"]\))\/messages\/delta$/i;
   if (url.protocol !== "https:" || url.hostname !== GRAPH_HOST || !inboxDeltaPath.test(decodeURIComponent(url.pathname))) {
     throw new Error("invalid_delta_link");
   }

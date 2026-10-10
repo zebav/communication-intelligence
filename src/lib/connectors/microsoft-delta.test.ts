@@ -14,6 +14,9 @@ describe("Microsoft inbox delta URLs", () => {
     expect(validatedInboxDeltaUrl(valid).toString()).toBe(valid);
     const graphVariant = "https://graph.microsoft.com/v1.0/me/mailFolders('inbox')/messages/delta?$deltatoken=safe";
     expect(validatedInboxDeltaUrl(graphVariant).toString()).toBe(graphVariant);
+    const graphFolderCursor = "https://graph.microsoft.com/v1.0/me/mailFolders('AQMkADNkNAAAgEMAAAA')/messages/delta?$skiptoken=safe";
+    expect(validatedInboxDeltaUrl(graphFolderCursor).toString()).toBe(graphFolderCursor);
     expect(() => validatedInboxDeltaUrl("https://example.com/collect")).toThrow("invalid_delta_link");
+    expect(() => validatedInboxDeltaUrl("https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=unsafe")).toThrow("invalid_delta_link");
   });
 });
