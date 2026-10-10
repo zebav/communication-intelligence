@@ -10,6 +10,10 @@ message content, provider tokens or private owner data.
   Today view and its persisted decision surface loading.
 - Gmail and Microsoft mail imports completed from connected accounts during the
   scheduled worker pass.
+- Gmail now reads the newest inbox page on every scheduled pass while advancing
+  one bounded historical page in parallel. This keeps fresh mail ahead of a
+  long backfill, makes the saved progress marker truthful, and still relies on
+  durable message ids to avoid duplicate imports.
 - Instagram reconciliation, Slack import/analysis, WhatsApp recovery, media
   analysis and calendar synchronization completed during the same observed
   window without a source-worker failure.
@@ -33,7 +37,7 @@ message content, provider tokens or private owner data.
 
 | Capability | Implemented | Connected | Observed in production | Operational status | Remaining proof |
 | --- | --- | --- | --- | --- | --- |
-| Gmail ingestion | Yes | Yes | Scheduled import completed | Operational, subject to new inbound-event test | Confirm one new real inbound message reaches a prepared decision |
+| Gmail ingestion | Yes | Yes | Scheduled import completed; newest-page plus resumable-backfill logic verified in build | Operational, subject to new inbound-event test | Confirm one new real inbound message reaches a prepared decision |
 | Outlook ingestion | Yes | Yes | Scheduled import completed | Operational, subject to new inbound-event test | Confirm one new real inbound message reaches a prepared decision |
 | Instagram ingestion | Yes | Yes | Reconciliation completed | Operational, bounded reconciliation | Confirm a newly received DM and profile enrichment |
 | WhatsApp ingestion | Yes | Yes | Recovery completed | Operational when webhook delivery succeeds | Confirm a newly received text and a media item |
