@@ -186,12 +186,35 @@ export async function materializeInboundDecision(db: SupabaseClient, owner: stri
   if (!kind) return null;
 
   const plan = makePlan(evidence, kind);
+  // Avoid an upsert update path here. The database task guard intentionally
+  // permits a new task only in `decision` state, and concurrent recovery
+  // workers should simply reuse the already-created decision rather than
+  // attempting a guarded update of it.
+  const { data: existing, error: existingError } = await db.from("assistant_tasks")
+    .select("*")
+    .eq("owner_id", owner)
+    .eq("message_id", evidence.messageId)
+    .eq("kind", kind)
+    .maybeSingle();
+  if (existingError) throw new Error("decision_lookup_failed");
+  if (existing) return existing as Task;
+
   const { data: created, error } = await db.from("assistant_tasks")
-    .upsert({ owner_id: owner, message_id: evidence.messageId, kind, status: "decision", plan }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true })
+    .insert({ owner_id: owner, message_id: evidence.messageId, kind, status: "decision", plan })
     .select("*")
     .maybeSingle();
-  if (error) throw new Error("decision_materialization_failed");
-  if (!created) return null;
+  // A second worker may have won the narrow insert race. Read its immutable
+  // decision instead of turning a harmless duplicate into a source failure.
+  if (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    if (code === "23505") {
+      const { data: raced } = await db.from("assistant_tasks").select("*")
+        .eq("owner_id", owner).eq("message_id", evidence.messageId).eq("kind", kind).maybeSingle();
+      if (raced) return raced as Task;
+    }
+    throw new Error(code ? `decision_materialization_${code}` : "decision_materialization_failed");
+  }
+  if (!created) throw new Error("decision_materialization_missing");
 
   const task = created as Task;
   // A reply draft returned by the existing analysis is already bound to the
