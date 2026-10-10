@@ -15,6 +15,10 @@ const MAX_CONVERSATIONS_PER_RUN = 12;
 const MAX_MESSAGES_PER_RUN = 36;
 const HISTORY_CONCURRENCY = 4;
 const PROFILE_CONCURRENCY = 6;
+// Slack's user profile endpoint is comparatively slow and is only needed to
+// make a newly discovered identity friendlier. Never let a workspace with a
+// large backlog spend an entire scheduled pass resolving display names.
+const MAX_PROFILE_LOOKUPS_PER_RUN = 8;
 
 async function slack(token: string, method: string, params: Record<string, string>, timeoutMs = 8_000) {
   const url = new URL(`https://slack.com/api/${method}`); Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -95,11 +99,42 @@ export async function reconcileSlackConnection(connectionId: string, options: { 
       return Boolean(senderId && message.text?.trim() && message.ts && senderId !== credentials.slackUserId);
     })
     .slice(0, MAX_MESSAGES_PER_RUN);
+
+  // conversations.history intentionally overlaps between runs. Filter these
+  // provider duplicates before resolving people, looking up conversations, or
+  // asking Slack for profiles. The later unique upsert remains the final
+  // idempotency guard in case a concurrent worker imports the same message.
+  const candidateExternalIds = candidates.map(({ channel, message }) => `slack:${channel.id ?? ""}:${message.ts ?? ""}`);
+  const { data: existingMessages, error: existingMessagesError } = candidateExternalIds.length
+    ? await db.from("messages")
+      .select("external_message_id")
+      .eq("owner_id", connection.owner_id)
+      .eq("source", "slack")
+      .in("external_message_id", candidateExternalIds)
+    : { data: [], error: null };
+  if (existingMessagesError) throw existingMessagesError;
+  const existingExternalIds = new Set((existingMessages ?? []).map(({ external_message_id }) => external_message_id));
+  const newCandidates = candidates.filter(({ channel, message }) => !existingExternalIds.has(`slack:${channel.id ?? ""}:${message.ts ?? ""}`));
+
   const displayNames = new Map<string, string>();
-  const senderIds = [...new Set(candidates.map(({ message }) => message.user!).filter(Boolean))];
-  const resolvedNames = await mapWithConcurrency(senderIds, PROFILE_CONCURRENCY, async (senderId) => {
+  const senderIds = [...new Set(newCandidates.map(({ message }) => message.user!).filter(Boolean))];
+  const { data: knownIdentities, error: knownIdentitiesError } = senderIds.length
+    ? await db.from("identities")
+      .select("external_identifier,username")
+      .eq("owner_id", connection.owner_id)
+      .eq("source", "slack")
+      .in("external_identifier", senderIds.map((senderId) => `slack:${senderId}`))
+    : { data: [], error: null };
+  if (knownIdentitiesError) throw knownIdentitiesError;
+  for (const identity of knownIdentities ?? []) {
+    const senderId = identity.external_identifier.replace(/^slack:/, "");
+    const username = identity.username?.trim();
+    if (senderId && username) displayNames.set(senderId, username);
+  }
+  const unresolvedSenderIds = senderIds.filter((senderId) => !displayNames.has(senderId)).slice(0, MAX_PROFILE_LOOKUPS_PER_RUN);
+  const resolvedNames = await mapWithConcurrency(unresolvedSenderIds, PROFILE_CONCURRENCY, async (senderId) => {
     try {
-      const user = await slack(accessToken, "users.info", { user: senderId }, 5_000);
+      const user = await slack(accessToken, "users.info", { user: senderId }, 4_000);
       return [senderId, user.user?.profile?.display_name?.trim() || user.user?.real_name?.trim()] as const;
     } catch {
       return [senderId, undefined] as const;
@@ -107,7 +142,7 @@ export async function reconcileSlackConnection(connectionId: string, options: { 
   });
   for (const [senderId, name] of resolvedNames) if (name) displayNames.set(senderId, name);
   const analyses: Array<{ ownerId: string; conversationId: string; messageId: string; source: "slack" }> = [];
-  for (const { channel, message } of candidates) {
+  for (const { channel, message } of newCandidates) {
       const channelId = channel.id ?? "";
       const senderId = message.user ?? ""; const text = message.text?.trim() ?? ""; const timestamp = message.ts ?? "";
       const displayName = displayNames.get(senderId) ?? `Slack contact ${senderId.slice(-6)}`;
@@ -138,5 +173,5 @@ export async function reconcileSlackConnection(connectionId: string, options: { 
     updated_at: new Date().toISOString(),
     token_metadata: { ...metadata, slack_conversation_cursor: listed.response_metadata?.next_cursor?.trim() || null },
   }).eq("id", connection.id);
-  return { imported, readableConversations, unavailableConversations };
+  return { imported, readableConversations, unavailableConversations, skippedDuplicates: candidates.length - newCandidates.length };
 }
