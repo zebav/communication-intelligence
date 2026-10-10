@@ -158,7 +158,17 @@ export async function GET(request: NextRequest) {
     outcome,
     durationMs: Date.now() - startedAt,
     requestId: request.headers.get("x-vercel-id"),
-    counts: { accounts: syncResults.length, synced, analyzed, remainingCandidates: Math.max(0, (pending?.length ?? 0) - candidates.length) },
+    // `pending` is a bounded recent-message window, not an actionable queue.
+    // Calling every deferred newsletter or already-analysed message a
+    // "remaining candidate" made healthy imports appear stuck in Operations.
+    counts: {
+      accounts: syncResults.length,
+      synced,
+      scanned: pending?.length ?? 0,
+      eligible: candidates.length,
+      analyzed,
+      deferred: Math.max(0, (pending?.length ?? 0) - candidates.length),
+    },
     error: outcome === "failed" ? syncResults.find((result) => !result.ok)?.errorCode ?? "email_sync_failed" : undefined,
   });
   // The automation dispatcher uses the response status as its durable retry
