@@ -89,8 +89,8 @@ describe("assistant review interface", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ task: { ...task, revision: 3, status: "ready" } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...snapshot, tasks: [{ ...task, revision: 3, status: "ready" }] }), { status: 200 })));
     render(<AssistantWorkspace people={[]} initialTaskId="task" onTaskChanged={changed} />);
-    await screen.findByRole("button", { name: "Spara för granskning" });
-    fireEvent.click(screen.getByRole("button", { name: "Spara för granskning" }));
+    await screen.findByRole("button", { name: "Spara ändringar" });
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
     await waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ id: "task", message_id: "m", status: "ready" })));
   });
 
