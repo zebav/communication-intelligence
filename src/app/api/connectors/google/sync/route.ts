@@ -15,11 +15,27 @@ import { mapWithConcurrency } from "@/lib/bounded-concurrency";
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
 type GmailMessage = { id?: string; threadId?: string; internalDate?: string; snippet?: string; payload?: GmailPayload; labelIds?: string[] };
+type GmailMessageList = { messages?: Array<{ id?: string }>; nextPageToken?: string };
 
 // Enough parallelism to keep an interactive import responsive, while leaving
 // room for message persistence and preventing one mailbox from consuming an
 // entire serverless invocation.
 const gmailMessageFetchConcurrency = 4;
+
+async function listInboxPage(accessToken: string, pageToken?: string) {
+  const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+  listUrl.searchParams.set("maxResults", "50");
+  listUrl.searchParams.append("labelIds", "INBOX");
+  listUrl.searchParams.set("q", "newer_than:1y");
+  if (pageToken) listUrl.searchParams.set("pageToken", pageToken);
+  const response = await fetch(listUrl, {
+    headers: { authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401) throw new Error("reconnect_required");
+  if (!response.ok) throw new Error(`gmail_list_${response.status}`);
+  return response.json() as Promise<GmailMessageList>;
+}
 
 function jsonError(message: string, status = 500) { return NextResponse.json({ error: message }, { status }); }
 
@@ -74,18 +90,30 @@ export async function POST(request: NextRequest) {
     const stored = decryptCredential<StoredCredentials>(connection.encrypted_credentials, encryptionKey);
     const authorized = await accessToken(stored, request.nextUrl.origin);
     const metadata = connectionMetadata;
-    const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-    listUrl.searchParams.set("maxResults", "50"); listUrl.searchParams.append("labelIds", "INBOX"); listUrl.searchParams.set("q", "newer_than:1y");
-    // Every scheduled pass begins at the newest Inbox page. The old cursor was
-    // a backfill cursor and made later syncs walk only older mail indefinitely.
-    // De-duplication below keeps this inexpensive and safe to repeat.
-    const listResponse = await fetch(listUrl, { headers: { authorization: `Bearer ${authorized.token}` }, signal: AbortSignal.timeout(15_000) });
-    if (listResponse.status === 401) throw new Error("reconnect_required");
-    if (!listResponse.ok) throw new Error(`gmail_list_${listResponse.status}`);
-    const list = await listResponse.json() as { messages?: Array<{ id?: string }>; nextPageToken?: string };
+    // Always inspect the newest page first: an import must not miss messages
+    // that arrive while historical mail is being backfilled. A second, saved
+    // page is processed in the same bounded pass so the backfill genuinely
+    // advances rather than merely advertising a cursor that is never used.
+    const newestPage = await listInboxPage(authorized.token);
+    const savedBackfillCursor = typeof metadata.gmail_backfill_page_token === "string"
+      && metadata.gmail_backfill_page_token.length > 0
+      ? metadata.gmail_backfill_page_token
+      : null;
+    let backfillPage: GmailMessageList | null = null;
+    if (savedBackfillCursor) {
+      try {
+        backfillPage = await listInboxPage(authorized.token, savedBackfillCursor);
+      } catch (error) {
+        // Gmail page tokens can expire. The newest page remains authoritative;
+        // restart the bounded backfill from it on the following pass instead
+        // of marking an otherwise healthy account as disconnected.
+        if (!(error instanceof Error) || error.message !== "gmail_list_400") throw error;
+      }
+    }
     let imported = 0; let alreadyStored = 0;
     const profileId = String(metadata.google_profile_id ?? connection.account_identifier);
-    const listedIds = (list.messages ?? []).flatMap((item) => item.id ? [item.id] : []);
+    const listedIds = [...new Set([...(newestPage.messages ?? []), ...(backfillPage?.messages ?? [])]
+      .flatMap((item) => item.id ? [item.id] : []))];
     const externalIds = listedIds.map((id) => `gmail:${profileId}:${id}`);
     const { data: storedRows } = externalIds.length ? await supabase.from("messages").select("external_message_id").eq("owner_id", userId).eq("source", "email").in("external_message_id", externalIds) : { data: [] };
     const storedIds = new Set((storedRows ?? []).map((row) => row.external_message_id));
@@ -142,12 +170,31 @@ export async function POST(request: NextRequest) {
     }
 
     const syncedAt = new Date().toISOString();
-    const nextMetadata = { ...metadata, expires_at: authorized.credentials.expiresAt, gmail_backfill_page_token: list.nextPageToken ?? null, gmail_initial_import_complete: !list.nextPageToken, last_sync_error_code: null, last_sync_error_at: null };
+    // Advance the historical cursor only after that page has been persisted.
+    // If the cursor was absent/expired, seed a fresh backfill from the newest
+    // page. The current page is still read on every run for live reliability.
+    const nextBackfillCursor = backfillPage
+      ? backfillPage.nextPageToken ?? null
+      : newestPage.nextPageToken ?? null;
+    const nextMetadata = {
+      ...metadata,
+      expires_at: authorized.credentials.expiresAt,
+      gmail_backfill_page_token: nextBackfillCursor,
+      gmail_initial_import_complete: !nextBackfillCursor,
+      last_sync_error_code: null,
+      last_sync_error_at: null,
+    };
     const update: Record<string, unknown> = { last_sync_at: syncedAt, health_status: "healthy", token_metadata: nextMetadata, updated_at: syncedAt };
     if (authorized.refreshed) update.encrypted_credentials = encryptCredential(authorized.credentials, encryptionKey);
     const { error: connectionUpdateError } = await supabase.from("connections").update(update).eq("id", connection.id).eq("owner_id", userId);
     if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
-    return NextResponse.json({ imported, alreadyStored, syncedAt, moreAvailable: Boolean(list.nextPageToken), initialImportComplete: !list.nextPageToken });
+    return NextResponse.json({
+      imported,
+      alreadyStored,
+      syncedAt,
+      moreAvailable: Boolean(nextBackfillCursor),
+      initialImportComplete: !nextBackfillCursor,
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown"; console.error("Gmail sync failed", { reason });
     // Keep the source account truthful in Connections. The cron worker can
