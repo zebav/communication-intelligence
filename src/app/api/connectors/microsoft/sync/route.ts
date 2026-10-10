@@ -13,6 +13,7 @@ import { senderRelevance } from "@/lib/sender-intelligence";
 import { responseTimeMinutes } from "@/lib/outcomes";
 import { queueVaultIngestion } from "@/lib/vault/ingestion-queue";
 import { z } from "zod";
+import { logOperation } from "@/lib/observability";
 
 type StoredCredentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 type GraphAddress = { emailAddress?: { name?: string; address?: string } };
@@ -35,6 +36,16 @@ type GraphMessage = {
 };
 type GraphMessagesResponse = { value?: GraphMessage[]; "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
 type TokenResponse = { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string };
+
+const maxPagesPerSync = 1;
+
+function safeMicrosoftSyncError(reason: string) {
+  if (reason === "reconnect_required" || reason === "graph_401") return { message: "Outlook behöver anslutas igen för att fortsätta hämta meddelanden.", status: 409, reconnect: true };
+  if (reason === "graph_403") return { message: "Outlook tillåter inte läsning av inkorgen med den nuvarande behörigheten. Anslut kontot igen och godkänn e-poståtkomsten.", status: 409, reconnect: true };
+  if (/^graph_(408|429|5\d\d)$/.test(reason)) return { message: "Microsofts e-posttjänst svarade tillfälligt inte. Solvani försöker igen automatiskt.", status: 502, reconnect: false };
+  if (reason === "sync_cursor_save_failed" || reason === "credential_update_failed") return { message: "Importen kunde inte spara sin säkra återhämtningspunkt. Solvani försöker igen automatiskt.", status: 502, reconnect: false };
+  return { message: "Outlook-importen stoppades innan den var klar. Solvani försöker igen automatiskt och visar en återanslutning endast om behörigheten faktiskt har gått ut.", status: 502, reconnect: false };
+}
 
 function jsonError(message: string, status = 500) {
   return NextResponse.json({ error: message }, { status });
@@ -70,6 +81,7 @@ async function getAccessToken(credentials: StoredCredentials, origin: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const background = isAuthorizedCron(request.headers.get("authorization"));
   const backgroundOwner = z.string().uuid().safeParse(request.headers.get("x-owner-id"));
   if (background && !backgroundOwner.success) return jsonError("Missing background owner.", 400);
@@ -127,7 +139,7 @@ export async function POST(request: NextRequest) {
     // Process several pages per request, while retaining Graph's opaque cursor if
     // more pages remain. This keeps server execution bounded and makes each click
     // progress toward a complete mailbox snapshot.
-    while (pagesProcessed < 4) {
+    while (pagesProcessed < maxPagesPerSync) {
       const graphResponse = await fetch(pageUrl, {
         headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="html"' },
         signal: AbortSignal.timeout(20_000),
@@ -235,7 +247,7 @@ export async function POST(request: NextRequest) {
     // Learn the owner's writing style only from recent sent messages that belong
     // to an already imported conversation. They are never analyzed on their own.
     const sentUrl = new URL("https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages");
-    sentUrl.searchParams.set("$top", "100");
+    sentUrl.searchParams.set("$top", "20");
     sentUrl.searchParams.set("$orderby", "sentDateTime desc");
     sentUrl.searchParams.set("$select", "id,conversationId,internetMessageId,subject,body,uniqueBody,bodyPreview,sentDateTime,hasAttachments");
     const sentResponse = await fetch(sentUrl, { headers: { authorization: `Bearer ${token.accessToken}`, prefer: 'outlook.body-content-type="text"' }, signal: AbortSignal.timeout(20_000) });
@@ -279,6 +291,7 @@ export async function POST(request: NextRequest) {
       updated_at: syncedAt,
     }).eq("id", connection.id);
     if (connectionUpdateError) throw new Error("sync_cursor_save_failed");
+    logOperation({ route: "/api/connectors/microsoft/sync", operation: "outlook_import", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), counts: { imported, styleSamples, pages: pagesProcessed } });
     return NextResponse.json({ imported, styleSamples, syncedAt, incremental: !needsFullBodyUpgrade && Boolean(metadata.inbox_sync_url), fullBodyUpgrade: needsFullBodyUpgrade, pagesProcessed, moreAvailable: Boolean(nextSyncUrl?.includes("$skiptoken") || nextSyncUrl?.includes("%24skiptoken")) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
@@ -287,10 +300,11 @@ export async function POST(request: NextRequest) {
     // keeps retrying transient failures, but a revoked refresh token is
     // surfaced as a precise reconnect action for this mailbox only.
     await supabase.from("connections").update({
-      health_status: reason === "reconnect_required" ? "reconnect_required" : "degraded",
+      health_status: safeMicrosoftSyncError(reason).reconnect ? "reconnect_required" : "degraded",
       updated_at: new Date().toISOString(),
     }).eq("id", connection.id).eq("owner_id", userId);
-    if (reason === "reconnect_required") return jsonError("Outlook needs to be connected again.", 409);
-    return jsonError("The Outlook messages could not be imported. Try again.");
+    const safeError = safeMicrosoftSyncError(reason);
+    logOperation({ route: "/api/connectors/microsoft/sync", operation: "outlook_import", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: reason });
+    return jsonError(safeError.message, safeError.status);
   }
 }
