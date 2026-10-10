@@ -30,4 +30,13 @@ describe("RelationshipWorkspace", () => {
     expect(await screen.findByText(/Köad\. Solvani startar den historiska analysen/i)).toBeTruthy();
     expect(screen.queryByText(/0 av \?/i)).toBeNull();
   });
+
+  it("uses Swedish category, trend and score labels", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } })));
+    render(<RelationshipWorkspace />);
+    expect(await screen.findByText("Romantiskt")).toBeTruthy();
+    expect(screen.getByText(/↑ Stärkts/)).toBeTruthy();
+    expect(screen.getByText("Styrka")).toBeTruthy();
+    expect(screen.getByText("Säkerhet")).toBeTruthy();
+  });
 });

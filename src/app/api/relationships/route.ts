@@ -27,15 +27,23 @@ export async function GET(request: NextRequest) {
   for (const snapshot of snapshots ?? []) if (!newest.has(snapshot.person_id)) newest.set(snapshot.person_id, snapshot);
   const ranked = [...newest.values()].filter((item) => Number(item.evidence_count) >= 3 || Number(item.confidence) >= .8).sort((a, b) => Number(b.ranking_score) - Number(a.ranking_score)).slice(0, 10);
   const ids = ranked.map((item) => item.person_id);
-  const { data: people, error: peopleError } = ids.length ? await db.from("people").select("id,display_name,organization,last_contact_at").eq("owner_id", user.id).in("id", ids) : { data: [], error: null };
+  const { data: people, error: peopleError } = ids.length ? await db.from("people").select("id,display_name,organization,last_contact_at,entity_type,relationship_type").eq("owner_id", user.id).in("id", ids) : { data: [], error: null };
   if (peopleError) return NextResponse.json({ error: "Kontakterna kunde inte läsas." }, { status: 503 });
   const byId = new Map((people ?? []).map((person) => [person.id, person]));
+  const placeholderName = /^(instagram|whatsapp|slack) contact\s+\d+$/i;
+  const isQualified = (snapshot: NonNullable<typeof snapshots>[number], person: NonNullable<typeof people>[number]) => {
+    if (person.entity_type === "automated" || placeholderName.test(person.display_name)) return false;
+    const evidenceCount = Number(snapshot.evidence_count);
+    const confidence = Number(snapshot.confidence);
+    const ownerConfirmed = Boolean(person.relationship_type && person.relationship_type !== "unknown");
+    return ownerConfirmed || (evidenceCount >= 5 && confidence >= 0.5);
+  };
   return NextResponse.json({
     category,
     job: job ? { status: job.status, processedPeople: job.processed_people, skippedPeople: job.skipped_people, totalPeople: job.total_people, stage: job.current_stage, error: job.error } : null,
     rows: ranked.flatMap((snapshot) => {
       const person = byId.get(snapshot.person_id);
-      return person ? [{ ...snapshot, person }] : [];
+      return person && isQualified(snapshot, person) ? [{ ...snapshot, person }] : [];
     }),
   }, { headers: { "Cache-Control": "no-store" } });
 }

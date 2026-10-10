@@ -109,10 +109,16 @@ export function scoreRelationship(input: RelationshipScoreInput): RelationshipSc
   const change = input.previousRankingScore == null ? 0 : rankingScore - input.previousRankingScore;
   const trend: RelationshipTrend = evidenceCount < 3 ? "uncertain" : ageDays > 90 ? "dormant" : input.previousRankingScore == null ? "new" : change >= 5 ? "rising" : change <= -5 ? "cooling" : "stable";
   const missingInformation: string[] = [];
-  if (evidenceCount < 4) missingInformation.push("Limited interaction history");
-  if (!reciprocity.length) missingInformation.push("Limited evidence about mutual initiative");
-  if (!shared.length && !ownerContext.length) missingInformation.push("Limited owner-confirmed shared context");
-  if (!reliability.length) missingInformation.push("Limited evidence about follow-through");
-  const explanation = `${trend === "rising" ? "Momentum is improving" : trend === "cooling" ? "Recent momentum is lower" : trend === "dormant" ? "The relationship is currently inactive" : "Current relationship pattern"}; based on ${evidenceCount} observed signals. Strength reflects contact and reciprocity; quality reflects response and follow-through; priority reflects your context and current relevance.`;
+  if (evidenceCount < 4) missingInformation.push("Begränsad kommunikationshistorik");
+  if (!reciprocity.length) missingInformation.push("Begränsat underlag om ömsesidigt initiativ");
+  if (!shared.length && !ownerContext.length) missingInformation.push("Begränsat bekräftat gemensamt sammanhang");
+  if (!reliability.length) missingInformation.push("Begränsat underlag om uppföljning och tillförlitlighet");
+  const trendSummary = trend === "rising" ? "Kontakten har stärkts på sistone"
+    : trend === "cooling" ? "Kontakten har varit mindre ömsesidig på sistone"
+      : trend === "dormant" ? "Kontakten har varit vilande under en längre tid"
+        : trend === "new" ? "Detta är en ny relation med ett tidigt underlag"
+          : trend === "uncertain" ? "Underlaget är ännu begränsat"
+            : "Kontakten är stabil just nu";
+  const explanation = `${trendSummary}. Bedömningen bygger på ${evidenceCount} observerade signaler från kommunikation och bekräftad kontext.`;
   return { strengthScore, qualityScore, priorityScore, rankingScore, interactionFrequencyScore, recencyScore, reciprocityScore, responsivenessScore, emotionalDepthScore, reliabilityScore, sharedContextScore, trajectoryScore, confidence, evidenceCoverage, evidenceCount, trend, missingInformation, explanation };
 }
