@@ -173,5 +173,13 @@ export async function reconcileSlackConnection(connectionId: string, options: { 
     updated_at: new Date().toISOString(),
     token_metadata: { ...metadata, slack_conversation_cursor: listed.response_metadata?.next_cursor?.trim() || null },
   }).eq("id", connection.id);
-  return { imported, readableConversations, unavailableConversations, skippedDuplicates: candidates.length - newCandidates.length };
+  return {
+    imported,
+    listedConversations: (listed.channels ?? []).length,
+    requestedConversations: requestedChannels.length,
+    directConversations: requestedChannels.filter((channel) => channel.is_im || channel.is_mpim).length,
+    readableConversations,
+    unavailableConversations,
+    skippedDuplicates: candidates.length - newCandidates.length,
+  };
 }

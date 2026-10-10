@@ -62,15 +62,27 @@ export async function GET(request: NextRequest) {
   // An AI retry is not a Slack credential or transport outage. Keep the
   // connection truthful while the durable analysis backlog retries.
   if (importFailed && connections?.length) await db.from("connections").update({ health_status: reconnectRequired ? "reconnect_required" : "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
-  const fulfilled = results.filter((result): result is PromiseFulfilledResult<{ imported: number; readableConversations: number; unavailableConversations: number; skippedDuplicates: number }> => result.status === "fulfilled");
+  const fulfilled = results.filter((result): result is PromiseFulfilledResult<{
+    imported: number;
+    listedConversations: number;
+    requestedConversations: number;
+    directConversations: number;
+    readableConversations: number;
+    unavailableConversations: number;
+    skippedDuplicates: number;
+  }> => result.status === "fulfilled");
   const imported = fulfilled.reduce((sum, result) => sum + result.value.imported, 0);
+  const listedConversations = fulfilled.reduce((sum, result) => sum + result.value.listedConversations, 0);
+  const requestedConversations = fulfilled.reduce((sum, result) => sum + result.value.requestedConversations, 0);
+  const directConversations = fulfilled.reduce((sum, result) => sum + result.value.directConversations, 0);
+  const readableConversations = fulfilled.reduce((sum, result) => sum + result.value.readableConversations, 0);
   const unavailableConversations = fulfilled.reduce((sum, result) => sum + result.value.unavailableConversations, 0);
   const skippedDuplicates = fulfilled.reduce((sum, result) => sum + result.value.skippedDuplicates, 0);
-  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, skipped_duplicates: skippedDuplicates, unavailable_conversations: unavailableConversations, analyzed, blocked_media: blockedMedia, pending: pendingTotal, remaining: Math.max(0, pendingTotal - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : firstAnalysisFailure ? analysisFailureCode(firstAnalysisFailure.reason) : undefined) });
+  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, listed_conversations: listedConversations, requested_conversations: requestedConversations, direct_conversations: directConversations, readable_conversations: readableConversations, imported, skipped_duplicates: skippedDuplicates, unavailable_conversations: unavailableConversations, analyzed, blocked_media: blockedMedia, pending: pendingTotal, remaining: Math.max(0, pendingTotal - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : firstAnalysisFailure ? analysisFailureCode(firstAnalysisFailure.reason) : undefined) });
   // A non-success status is intentional: the durable dispatcher records it as
   // a retry, rather than presenting a failed Slack import as completed.
   return NextResponse.json(
-    { ok: !failed, imported, skippedDuplicates, unavailableConversations, analyzed, blockedMedia, failed, reconnectRequired, pending: pendingTotal, remaining: Math.max(0, pendingTotal - analysisCandidates.length), analysisLimit: maxAnalysisPerPass },
+    { ok: !failed, imported, listedConversations, requestedConversations, directConversations, readableConversations, skippedDuplicates, unavailableConversations, analyzed, blockedMedia, failed, reconnectRequired, pending: pendingTotal, remaining: Math.max(0, pendingTotal - analysisCandidates.length), analysisLimit: maxAnalysisPerPass },
     { status: failed ? 502 : 200, headers: { "Cache-Control": "no-store" } },
   );
 }
