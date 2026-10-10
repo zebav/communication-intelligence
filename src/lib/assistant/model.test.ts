@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { approvalBrief, candidateRank, conversationDecisionKey, decisionCard, isNoteworthy, keepCurrentConversationCandidate, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, type Evidence, type Task } from "./model";
+import { approvalBrief, candidateRank, conversationDecisionKey, decisionCard, isNoteworthy, keepCurrentConversationCandidate, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, taskNeedsOwnerInput, taskStatusLabel, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
 const task = (): Task => ({ id: "t1", message_id: "m1", kind: "reply", status: "ready", revision: 2, plan: makePlan(example, "reply"), result: {}, created_at: example.sentAt, updated_at: example.sentAt });
 describe("action discovery", () => {
+  it("presents missing private information as an owner decision, not a passive wait", () => {
+    const value = { ...task(), status: "waiting" as const, result: { browserMissingInformation: [{ key: "policy", label: "försäkringsnummer" }] } };
+    expect(taskNeedsOwnerInput(value)).toBe(true);
+    expect(taskStatusLabel(value)).toBe("Behöver din uppgift");
+  });
   it("keeps one current candidate for a conversation burst", () => {
     const first = makePlan({ ...example, messageId: "m-old", sentAt: "2026-10-01T10:00:00Z" }, "reply");
     const latest = makePlan({ ...example, messageId: "m-new", sentAt: "2026-10-01T10:05:00Z" }, "meeting");

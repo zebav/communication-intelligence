@@ -275,6 +275,28 @@ export function taskBucket(task: Task, now = Date.now()): "decision" | "ready" |
   if (task.status === "waiting" && !task.observedReplyAt && (!task.plan.followUpAt || Date.parse(task.plan.followUpAt) > now)) return "waiting";
   return "decision";
 }
+
+/**
+ * `waiting` is the durable execution state retained for provider compatibility.
+ * This presentation helper separates an owner input request from passive
+ * waiting for someone else, without creating another task record.
+ */
+export function taskNeedsOwnerInput(task: Task) {
+  if (task.plan.preparation?.status === "needs_input") return true;
+  return Array.isArray(task.result.browserMissingInformation) && task.result.browserMissingInformation.length > 0;
+}
+
+export function taskStatusLabel(task: Task) {
+  return taskNeedsOwnerInput(task) ? "Behöver din uppgift" : statusLabels[task.status];
+}
+
+export function taskInputSummary(task: Task) {
+  const runtime = Array.isArray(task.result.browserMissingInformation) ? task.result.browserMissingInformation : [];
+  const labels = runtime.flatMap((item) => item && typeof item === "object" && "label" in item && typeof item.label === "string" ? [item.label] : []);
+  if (labels.length) return labels.slice(0, 3);
+  if (task.kind === "meeting" && task.plan.preparation?.status === "needs_input") return ["en önskad dag eller tidsram"];
+  return [];
+}
 export function mayTransition(from: TaskStatus, to: TaskStatus) {
   const allowed: Record<TaskStatus, TaskStatus[]> = {
     decision: ["decision", "ready", "dismissed", "done"], ready: ["decision", "ready", "executing", "dismissed", "done"],
