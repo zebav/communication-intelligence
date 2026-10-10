@@ -40,6 +40,29 @@ explicit during Release 0; a successful Preview is not a production release.
 - Complete iPhone journeys using an authenticated Preview session.
 - Capture live performance telemetry for login, Inbox and Notiscenter.
 
+### Release-candidate progress after this snapshot
+
+The following changes are present on
+`phase/mobile-contact-settings-recovery-v1` and are intentionally still
+Preview-only until the gates above are completed:
+
+- Inbound Gmail, Outlook, Instagram, WhatsApp and Slack analysis now
+  materialises the same persisted decision record used by Inbox, Today and
+  Notiscenter. Opening an Inbox item no longer starts a second model call.
+- A complete, guarded reply can be approved directly from Inbox for providers
+  that support sending. Slack remains copy-only because no Slack send executor
+  has been approved or implemented.
+- Follow-up detection prepares a reviewable draft in the background. It never
+  sends automatically, and a failed preparation is retried instead of being
+  represented as a completed decision.
+- Contact conversation counts retain distinct provider threads while removing
+  genuine import replays using the provider's external conversation id.
+
+Targeted decision, repository and conversation tests currently cover these
+paths. A local production build requires the Webpack fallback in this isolated
+environment; Turbopack cannot launch its CSS worker here. Neither result is a
+substitute for the required Vercel Preview and real-provider checks.
+
 ## Resources and truthful operating state
 
 | Resource | Implementation and permissions | Used today | Status that still needs evidence | Best next use |
