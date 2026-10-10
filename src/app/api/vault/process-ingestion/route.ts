@@ -1,21 +1,16 @@
 import {NextRequest,NextResponse} from "next/server";
-import {decryptCredential,encryptCredential} from "@/lib/connectors/credential-crypto";
-import {googleConfig} from "@/lib/connectors/google-oauth";
-import {googleGmailConnector} from "@/lib/connectors/google-gmail";
-import {microsoftConfig} from "@/lib/connectors/microsoft-oauth";
-import {microsoftGraphConnector} from "@/lib/connectors/microsoft-graph";
+import {decryptCredential} from "@/lib/connectors/credential-crypto";
 import {createAdminClient} from "@/lib/supabase/admin";
 import {createClient} from "@/lib/supabase/server";
 import {isAuthorizedCron} from "@/lib/cron-auth";
-import {ingestTrustedMediaAttachments, type MediaJob} from "@/lib/media/email-worker";
+import {ingestTrustedMediaAttachments, processEmailMediaJob, type MediaJob} from "@/lib/media/email-worker";
 import {instagramConnector} from "@/lib/connectors/instagram";
 import {downloadEphemeralInstagramMedia} from "@/lib/connectors/instagram-media";
-import {isDecorativeEmailSignatureAttachment} from "@/lib/vault/email-attachment-filter";
 import {z} from "zod";
 import {mediaFailureUpdate} from "@/lib/media/ingestion-lifecycle";
 
 export const maxDuration=120;
-type Credentials={accessToken:string;refreshToken?:string;expiresAt:string;tokenType?:string;scope?:string};
+type Credentials={accessToken:string};
 
 async function owner(request:NextRequest){
  const background=isAuthorizedCron(request.headers.get("authorization"));
@@ -26,56 +21,7 @@ async function owner(request:NextRequest){
  const {data:aal}=await db.auth.mfa.getAuthenticatorAssuranceLevel(); if(aal?.currentLevel!=="aal2")return null;
  return {id:user.id,background:false};
 }
-async function refreshMicrosoft(credentials:Credentials,origin:string){
- if(Date.parse(credentials.expiresAt)>Date.now()+60_000)return credentials;
- if(!credentials.refreshToken)throw new Error("reconnect_required");
- const cfg=microsoftConfig(origin);
- const r=await fetch(`https://login.microsoftonline.com/${cfg.tenant}/oauth2/v2.0/token`,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:cfg.clientId,client_secret:cfg.clientSecret,grant_type:"refresh_token",refresh_token:credentials.refreshToken,scope:microsoftGraphConnector.scopes.join(" ")}),signal:AbortSignal.timeout(15_000)});
- if(!r.ok)throw new Error("reconnect_required"); const t=await r.json() as {access_token?:string;refresh_token?:string;expires_in?:number;token_type?:string;scope?:string};
- if(!t.access_token||!t.expires_in)throw new Error("reconnect_required");
- return {...credentials,accessToken:t.access_token,refreshToken:t.refresh_token??credentials.refreshToken,expiresAt:new Date(Date.now()+t.expires_in*1000).toISOString(),tokenType:t.token_type??credentials.tokenType,scope:t.scope??credentials.scope};
-}
-async function refreshGoogle(credentials:Credentials,origin:string){
- if(Date.parse(credentials.expiresAt)>Date.now()+60_000)return credentials;
- if(!credentials.refreshToken)throw new Error("reconnect_required");
- const cfg=googleConfig(origin);
- const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:cfg.clientId,client_secret:cfg.clientSecret,grant_type:"refresh_token",refresh_token:credentials.refreshToken}),signal:AbortSignal.timeout(15_000)});
- if(!r.ok)throw new Error("reconnect_required"); const t=await r.json() as {access_token?:string;expires_in?:number;refresh_token?:string};
- if(!t.access_token||!t.expires_in)throw new Error("reconnect_required");
- return {...credentials,accessToken:t.access_token,refreshToken:t.refresh_token??credentials.refreshToken,expiresAt:new Date(Date.now()+t.expires_in*1000).toISOString()};
-}
 type Attachment={name:string;mime:string;bytes:Uint8Array;isInline?:boolean;contentId?:string;contentDisposition?:string};
-async function microsoftAttachments(token:string,messageId:string):Promise<Attachment[]>{
- const list=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});
- if(!list.ok)throw new Error(`graph_attachments_${list.status}`);
- const data=await list.json() as {value?:Array<{id?:string;name?:string;contentType?:string;size?:number;isInline?:boolean}>};
- const out:Attachment[]=[];
- for(const item of data.value??[]){
-  if(!item.id||!item.name||item.isInline||(item.size??0)>100*1024*1024)continue;
-  const raw=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(item.id)}/$value`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(30_000)});
-  if(!raw.ok)continue;
-  const bytes=new Uint8Array(await raw.arrayBuffer());
-  const attachment={name:item.name,mime:item.contentType||raw.headers.get("content-type")||"application/octet-stream",bytes,isInline:item.isInline};
-  if(!isDecorativeEmailSignatureAttachment({filename:attachment.name,mimeType:attachment.mime,sizeBytes:bytes.length,isInline:attachment.isInline}))out.push(attachment);
- }
- return out;
-}
-type GmailPart={filename?:string;mimeType?:string;headers?:Array<{name?:string;value?:string}>;body?:{attachmentId?:string;data?:string;size?:number};parts?:GmailPart[]};
-function gmailParts(part?:GmailPart):GmailPart[]{if(!part)return[];return [...(part.filename?.trim()&&part.body&&(part.body.attachmentId||part.body.data)?[part]:[]),...(part.parts??[]).flatMap(gmailParts)];}
-async function gmailAttachments(token:string,messageId:string):Promise<Attachment[]>{
- const msg=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=full`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});
- if(!msg.ok)throw new Error(`gmail_message_${msg.status}`); const data=await msg.json() as {payload?:GmailPart};
- const out:Attachment[]=[];
- for(const part of gmailParts(data.payload)){
-  if(!part.filename||(part.body?.size??0)>100*1024*1024)continue; let encoded=part.body?.data??"";
-  if(part.body?.attachmentId){const r=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.body.attachmentId)}`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(20_000)});if(!r.ok)continue;encoded=String((await r.json() as {data?:string}).data??"");}
-  if(!encoded)continue;
-  const bytes=new Uint8Array(Buffer.from(encoded,"base64url")); const headers=new Map((part.headers??[]).map(header=>[(header.name??"").toLowerCase(),header.value??""]));
-  const attachment={name:part.filename,mime:part.mimeType||"application/octet-stream",bytes,contentId:headers.get("content-id"),contentDisposition:headers.get("content-disposition")};
-  if(!isDecorativeEmailSignatureAttachment({filename:attachment.name,mimeType:attachment.mime,sizeBytes:bytes.length,contentId:attachment.contentId,contentDisposition:attachment.contentDisposition}))out.push(attachment);
- }
- return out;
-}
 
 async function fetchExternalMedia(url:string,apiKey?:string):Promise<Attachment[]>{
  const parsed=new URL(url);
@@ -114,14 +60,23 @@ export async function POST(request:NextRequest){
  const jobs=[...(queued??[])].sort((left,right)=>mediaPriority(left)-mediaPriority(right)||Number(left.attempts??0)-Number(right.attempts??0)||String(right.updated_at??"").localeCompare(String(left.updated_at??""))).slice(0,10);
  let processed=0,saved=0,failed=0; const skipped=0;
  for(const job of jobs??[]){
+  // Email attachments have one canonical worker. Keeping token refresh,
+  // provider retrieval, storage and idempotency in that module prevents the
+  // background route and the connector worker from drifting into incompatible
+  // Microsoft Graph requests.
+  if(job.provider==="microsoft-graph"||job.provider==="gmail"){
+   try{
+    const outcome=await processEmailMediaJob(db,job as MediaJob);
+    if(outcome.processed){processed++;saved+=outcome.assetCount??0;}
+   }catch{failed++;}
+   continue;
+  }
   const {data:claimed}=await db.from("vault_ingestion_jobs").update({state:"processing",attempts:Number(job.attempts??0)+1,retrieval_status:"fetching",analysis_status:"processing",updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id).eq("state","pending").select("id").maybeSingle(); if(!claimed)continue;
   try{
    const {data:conn}=await db.from("connections").select("id,provider,encrypted_credentials").eq("owner_id",actor.id).eq("id",job.connection_id).single();
    if(!conn?.encrypted_credentials)throw new Error("connection_missing");
-   const original=decryptCredential<Credentials>(conn.encrypted_credentials,key); let creds:Credentials=original; let files:Attachment[]=[]; let sourceType:"email"|"whatsapp"|"instagram"="email";
-   if(conn.provider===microsoftGraphConnector.id){creds=await refreshMicrosoft(original,request.nextUrl.origin);files=await microsoftAttachments(creds.accessToken,job.provider_message_id);}
-   else if(conn.provider===googleGmailConnector.id){creds=await refreshGoogle(original,request.nextUrl.origin);files=await gmailAttachments(creds.accessToken,job.provider_message_id);}
-   else if(conn.provider===instagramConnector.id){
+   const original=decryptCredential<Credentials>(conn.encrypted_credentials,key); const files:Attachment[]=[]; let sourceType:"email"|"whatsapp"|"instagram"="email";
+   if(conn.provider===instagramConnector.id){
      sourceType="instagram";
      const {data:refs}=await db.from("vault_media_references").select("media_reference").eq("owner_id",actor.id).eq("connection_id",conn.id).eq("source","instagram").eq("provider_message_id",job.provider_message_id);
      const urls=(refs??[]).flatMap(ref=>typeof ref.media_reference==="string"?[ref.media_reference]:[]);
@@ -142,7 +97,6 @@ export async function POST(request:NextRequest){
      if(!files.length)throw new Error("whatsapp_media_reference_missing");
    }
    else throw new Error("unsupported_provider");
-   if(creds.accessToken!==original.accessToken)await db.from("connections").update({encrypted_credentials:encryptCredential(creds,key),updated_at:new Date().toISOString()}).eq("id",conn.id).eq("owner_id",actor.id);
    const outcome=await ingestTrustedMediaAttachments(db,{...job,source_type:sourceType,attempts:Number(job.attempts??0)} as MediaJob,files.map(file=>({filename:file.name,mimeType:file.mime,bytes:Buffer.from(file.bytes)})));
    saved+=outcome.assetCount;
    await db.from("vault_ingestion_jobs").update({state:"done",retrieval_status:"available",analysis_status:outcome.state==="ready"?"completed":"blocked",vault_status:outcome.assetCount>0?"retained":"rejected",last_error_code:null,failed_stage:null,error_details:{},next_retry_at:null,completed_at:new Date().toISOString(),dead_lettered_at:null,updated_at:new Date().toISOString()}).eq("id",job.id).eq("owner_id",actor.id);processed++;
