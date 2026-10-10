@@ -32,4 +32,13 @@ describe("historical assistant evidence", () => {
     expect(evidence.unread).toBe(true);
     expect(propose(evidence)).toEqual([]);
   });
+  it("keeps imported provider ids out of a decision card's displayed contact name", () => {
+    const evidence = evidenceFromRow({
+      id: "35e15ce1-5ceb-4176-93cc-4ef2ebf1c820", conversation_id: "7f5e805e-a312-4311-b576-39ab99a84ed7",
+      source: "instagram", direction: "in", body_text: "Hej", sent_at: "2026-09-17T17:26:01Z", classification: "Personal", importance_score: 7,
+      metadata: {}, identities: { external_identifier: "instagram:123456", username: "anna" },
+      conversations: { id: "7f5e805e-a312-4311-b576-39ab99a84ed7", title: "Instagram", person_id: "c0a8012e-0000-4000-8000-000000000001", connection_id: null, external_conversation_id: "instagram:123456", last_user_message_at: null, last_other_message_at: "2026-09-17T17:26:01Z", people: { display_name: "Instagram contact 123456" }, connections: {} },
+    });
+    expect(evidence.personName).toBe("@anna");
+  });
 });

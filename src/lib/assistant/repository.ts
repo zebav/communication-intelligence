@@ -8,8 +8,9 @@ import { verifiedHttpsUrl } from "./browser-url";
 import type { Source } from "@/lib/domain";
 import { blocksDecisionUntilMediaReady, mediaDecisionState } from "@/lib/media/decision-gate";
 import { mediaContextForMessage } from "@/lib/media/context";
+import { presentPersonName } from "@/lib/person-presentation";
 
-const fields = "id,conversation_id,source,direction,body_text,sent_at,created_at,classification,importance_score,attachment_count,metadata,identities(external_identifier),conversations(id,title,person_id,connection_id,external_conversation_id,last_user_message_at,last_other_message_at,people(display_name),connections(provider,account_identifier,account_name))";
+const fields = "id,conversation_id,source,direction,body_text,sent_at,created_at,classification,importance_score,attachment_count,metadata,identities(external_identifier,username),conversations(id,title,person_id,connection_id,external_conversation_id,last_user_message_at,last_other_message_at,people(display_name),connections(provider,account_identifier,account_name))";
 type Row = Record<string, unknown>;
 function object(value: unknown): Row { return value && typeof value === "object" && !Array.isArray(value) ? value as Row : {}; }
 function one(value: unknown): Row { return object(Array.isArray(value) ? value[0] : value); }
@@ -73,9 +74,15 @@ function storedAnalysis(value: unknown): Partial<import("@/lib/ai/service").Emai
 }
 export function evidenceFromRow(value: unknown): Evidence {
   const row = object(value), c = one(row.conversations), p = one(c.people), connection = one(c.connections), identity = one(row.identities);
+  const source = row.source as Source;
   const e = {
     messageId: str(row.id), conversationId: str(row.conversation_id), personId: str(c.person_id) || null,
-    personName: str(p.display_name) || "Okänd kontakt", source: row.source as Source,
+    personName: presentPersonName({
+      displayName: str(p.display_name),
+      source,
+      identities: [{ source, username: str(identity.username) }],
+      fallback: "Okänd kontakt",
+    }), source,
     connectionId: str(c.connection_id) || null, provider: str(connection.provider),
     account: str(connection.account_identifier) || str(connection.account_name) || "Konto behöver kontrolleras",
     title: str(c.title), body: str(row.body_text), sentAt: str(row.sent_at), direction: row.direction as "in" | "out",
