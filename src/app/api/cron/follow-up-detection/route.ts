@@ -5,6 +5,7 @@ import { logOperation } from "@/lib/observability";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { makePlan, sendCapability, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, readEvidence } from "@/lib/assistant/repository";
+import { databaseQueryFailureCode } from "@/lib/learning-diagnostics";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,7 +28,10 @@ export async function GET(request: NextRequest) {
     .limit(16);
   if (ownerId) query = query.eq("owner_id", ownerId);
   const { data: outcomes, error } = await query;
-  if (error) return NextResponse.json({ error: "Follow-up outcomes could not be read." }, { status: 503 });
+  if (error) {
+    logOperation({ route: "/api/cron/follow-up-detection", operation: "follow_up_detection", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), error: databaseQueryFailureCode("follow_up", error) });
+    return NextResponse.json({ error: "Follow-up outcomes could not be read." }, { status: 503 });
+  }
   let created = 0;
   let prepared = 0;
   let failed = 0;
