@@ -32,6 +32,9 @@ message content, provider tokens or private owner data.
   necessary service-role permissions. The production database grant check
   returned true for outcomes read, learning read/update, task read/insert/update
   and audit insert.
+- Vercel Speed Insights is installed in the application layout. Its dashboard
+  was reachable but had not yet accumulated real-user events at the time of
+  this checkpoint, so it is not used as performance evidence yet.
 
 ## Current readiness matrix
 
@@ -47,6 +50,7 @@ message content, provider tokens or private owner data.
 | Follow-up detection | Yes | N/A | Permission repair and duplicate-race recovery applied | Operational, subject to live task-transition test | Confirm a newly eligible follow-up appears once |
 | Autonomous learning | Yes | N/A | Completed safely after permission repair | Operational, review-gated | Confirm a new owner correction produces the expected learning candidate |
 | Native iOS push | Architecture only | No | No | Not active | Device registration, permission, delivery and deep-link verification |
+| Real-user web performance metrics | Yes | Yes | Speed Insights dashboard reachable but no events yet | Collecting | Wait for representative production sessions, then use route-level data to prioritize the next change |
 
 ## Current constraints
 
