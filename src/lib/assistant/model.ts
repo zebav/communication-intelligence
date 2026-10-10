@@ -3,6 +3,7 @@ import type { EmailAnalysis } from "@/lib/ai/service";
 import type { Source } from "@/lib/domain";
 import { blocksDecisionUntilMediaReady, mediaDecisionLabel, mediaDecisionState, type MediaDecisionState } from "@/lib/media/decision-gate";
 import { verifiedHttpsUrl } from "./browser-url";
+import type { DecisionContext } from "./decision-context";
 
 export const kinds = ["reply", "forward", "meeting", "follow_up", "website"] as const;
 export const statuses = ["decision", "ready", "executing", "waiting", "done", "dismissed", "uncertain"] as const;
@@ -46,6 +47,8 @@ export type Plan = {
   recipientPersonId: string | null; recipient: string; recipientName: string;
   followUpAt: string | null; steps: string[];
   preparation?: PreparedDecision;
+  /** Task-scoped provenance, created during preparation rather than on every render. */
+  context?: DecisionContext;
 };
 export type Task = { id: string; message_id: string; kind: TaskKind; status: TaskStatus; revision: number; plan: Plan; result: Record<string, unknown>; created_at: string; updated_at: string; observedReplyAt?: string };
 export type DecisionCard = {

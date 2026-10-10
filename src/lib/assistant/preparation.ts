@@ -8,6 +8,7 @@ import { mapsEnabled, reserveMapsOperation } from "@/lib/calendar/maps-budget";
 import { listKnowledgeEntries } from "@/lib/personal-knowledge";
 import { getAIService } from "@/lib/ai/service";
 import { generateDraft } from "./repository";
+import { decisionContextPrompt, retrieveDecisionContext, type DecisionContext } from "./decision-context";
 import type { Plan, PreparedDecision, TaskKind } from "./model";
 
 function dateInTimezone(timezone: string, instant = new Date()) {
@@ -68,7 +69,7 @@ function homeAddress(entries: Awaited<ReturnType<typeof listKnowledgeEntries>>) 
   )?.value ?? "";
 }
 
-async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan): Promise<Plan> {
+async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan, sharedContext: DecisionContext): Promise<Plan> {
   const [messages, settings] = await Promise.all([
     db.from("messages").select("id,body_text,sent_at,direction,source").eq("owner_id", owner).eq("conversation_id", plan.evidence.conversationId)
       .order("sent_at", { ascending: false }).order("id").limit(16),
@@ -108,8 +109,8 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
       `Kalenderanalys: ${intent.summary}`,
       intent.questions.length ? `Frågor som behöver klargöras: ${intent.questions.join(" | ")}` : "",
     ].filter(Boolean).join("\n");
-    const draft = await generateDraft(db, owner, plan, false, context);
-    return { ...plan, draft, originalDraft: draft, preparation };
+    const draft = await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${context}`);
+    return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation };
   }
 
   if (!resolvedDate) {
@@ -118,8 +119,8 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
       `Datum saknas eller behöver bekräftas.`,
       intent.questions.length ? `Be personen om: ${intent.questions.join(" | ")}` : "",
     ].filter(Boolean).join("\n");
-    const draft = await generateDraft(db, owner, plan, false, context);
-    return { ...plan, draft, originalDraft: draft, preparation };
+    const draft = await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${context}`);
+    return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation };
   }
 
   const slotsResult = await calendarSuggestions(db, owner, {
@@ -186,11 +187,11 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan)
     "Skriv ett komplett naturligt svar. Om flera tider finns: erbjud dem kort och tydligt. Påstå inte att en kalenderbokning eller restaurangbokning redan är gjord.",
   ].filter(Boolean).join("\n");
 
-  const draft = await generateDraft(db, owner, plan, false, context);
-  return { ...plan, draft, originalDraft: draft, preparation };
+  const draft = await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${context}`);
+  return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation };
 }
 
-async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan): Promise<Plan> {
+async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan, sharedContext: DecisionContext): Promise<Plan> {
   const e = plan.evidence;
   const action = e.analysis.actionSuggestion;
   const context = `${e.title} ${e.body} ${action?.task ?? ""} ${action?.reason ?? ""}`;
@@ -198,9 +199,10 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
 
   if (!needsResearch) {
     const shouldDraft = e.analysis.requiresReply || ["instagram", "whatsapp"].includes(e.source);
-    const draft = plan.draft || (shouldDraft ? await generateDraft(db, owner, plan, false) : "");
+    const draft = plan.draft || (shouldDraft ? await generateDraft(db, owner, plan, false, decisionContextPrompt(sharedContext)) : "");
     return {
       ...plan,
+      context: sharedContext,
       draft,
       originalDraft: draft,
       preparation: {
@@ -234,9 +236,10 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
       "Use only facts supported by the research. Do not say a booking has been made unless a provider has actually confirmed it.",
     ].filter(Boolean).join("\n");
     const shouldDraft = e.analysis.requiresReply || ["instagram", "whatsapp"].includes(e.source);
-    const draft = shouldDraft ? await generateDraft(db, owner, plan, false, contextText) : (deep.suggestedReply || plan.draft);
+    const draft = shouldDraft ? await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${contextText}`) : (deep.suggestedReply || plan.draft);
     return {
       ...plan,
+      context: sharedContext,
       draft,
       originalDraft: draft,
       preparation: {
@@ -248,9 +251,10 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
     };
   } catch {
     const shouldDraft = e.analysis.requiresReply || ["instagram", "whatsapp"].includes(e.source);
-    const draft = plan.draft || (shouldDraft ? await generateDraft(db, owner, plan, false) : "");
+    const draft = plan.draft || (shouldDraft ? await generateDraft(db, owner, plan, false, decisionContextPrompt(sharedContext)) : "");
     return {
       ...plan,
+      context: sharedContext,
       draft,
       originalDraft: draft,
       preparation: {
@@ -263,10 +267,11 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
 }
 
 export async function prepareDecisionPlan(db: SupabaseClient, owner: string, plan: Plan, kind: TaskKind): Promise<Plan> {
-  if (kind === "meeting") return meetingPreparation(db, owner, plan);
-  if (kind === "website") return researchPreparation(db, owner, plan);
+  const sharedContext = await retrieveDecisionContext(db, owner, plan).catch(() => ({ version: "v1" as const, preparedAt: new Date().toISOString(), items: [] }));
+  if (kind === "meeting") return meetingPreparation(db, owner, plan, sharedContext);
+  if (kind === "website") return researchPreparation(db, owner, plan, sharedContext);
   // Opening a reply/follow-up decision must be fast and must not spend an AI call
   // before the owner has chosen to ask for a draft. Draft generation remains an
   // explicit action in the task card, where it can use the same profile/history.
-  return { ...plan, preparation: { status: "ready", summary: plan.reason, preparedAt: new Date().toISOString() } };
+  return { ...plan, context: sharedContext, preparation: { status: "ready", summary: plan.reason, preparedAt: new Date().toISOString() } };
 }
