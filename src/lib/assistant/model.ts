@@ -152,12 +152,13 @@ const bulk = new Set(["Marketing", "Newsletter", "Spam", "Notification", "Inform
 // classification. Historical classifications are not authoritative: a
 // commercial newsletter must not become urgent merely because an older model
 // called it Legal or Business.
-const promotional = /\b(nyhetsbrev|newsletter|unsubscribe|avregistrera|veckan på|kampanj|erbjudande|offer|rabatt|% off|meny denna vecka|boka bord|netflix|streaming|member benefits|medlemsförmån|shop now|handla nu|sale|rea)\b/i;
+const promotional = /\b(nyhetsbrev|newsletter|unsubscribe|avregistrera|veckan på|kampanj|erbjudande|offer|rabatt|% off|meny denna vecka|boka bord|netflix|streaming|member benefits|medlemsförmån|shop now|handla nu|sale|rea|list-manage\.com|helgens brunch|bordet är dukat|vem tar du med|det här vill du inte missa)\b/i;
 // Some senders use newsletter-like mail for account, release and payout
 // notices. They are not reply tasks by default, but must not disappear into
 // marketing merely because their delivery format includes an unsubscribe link.
 const criticalService = /\b(kivra|distrokid|testflight|app store connect|apple developer|bankid|skatteverket|verksamt|bolagsverket|microsoft 365|google workspace|cloudflare|domain renewal|renewal notice|utbetalning|payout|royalt(?:y|ies)|tax|moms|invoice overdue|förfallen faktura)\b/i;
 const disposableTestMessage = /^\s*(?:test|testing)(?:\s*\d+)?[.!?\s]*$/i;
+const bookingConfirmation = /\b(booking confirmation|bokningsbekräftelse|reservation confirmation|confirmation number|bokningsnummer)\b/i;
 export function isCriticalServiceNotice(e: Pick<Evidence, "title" | "body">) {
   return criticalService.test(`${e.title}\n${e.body}`);
 }
@@ -169,6 +170,7 @@ export function isNoteworthy(e: Pick<Evidence, "title" | "body" | "classificatio
   if (disposableTestMessage.test(e.body)) return false;
   if (isCriticalServiceNotice(e)) return true;
   if (isPromotional(e)) return false;
+  if (bookingConfirmation.test(`${e.title}\n${e.body}`)) return true;
   if (e.priority >= 6) return true;
   if (["Financial", "Legal", "Booking / Travel", "Customer", "Business"].includes(e.classification)) return true;
   return /\b(invoice|faktura|contract|avtal|verification|verifiera|account|konto|release)\b/i.test(`${e.title}\n${e.body}`);
@@ -193,6 +195,10 @@ export function propose(e: Evidence, now = Date.now()): TaskKind[] {
   if (e.lastOtherAt && Date.parse(e.lastOtherAt) > Date.parse(e.sentAt)) return [];
   if (disposableTestMessage.test(e.body)) return [];
   if (isPromotional(e)) return [];
+  // A confirmation documents a completed provider action. It may be useful
+  // information, but treating it as another booking task risks duplicate
+  // reservations or sending an unnecessary reply.
+  if (bookingConfirmation.test(`${e.title}\n${e.body}`)) return [];
   const a = e.analysis;
   const context = `${a.intent ?? ""} ${a.summary ?? ""} ${e.title} ${e.body}`;
   if (a.forwardingSuggestion?.recommended) return ["forward"];

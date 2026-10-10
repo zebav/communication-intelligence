@@ -20,6 +20,16 @@ describe("action discovery", () => {
     expect(propose(campaign)).toEqual([]);
     expect(isNoteworthy(campaign)).toBe(false);
   });
+  it("keeps restaurant mailing-list promotions out even when an older classifier called them Business", () => {
+    const campaign = { ...example, classification: "Business", priority: 6.8, title: "Det här vill du inte missa i helgen", body: "Helgens brunch. Bordet är dukat – vem tar du med? Boka brunch https://us.list-manage.com/example", analysis: { actionSuggestion: { detected: true, type: "website_task" as const, task: "Boka brunch", reason: "Länk finns", targetUrl: "https://example.com", requiresLogin: false, contactIds: [], requiredFields: [], confidence: .9 } } };
+    expect(propose(campaign)).toEqual([]);
+    expect(isNoteworthy(campaign)).toBe(false);
+  });
+  it("keeps booking confirmations as notes rather than a duplicate website task", () => {
+    const confirmation = { ...example, classification: "Booking / Travel", title: "Bokningsbekräftelse SE906S0325748", body: "Bokningsbekräftelse för ICEBAR Stockholm. Bokningsnummer: SE906S0325748.", analysis: { actionSuggestion: { detected: true, type: "website_task" as const, task: "Öppna bokning", reason: "Bekräftelse", targetUrl: "https://example.com", requiresLogin: false, contactIds: [], requiredFields: [], confidence: .9 } } };
+    expect(propose(confirmation)).toEqual([]);
+    expect(isNoteworthy(confirmation)).toBe(true);
+  });
   it.each(["Kivra: du har ett nytt viktigt brev", "DistroKid: royalty payout available", "TestFlight: action required for your build"])("keeps a critical service notice in 'Bör noteras': %s", (title) => {
     expect(isNoteworthy({ ...example, title, classification: "Newsletter", priority: 2 })).toBe(true);
   });
