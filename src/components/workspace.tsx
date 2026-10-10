@@ -296,41 +296,25 @@ function CommunicationCaseCard({ item, decisions, onDecisionChange, onOpenAssist
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(item.analysis?.draftResponse ?? "");
   const [status, setStatus] = useState("");
-  const [preparing, setPreparing] = useState(false);
   const [decisionWorking, setDecisionWorking] = useState(false);
-  const preparedConversation = useRef<string | null>(null);
+  const [approvalTaskId, setApprovalTaskId] = useState("");
+  const [copied, setCopied] = useState(false);
   const latestInbound = item.threadMessages?.filter((entry) => entry.direction === "in").at(-1);
   const decision = latestInbound?.id ? decisions[latestInbound.id] : undefined;
-  useEffect(() => {
-    if (!expanded || !["instagram", "slack"].includes(item.source) || item.analysis || preparing || preparedConversation.current === item.id) return;
-    preparedConversation.current = item.id;
-    setPreparing(true);
-    void fetch(`/api/connectors/${item.source}/analyze`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: item.id }) })
-      .then(async (response) => { const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error ?? "Svarsförslaget kunde inte förberedas."); router.refresh(); })
-      .catch((error) => setStatus(error instanceof Error ? error.message : "Svarsförslaget kunde inte förberedas."))
-      .finally(() => setPreparing(false));
-  }, [expanded, item.analysis, item.id, item.source, preparing, router]);
-  const prepareDecision = async () => {
-    if (!latestInbound?.id) return;
+  const canSendInSource = item.source === "instagram" || item.source === "whatsapp";
+  const approvePreparedReply = async () => {
+    if (!decision || !canSendInSource) return;
     setDecisionWorking(true); setStatus("");
     try {
-      const response = await fetch("/api/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start", messageId: latestInbound.id, kind: "reply" }) });
-      const data = await response.json() as { error?: string; task?: InboxDecisionStatus };
-      if (!response.ok || !data.task) throw new Error(data.error ?? "Beslutet kunde inte förberedas.");
-      let task = data.task;
-      if (draft.trim() && draft.trim() !== item.analysis?.draftResponse?.trim()) {
-        const saved = await fetch("/api/assistant", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "save", id: task.id, revision: task.revision, edit: { draft, recipientPersonId: null, followUpAt: null } }) });
-        const savedData = await saved.json() as { error?: string; task?: InboxDecisionStatus };
-        if (!saved.ok) throw new Error(savedData.error ?? "Utkastet kunde inte sparas i beslutet.");
-        task = savedData.task ?? task;
-      }
-      onDecisionChange(task); onOpenAssistant(task.id);
-    } catch (error) { setStatus(error instanceof Error ? error.message : "Beslutet kunde inte förberedas."); }
+      await approveReplyDecision(decision, draft, item.analysis?.draftResponse ?? "", onDecisionChange);
+      setApprovalTaskId("");
+      router.refresh();
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Utskicket kunde inte genomföras."); }
     finally { setDecisionWorking(false); }
   };
   const channelLabel = item.source === "whatsapp" ? "WhatsApp" : item.source === "slack" ? "Slack" : "Instagram";
   const timingLabel = { now: "Skicka nu", within_3_hours: "Inom tre timmar", tomorrow_afternoon: "I morgon eftermiddag", in_3_days: "Om tre dagar", no_reply_needed: "Ingen åtgärd behövs" } as const;
-  return <article className="case-item communication-case-card"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div className="case-card-content"><div className="case-title"><PersonLink personId={item.personId} name={item.personName} /><span className="tag">1 {item.source} thread</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><button className="case-card-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span className="case-person">{item.title} · {formatMessageTime(item.createdAt)}</span><p>{item.message}</p></button>{expanded && <div className="case-intelligence">{latestInbound?.id && <PriorityFeedback messageId={latestInbound.id} initialScore={item.priorityScore ?? 5} />}{item.threadMessages && item.threadMessages.length > 0 && <div className="case-thread">{item.threadMessages.slice(-24).map((entry) => <div key={entry.id} className={`message ${entry.direction === "out" ? "out" : ""}`}><div className="message-bubble"><ReadableMessage text={entry.body} /><MessageAttachments messageId={entry.id} expected={entry.attachmentCount} /></div><div className="message-meta">{entry.direction === "out" ? "Du" : item.personName} · {channelLabel} · {formatMessageTime(entry.sentAt)}</div></div>)}</div>}{item.analysis ? <><div className="intel-label">AI-bedömning</div><strong>{item.analysis.summary}</strong><p><b>Intent:</b> {item.analysis.intent || "Inte fastställt"}</p><p>{item.analysis.priorityReason}</p>{item.recommendedAction && <span className="pill">{actionLabels[item.recommendedAction as RecommendedAction] ?? item.recommendedAction}</span>}{item.analysis.sendTiming && <div className="learning-notice"><div><strong>Föreslagen svarstid: {timingLabel[item.analysis.sendTiming.recommendation]}</strong><p>{item.analysis.sendTiming.rationale}</p></div></div>}<AIPlanner plan={item.analysis.planningSuggestion} /><div className="intel-label case-reply-label">Föreslaget svar · {item.analysis.draftTone || "Naturlig ton"}</div><textarea value={draft} onChange={(event) => { setDraft(event.target.value); setStatus(""); }} aria-label={`Föreslaget svar till ${item.personName}`} />{decision ? <div className="decision-status-row"><span className="pill">Beslutsstatus: {statusLabels[decision.status]}</span><button className="btn primary" onClick={() => onOpenAssistant(decision.id)}>Öppna sparat beslut</button></div> : <button className="btn primary" disabled={decisionWorking || !latestInbound?.id || !draft.trim()} onClick={() => void prepareDecision()}><Send size={12} />{decisionWorking ? "Sparar beslut…" : "Fortsätt till godkännande"}</button>}{latestInbound?.id && <ScheduledSendControl conversationId={item.id} messageId={latestInbound.id} source={item.source} body={draft} suggestedTiming={item.analysis.sendTiming?.recommendation} suggestedTimingReason={item.analysis.sendTiming?.rationale} disabled={decisionWorking} onScheduled={() => router.refresh()} />}{status && <p className="negative">{status}</p>}</> : <div className="learning-notice"><div><strong>{preparing ? "Tar fram ett svarsförslag…" : "Svarsförslag förbereds"}</strong><p>{preparing ? `Solvani läser den öppnade ${channelLabel}-tråden och sparar ett redigerbart utkast.` : "Öppna tråden igen för att försöka förbereda svaret."}</p></div></div>}{status && !item.analysis && <p className="negative">{status}</p>}</div>}</div></article>;
+  return <article className="case-item communication-case-card"><div className="avatar">{item.personName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div className="case-card-content"><div className="case-title"><PersonLink personId={item.personId} name={item.personName} /><span className="tag">1 {item.source} thread</span>{item.priorityScore != null && <span className="score">{item.priorityScore}</span>}</div><button className="case-card-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span className="case-person">{item.title} · {formatMessageTime(item.createdAt)}</span><p>{item.message}</p></button>{expanded && <div className="case-intelligence">{latestInbound?.id && <PriorityFeedback messageId={latestInbound.id} initialScore={item.priorityScore ?? 5} />}{item.threadMessages && item.threadMessages.length > 0 && <div className="case-thread">{item.threadMessages.slice(-24).map((entry) => <div key={entry.id} className={`message ${entry.direction === "out" ? "out" : ""}`}><div className="message-bubble"><ReadableMessage text={entry.body} /><MessageAttachments messageId={entry.id} expected={entry.attachmentCount} /></div><div className="message-meta">{entry.direction === "out" ? "Du" : item.personName} · {channelLabel} · {formatMessageTime(entry.sentAt)}</div></div>)}</div>}{item.analysis ? <><div className="intel-label">AI-bedömning</div><strong>{item.analysis.summary}</strong><p><b>Intent:</b> {item.analysis.intent || "Inte fastställt"}</p><p>{item.analysis.priorityReason}</p>{item.recommendedAction && <span className="pill">{actionLabels[item.recommendedAction as RecommendedAction] ?? item.recommendedAction}</span>}{item.analysis.sendTiming && <div className="learning-notice"><div><strong>Föreslagen svarstid: {timingLabel[item.analysis.sendTiming.recommendation]}</strong><p>{item.analysis.sendTiming.rationale}</p></div></div>}<AIPlanner plan={item.analysis.planningSuggestion} /><div className="intel-label case-reply-label">Föreslaget svar · {item.analysis.draftTone || "Naturlig ton"}</div><textarea value={draft} onChange={(event) => { setDraft(event.target.value); setApprovalTaskId(""); setStatus(""); }} aria-label={`Föreslaget svar till ${item.personName}`} />{decision?.kind === "reply" && decision.status === "ready" && canSendInSource ? <div className="assistant-approval"><label><input type="checkbox" checked={approvalTaskId === decision.id} disabled={decisionWorking} onChange={(event) => setApprovalTaskId(event.target.checked ? decision.id : "")} /> Jag godkänner mottagaren och exakt det visade svaret.</label><button className="btn primary" disabled={approvalTaskId !== decision.id || decisionWorking} onClick={() => void approvePreparedReply()}><Send size={12} />{decisionWorking ? "Skickar…" : "Godkänn och skicka"}</button></div> : decision ? <div className="decision-status-row"><span className="pill">Beslutsstatus: {statusLabels[decision.status]}</span>{item.source === "slack" && draft.trim() ? <button className="btn" onClick={() => { void navigator.clipboard.writeText(draft).then(() => setCopied(true)).catch(() => setCopied(false)); }}>{copied ? "Kopierat – inget har skickats" : "Kopiera svar"}</button> : <button className="btn" onClick={() => onOpenAssistant(decision.id)}>Se detaljer</button>}</div> : <span className="pill">Förbereds automatiskt</span>}{latestInbound?.id && item.source !== "slack" && <ScheduledSendControl conversationId={item.id} messageId={latestInbound.id} source={item.source} body={draft} suggestedTiming={item.analysis.sendTiming?.recommendation} suggestedTimingReason={item.analysis.sendTiming?.rationale} disabled={decisionWorking} onScheduled={() => router.refresh()} />}{status && <p className="negative">{status}</p>}</> : <div className="learning-notice"><div><strong>Svarsförslag förbereds</strong><p>Solvani analyserar nya meddelanden i bakgrunden. Återkom om en kort stund.</p></div></div>}{status && !item.analysis && <p className="negative">{status}</p>}</div>}</div></article>;
 }
 
 function Today({ emails, channelCases, decisions, onOpenInbox, onOpenSource }: { emails: SyncedEmailConversation[]; channelCases: CommunicationCase[]; decisions: Record<string, InboxDecisionStatus>; onOpenInbox: () => void; onOpenSource: (source: Source) => void }) {
@@ -393,6 +377,35 @@ function ReadableMessage({ text }: { text: string }) {
 }
 
 type InboxDecisionStatus = { id: string; message_id: string; kind: TaskKind; status: TaskStatus; revision: number; updated_at: string };
+
+/**
+ * Both the email reader and connected-channel threads present the same
+ * persisted assistant task. Keep the approval request in one place so an
+ * edited visible draft is always saved before the server performs its normal
+ * revision, recipient, connection and duplicate-send checks.
+ */
+async function approveReplyDecision(task: InboxDecisionStatus, draft: string, originalDraft: string, onDecisionChange: (task: InboxDecisionStatus) => void) {
+  if (task.kind !== "reply" || task.status !== "ready") throw new Error("Beslutet behöver granskas eller förberedas klart först.");
+  let current = task;
+  if (draft.trim() !== originalDraft.trim()) {
+    const saved = await fetch("/api/assistant", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "save", id: current.id, revision: current.revision, edit: { draft, recipientPersonId: null, followUpAt: null } }),
+    });
+    const savedData = await saved.json() as { error?: string; task?: InboxDecisionStatus };
+    if (!saved.ok || !savedData.task) throw new Error(savedData.error ?? "Det redigerade svaret kunde inte sparas.");
+    current = savedData.task;
+    onDecisionChange(current);
+  }
+  const response = await fetch("/api/assistant", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "execute", id: current.id, revision: current.revision, approved: true }),
+  });
+  const data = await response.json() as { error?: string; task?: InboxDecisionStatus };
+  if (!response.ok || !data.task) throw new Error(data.error ?? "Utskicket kunde inte genomföras.");
+  onDecisionChange(data.task);
+  return data.task;
+}
 
 function SyncedInbox({ emails, people, decisions, onDecisionChange, onOpenAssistant }: { emails: SyncedEmailConversation[]; people: CommunicationPersonOption[]; decisions: Record<string, InboxDecisionStatus>; onDecisionChange: (task: InboxDecisionStatus) => void; onOpenAssistant: (taskId?: string) => void }) {
   const router = useRouter();
@@ -494,27 +507,7 @@ function SyncedInbox({ emails, people, decisions, onDecisionChange, onOpenAssist
     if (!currentDecision || currentDecision.kind !== "reply" || currentDecision.status !== "ready") return;
     setDecisionWorking(true); setDecisionMessage("");
     try {
-      // The inbox is a presentation of the same persisted task. When the
-      // owner edited the visible draft, persist that exact text first so the
-      // approval can never send an older proposal.
-      let task = currentDecision;
-      if (replyDraft.trim() !== selected.analysis?.draftResponse?.trim()) {
-        const saved = await fetch("/api/assistant", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "save", id: task.id, revision: task.revision, edit: { draft: replyDraft, recipientPersonId: null, followUpAt: null } }),
-        });
-        const savedData = await saved.json() as { error?: string; task?: InboxDecisionStatus };
-        if (!saved.ok || !savedData.task) throw new Error(savedData.error ?? "Det redigerade svaret kunde inte sparas.");
-        task = savedData.task;
-        onDecisionChange(task);
-      }
-      const response = await fetch("/api/assistant", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "execute", id: task.id, revision: task.revision, approved: true }),
-      });
-      const data = await response.json() as { error?: string; task?: InboxDecisionStatus };
-      if (!response.ok || !data.task) throw new Error(data.error ?? "Utskicket kunde inte genomföras.");
-      onDecisionChange(data.task);
+      await approveReplyDecision(currentDecision, replyDraft, selected.analysis?.draftResponse ?? "", onDecisionChange);
       setApprovalTaskId("");
       router.refresh();
     } catch (error) {
