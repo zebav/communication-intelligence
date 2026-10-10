@@ -7,9 +7,9 @@ Do not ask the owner to test this connector until every item under **Ready for t
 1. Create or select the Meta app that will own the Instagram integration.
 2. Add the Instagram API product and configure Instagram Login for an eligible professional account.
 3. Add this exact production redirect URI:
-   `https://communication-intelligence-blush.vercel.app/api/connectors/instagram/callback`
+   `https://www.solvani.app/api/connectors/instagram/callback`
 4. Configure the webhook callback:
-   `https://communication-intelligence-blush.vercel.app/api/connectors/instagram/webhook`
+   `https://www.solvani.app/api/connectors/instagram/webhook`
 5. Subscribe the app to Instagram messaging events.
 6. Request the minimum permissions declared in `src/lib/connectors/instagram.ts`.
 7. Complete Meta review before connecting accounts that are not app testers.
@@ -18,7 +18,9 @@ Do not ask the owner to test this connector until every item under **Ready for t
 
 - `INSTAGRAM_APP_ID`: Meta app identifier.
 - `INSTAGRAM_APP_SECRET`: Meta app secret. Never expose it to browser code.
-- `INSTAGRAM_REDIRECT_URI`: the exact production redirect URI above.
+- `INSTAGRAM_REDIRECT_URI`: the exact production redirect URI above. Do not
+  use a `communication-intelligence-*.vercel.app` alias: it can point at an
+  old deployment and cause Meta-signed webhooks to be rejected there.
 - `INSTAGRAM_WEBHOOK_VERIFY_TOKEN`: a new random secret shared only with Meta's webhook setup.
 - `META_GRAPH_API_VERSION`: approved Graph API version, for example `v23.0`.
 - `CREDENTIAL_ENCRYPTION_KEY`: already required by the email connectors.
@@ -42,7 +44,7 @@ Enable the Instagram variables for Production and Preview only when their callba
 - [ ] PR #37 has deployed successfully and is merged.
 - [ ] The Instagram work has been moved to its own branch and pull request.
 - [ ] All required Meta and Vercel values are configured.
-- [ ] Meta accepts both callback URLs and verifies the webhook token.
+- [ ] Meta accepts the stable Solvani callback and verifies the webhook token.
 - [ ] The Instagram account is Professional (Creator or Business) and available to the Meta app.
 - [ ] Preview is Ready and automated tests pass.
 - [ ] An end-to-end test confirms receive, deduplicate, person matching, AI draft, owner approval, and send.

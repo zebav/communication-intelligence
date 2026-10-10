@@ -2,11 +2,38 @@ import { randomBytes } from "node:crypto";
 import { instagramConnector } from "./instagram";
 
 export const INSTAGRAM_OAUTH_COOKIE_PATH = "/api/connectors/instagram";
+export const SOLVANI_PRODUCTION_ORIGIN = "https://www.solvani.app";
 
-export function instagramRedirectUri(origin: string, environment?: { INSTAGRAM_REDIRECT_URI?: string; VERCEL_PROJECT_PRODUCTION_URL?: string }) {
+type InstagramOAuthEnvironment = {
+  INSTAGRAM_REDIRECT_URI?: string;
+  VERCEL_PROJECT_PRODUCTION_URL?: string;
+  VERCEL_ENV?: string;
+  NODE_ENV?: string;
+};
+
+function isStableSolvaniCallback(value: string | undefined) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:"
+      && (url.hostname === "www.solvani.app" || url.hostname === "solvani.app")
+      && url.pathname === "/api/connectors/instagram/callback";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Meta callbacks must use one stable public origin. Earlier deployments used a
+ * changing Vercel alias, which meant a reconnect or webhook configuration
+ * could silently point at an old build. Preview requests safely bounce to the
+ * stable app in production; local development still uses its supplied origin.
+ */
+export function instagramRedirectUri(origin: string, environment?: InstagramOAuthEnvironment) {
   const configuredEnvironment = environment ?? process.env;
-  if (configuredEnvironment.INSTAGRAM_REDIRECT_URI) return configuredEnvironment.INSTAGRAM_REDIRECT_URI;
-  if (configuredEnvironment.VERCEL_PROJECT_PRODUCTION_URL) return `https://${configuredEnvironment.VERCEL_PROJECT_PRODUCTION_URL}/api/connectors/instagram/callback`;
+  if (isStableSolvaniCallback(configuredEnvironment.INSTAGRAM_REDIRECT_URI)) return configuredEnvironment.INSTAGRAM_REDIRECT_URI!;
+  const runningInVercel = Boolean(configuredEnvironment.VERCEL_PROJECT_PRODUCTION_URL || configuredEnvironment.VERCEL_ENV);
+  if (configuredEnvironment.NODE_ENV === "production" || runningInVercel) return `${SOLVANI_PRODUCTION_ORIGIN}/api/connectors/instagram/callback`;
   return `${origin}/api/connectors/instagram/callback`;
 }
 
