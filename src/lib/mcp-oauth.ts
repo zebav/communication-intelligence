@@ -13,6 +13,11 @@ export function issueOpaqueToken(prefix: string, bytes = 32) {
   return prefix + randomBytes(bytes).toString("base64url");
 }
 
+/** A non-secret identifier that is safe to show in Settings and audit events. */
+export function manualMcpTokenFingerprint(token: string) {
+  return token.slice(-8);
+}
+
 export function normalizeScopes(scope?: string | null) {
   const requested = new Set((scope ?? "").split(/\s+/).filter(Boolean));
   const allowed = ["contacts.read", "contacts.write"].filter((item) => requested.has(item));
@@ -25,15 +30,30 @@ export function hasScope(scope: string, required: string) {
 
 export async function resolveMcpAccessToken(authHeader: string | null) {
   if (!authHeader?.startsWith("Bearer ")) return null;
-  const tokenHash = hashToken(authHeader.slice(7));
+  const presented = authHeader.slice(7).trim();
+  if (!presented) return null;
+  const tokenHash = hashToken(presented);
   const db = createAdminClient();
   const { data, error } = await db.from("solvani_oauth_tokens")
     .select("owner_id,scope,access_expires_at,revoked_at")
     .eq("access_token_hash", tokenHash)
     .maybeSingle();
-  if (error || !data || data.revoked_at) return null;
-  if (Date.parse(data.access_expires_at) <= Date.now()) return null;
-  return { ownerId: data.owner_id as string, scope: data.scope as string };
+  if (!error && data && !data.revoked_at && Date.parse(data.access_expires_at) > Date.now()) {
+    return { ownerId: data.owner_id as string, scope: data.scope as string, kind: "oauth" as const };
+  }
+
+  // Manual tokens are intentionally a separate table: OAuth credentials rotate
+  // and expire differently, while this personal bearer token is revocable and
+  // never has a refresh token or plaintext server-side representation.
+  const { data: manual, error: manualError } = await db.from("solvani_mcp_tokens")
+    .select("id,owner_id,scope,expires_at,revoked_at")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+  if (manualError || !manual || manual.revoked_at || Date.parse(manual.expires_at) <= Date.now()) return null;
+  // Usage telemetry is deliberately best effort: authentication must stay
+  // available if a non-critical timestamp write is temporarily unavailable.
+  void db.from("solvani_mcp_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", manual.id);
+  return { ownerId: manual.owner_id as string, scope: manual.scope as string, kind: "manual" as const };
 }
 
 export async function validateChatGptClient(clientId: string, redirectUri: string) {
