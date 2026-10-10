@@ -64,10 +64,20 @@ export async function GET(request: NextRequest) {
           ? await database.from("connections").select("id", { count: "exact", head: true }).eq("owner_id", job.owner_id).eq("provider", provider).eq("status", "connected")
           : null;
         const expectedMailboxCount = expected?.count ?? 0;
-        const missingMailboxPass = Boolean(provider && !expected?.error && expectedMailboxCount > 0 && result.accounts === 0);
+        // A valid source-worker response always includes its bounded account
+        // count. Treat a missing counter exactly like zero work: it usually
+        // means the internal request returned a non-worker response (for
+        // example an HTML/error boundary) that happened to carry HTTP 200.
+        // Completing that job would again mask stale mailboxes as healthy.
+        const missingMailboxPass = Boolean(provider && !expected?.error && expectedMailboxCount > 0 && (result.accounts == null || result.accounts === 0));
         if (missingMailboxPass) {
           const status = retryStatusFor(job);
-          await completeAutomationJob(database, job, { status, errorCode: "mailbox_sync_no_accounts", httpStatus: response.status, result });
+          await completeAutomationJob(database, job, {
+            status,
+            errorCode: result.accounts == null ? "mailbox_sync_unverified" : "mailbox_sync_no_accounts",
+            httpStatus: response.status,
+            result,
+          });
           return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: status };
         }
         await completeAutomationJob(database, job, { status: "completed", httpStatus: response.status, result });
