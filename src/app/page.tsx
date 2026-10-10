@@ -5,6 +5,7 @@ import type { View } from "@/components/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { defaultUniversalProfile, normalizeUniversalProfile } from "@/lib/communication-profile";
 import { recentWindowStartIso } from "@/lib/recent-window";
+import { deduplicatePersonConversations } from "@/lib/person-conversations";
 import { logOperation } from "@/lib/observability";
 import { newTraceId } from "@/lib/automation-jobs";
 import type { CalendarLearningEvent, ChannelConnection, CommunicationCase, CommunicationOutcome, CommunicationPersonOption, DeepAnalysis, FollowUpCommitment, IntelligentPerson, LearningSignal, Source, SyncedEmailConversation, UniversalCommunicationProfile } from "@/lib/domain";
@@ -116,7 +117,7 @@ export default async function Home({ searchParams }: HomeProps) {
   // Keep the first authenticated render small. Embedding every message for every
   // conversation made the landing page grow with the entire mailbox history.
   // Recent message context is loaded below as one bounded payload instead.
-  const conversationFields = "id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule)";
+  const conversationFields = "id,external_conversation_id,title,source,conversation_type,created_at,last_message_at,summary,priority_score,recommended_action,people(id,display_name,relationship_type,manual_priority,email_handling_rule)";
   const overviewCutoff = recentWindowStartIso(31);
   const needsPeople = ["people", "inbox", "cases", "settings", "intelligence", "assistant", "calendar"].includes(initialView);
   const needsConversationDetail = ["today", "inbox", "cases", "calendar"].includes(initialView);
@@ -353,14 +354,7 @@ export default async function Home({ searchParams }: HomeProps) {
 
   const intelligentPeople: IntelligentPerson[] = (personRows ?? []).map((person) => {
     const allPersonConversations = conversationsByPerson.get(person.id) ?? [];
-    const personConversations = [...allPersonConversations.reduce((grouped, row) => {
-      const key = row.source === "email" ? `email:${row.id}` : `${row.source}:imported-thread`;
-      const current = grouped.get(key);
-      const rowTime = String(row.last_message_at ?? row.created_at ?? "");
-      const currentTime = String(current?.last_message_at ?? current?.created_at ?? "");
-      if (!current || rowTime > currentTime) grouped.set(key, row);
-      return grouped;
-    }, new Map<string, (typeof allPersonConversations)[number]>()).values()];
+    const personConversations = deduplicatePersonConversations(allPersonConversations);
     const responseConversations = personConversations.filter((row) => {
       const messages = Array.isArray(row.messages) ? row.messages : [];
       const latestInbound = [...messages].filter((message: { direction?: string | null; sent_at?: string | null }) => message.direction === "in").sort((a: { sent_at?: string | null }, b: { sent_at?: string | null }) => String(b.sent_at).localeCompare(String(a.sent_at)))[0];
