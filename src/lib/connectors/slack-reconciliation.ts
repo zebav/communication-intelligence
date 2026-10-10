@@ -40,7 +40,8 @@ function prioritizedConversations(channels: SlackChannel[]) {
 }
 
 /** Bounded, read-only import. It never posts to Slack. */
-export async function reconcileSlackConnection(connectionId: string) {
+export async function reconcileSlackConnection(connectionId: string, options: { analyze?: boolean } = {}) {
+  const analyzeImportedMessages = options.analyze ?? true;
   const db = createAdminClient();
   const { data: connection } = await db.from("connections").select("id,owner_id,account_name,encrypted_credentials,scopes,token_metadata").eq("id", connectionId).eq("provider", "slack").eq("status", "connected").maybeSingle();
   const key = process.env.CREDENTIAL_ENCRYPTION_KEY;
@@ -123,7 +124,10 @@ export async function reconcileSlackConnection(connectionId: string) {
       const { data: saved, error } = await db.from("messages").upsert({ owner_id: connection.owner_id, conversation_id: savedConversation.data.id, external_message_id: `slack:${channelId}:${timestamp}`, direction: "in", sender_identity_id: person.identityId, source: "slack", body_text: text, sent_at: sentAt, classification: mentionedOwner ? "Action Required" : channelMode === "work" ? "Information Only" : "Personal", importance_score: mentionedOwner ? 9 : channelMode === "private" ? 6 : 4, metadata: { provider: "slack", connection_id: connection.id, channel_id: channelId, channel_name: channel.name ?? null, slack_channel_mode: channelMode, slack_mentioned_owner: mentionedOwner }, processed_at: null }, { onConflict: "owner_id,source,external_message_id", ignoreDuplicates: true }).select("id").maybeSingle();
       if (error) throw error; if (saved) { imported += 1; analyses.push({ ownerId: connection.owner_id, conversationId: savedConversation.data.id, messageId: saved.id, source: "slack" }); }
   }
-  await Promise.allSettled(analyses.slice(0, 3).map(analyzeIncomingInstagramMessage));
+  // The user-triggered sync still prepares a few imports immediately. The
+  // scheduled worker opts out and owns the queue once per pass, avoiding a
+  // race where the same message is analysed twice.
+  if (analyzeImportedMessages) await Promise.allSettled(analyses.slice(0, 3).map(analyzeIncomingInstagramMessage));
   await db.from("connections").update({
     health_status: unavailableConversations > 0 ? "degraded" : "healthy",
     last_sync_at: new Date().toISOString(),
