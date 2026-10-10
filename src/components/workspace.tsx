@@ -774,6 +774,10 @@ function Connections({ connections }: { connections: ChannelConnection[] }) {
   const accountSyncSummary = (connection: ChannelConnection) => {
     if (connection.healthStatus === "reconnect_required") return "Återanslutning krävs";
     if (connection.healthStatus === "error") return "Kontroll behövs";
+    // WhatsApp is delivered by its verified webhook, not fetched through a
+    // periodic mailbox poll. A missing `last_sync_at` is therefore expected
+    // before the first inbound message and must not look like stale data.
+    if (connection.provider === "whatsapp-business" && !connection.lastSyncAt) return "Direktuppdatering aktiv";
     if (!connection.lastSyncAt) return "Inte synkroniserat ännu";
     return `Senast synkat: ${new Intl.DateTimeFormat("sv-SE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(connection.lastSyncAt))}`;
   };
