@@ -42,6 +42,22 @@ export type PreparedDecision = {
   };
 };
 
+/**
+ * A small, typed request for owner input. The request itself may live in the
+ * saved decision, but its value never does: values are stored in the existing
+ * encrypted Personal Knowledge Vault with an explicit task-only use scope.
+ */
+export const taskInputKinds = ["text", "email", "phone", "date", "account_number", "other"] as const;
+export type TaskInputKind = typeof taskInputKinds[number];
+export type TaskInputRequirement = {
+  key: string;
+  label: string;
+  description: string;
+  kind: TaskInputKind;
+  sensitivity: "personal" | "sensitive" | "restricted";
+  persistence: "task_only" | "reusable" | "restricted_reusable";
+};
+
 export type Plan = {
   evidence: Evidence; draft: string; originalDraft: string; reason: string;
   recipientPersonId: string | null; recipient: string; recipientName: string;
@@ -49,6 +65,8 @@ export type Plan = {
   preparation?: PreparedDecision;
   /** Task-scoped provenance, created during preparation rather than on every render. */
   context?: DecisionContext;
+  /** Missing information is a request, never a place for the submitted value. */
+  inputRequirements?: TaskInputRequirement[];
 };
 export type Task = { id: string; message_id: string; kind: TaskKind; status: TaskStatus; revision: number; plan: Plan; result: Record<string, unknown>; created_at: string; updated_at: string; observedReplyAt?: string };
 export type DecisionCard = {
@@ -282,7 +300,7 @@ export function taskBucket(task: Task, now = Date.now()): "decision" | "ready" |
  * waiting for someone else, without creating another task record.
  */
 export function taskNeedsOwnerInput(task: Task) {
-  if (task.plan.preparation?.status === "needs_input") return true;
+  if (task.plan.inputRequirements?.length) return true;
   return Array.isArray(task.result.browserMissingInformation) && task.result.browserMissingInformation.length > 0;
 }
 
@@ -291,6 +309,8 @@ export function taskStatusLabel(task: Task) {
 }
 
 export function taskInputSummary(task: Task) {
+  const requested = task.plan.inputRequirements?.map((item) => item.label).filter(Boolean) ?? [];
+  if (requested.length) return requested.slice(0, 3);
   const runtime = Array.isArray(task.result.browserMissingInformation) ? task.result.browserMissingInformation : [];
   const labels = runtime.flatMap((item) => item && typeof item === "object" && "label" in item && typeof item.label === "string" ? [item.label] : []);
   if (labels.length) return labels.slice(0, 3);

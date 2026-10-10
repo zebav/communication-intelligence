@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { approvalBrief, candidateRank, conversationDecisionKey, decisionCard, isNoteworthy, keepCurrentConversationCandidate, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, taskNeedsOwnerInput, taskStatusLabel, type Evidence, type Task } from "./model";
+import { approvalBrief, candidateRank, conversationDecisionKey, decisionCard, isNoteworthy, keepCurrentConversationCandidate, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, taskInputSummary, taskNeedsOwnerInput, taskStatusLabel, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
@@ -9,6 +9,13 @@ describe("action discovery", () => {
     const value = { ...task(), status: "waiting" as const, result: { browserMissingInformation: [{ key: "policy", label: "försäkringsnummer" }] } };
     expect(taskNeedsOwnerInput(value)).toBe(true);
     expect(taskStatusLabel(value)).toBe("Behöver din uppgift");
+  });
+  it("keeps a typed task request separate from the saved decision value", () => {
+    const value = { ...task(), kind: "meeting" as const, status: "decision" as const, plan: { ...makePlan(example, "meeting"), inputRequirements: [{ key: "meeting_date", label: "vilken dag som passar", description: "Välj en dag.", kind: "date" as const, sensitivity: "personal" as const, persistence: "task_only" as const }] } };
+    expect(taskNeedsOwnerInput(value)).toBe(true);
+    expect(taskStatusLabel(value)).toBe("Behöver din uppgift");
+    expect(taskInputSummary(value)).toEqual(["vilken dag som passar"]);
+    expect(JSON.stringify(value.plan)).not.toContain("2026-10-10");
   });
   it("keeps one current candidate for a conversation burst", () => {
     const first = makePlan({ ...example, messageId: "m-old", sentAt: "2026-10-01T10:00:00Z" }, "reply");

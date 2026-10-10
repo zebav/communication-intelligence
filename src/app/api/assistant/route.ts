@@ -12,6 +12,7 @@ import { chooseAdvisorConversation } from "@/lib/assistant/follow-up";
 import { sendApprovedGmailReply } from "@/lib/assistant/gmail-reply";
 import { readDataIngestionHealth } from "@/lib/data-ingestion-health";
 import { sendOutlookFollowUp } from "@/lib/assistant/outlook-follow-up";
+import { readTaskInputs, saveTaskInput } from "@/lib/assistant/task-inputs";
 import { POST as outlookReply } from "@/app/api/connectors/microsoft/reply/route";
 import { POST as outlookForward } from "@/app/api/connectors/microsoft/forward/route";
 import { POST as instagramReply } from "@/app/api/connectors/instagram/reply/route";
@@ -23,6 +24,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("dismiss_candidate"), messageId: z.string().uuid(), kind: z.enum(kinds), scope: z.enum(["message", "sender"]).optional() }),
   z.object({ action: z.literal("save"), ...base, edit: editSchema }),
   z.object({ action: z.literal("generate"), ...base }),
+  z.object({ action: z.literal("provide_input"), ...base, input: z.object({ key: z.string().trim().min(1).max(64), value: z.string().trim().min(1).max(3000) }) }),
   z.object({ action: z.literal("execute"), ...base, approved: z.literal(true) }),
   z.object({ action: z.literal("dismiss"), ...base }),
   z.object({ action: z.literal("complete"), ...base, note: z.string().trim().min(5).max(1000) }),
@@ -222,19 +224,21 @@ export async function POST(request: NextRequest) {
     if (a.action === "start") {
       const e = await readEvidence(db, owner, a.messageId);
       if (e.direction !== "in" && a.kind !== "follow_up") throw new Error("Välj ett inkommande originalmeddelande.");
-      // The owner explicitly asked to prepare this decision. Research/planning may run here,
-      // but no external message, calendar booking or website side effect is authorized.
+      // Claim the canonical task before preparation. This gives missing owner
+      // information a durable home without placing its values in the task plan.
       const initialPlan = makePlan(e, a.kind);
-      const { prepareDecisionPlan } = await import("@/lib/assistant/preparation");
-      const preparedPlan = await prepareDecisionPlan(db, owner, initialPlan, a.kind);
       const { data, error } = await db.from("assistant_tasks").upsert({
-        owner_id: owner, message_id: e.messageId, kind: a.kind, plan: preparedPlan,
+        owner_id: owner, message_id: e.messageId, kind: a.kind, plan: initialPlan,
       }, { onConflict: "owner_id,message_id,kind", ignoreDuplicates: true }).select("*").maybeSingle();
       if (error) throw new Error("Uppdraget kunde inte sparas.");
       if (data) {
         const created = data as Task;
+        // The owner explicitly asked to prepare this decision. Research/planning may run here,
+        // but no external message, calendar booking or website side effect is authorized.
+        const { prepareDecisionPlan } = await import("@/lib/assistant/preparation");
+        const preparedPlan = await prepareDecisionPlan(db, owner, initialPlan, a.kind);
         const canSendPrepared = !sendCapability(preparedPlan, a.kind) && ["reply", "follow_up", "meeting"].includes(a.kind) && preparedPlan.preparation?.status === "ready";
-        return json({ task: canSendPrepared ? await changeTask(db, owner, created, "ready", preparedPlan) : created });
+        return json({ task: await changeTask(db, owner, created, canSendPrepared ? "ready" : "decision", preparedPlan) });
       }
       const { data: existing, error: read } = await db.from("assistant_tasks").select("*").eq("owner_id", owner).eq("message_id", e.messageId).eq("kind", a.kind).single();
       if (read) throw new Error("Uppdraget finns redan men kunde inte läsas.");
@@ -247,6 +251,15 @@ export async function POST(request: NextRequest) {
       return json({ saved: true });
     }
     if (task.revision !== a.revision) throw new Error("Uppdraget har ändrats. Hämta och granska den senaste versionen.");
+    if (a.action === "provide_input") {
+      if (!['decision', 'ready'].includes(task.status)) throw new Error("Denna uppgift kan inte längre ändras.");
+      await saveTaskInput(owner, task, a.input);
+      const values = await readTaskInputs(db, owner, task);
+      const { prepareDecisionPlan } = await import("@/lib/assistant/preparation");
+      const preparedPlan = await prepareDecisionPlan(db, owner, task.plan, task.kind, values);
+      const canSendPrepared = !sendCapability(preparedPlan, task.kind) && ["reply", "follow_up", "meeting"].includes(task.kind) && preparedPlan.preparation?.status === "ready";
+      return json({ task: await changeTask(db, owner, task, canSendPrepared ? "ready" : "decision", preparedPlan) });
+    }
     if (a.action === "reconcile") {
       if (task.kind !== "meeting" || !["decision", "ready"].includes(task.status)) return json({ task });
       const { data: hold, error } = await db.from("calendar_holds").select("id,external_event_id").eq("owner_id", owner).eq("conversation_id", task.plan.evidence.conversationId).eq("status", "confirmed").gte("created_at", task.created_at).order("created_at", { ascending: false }).limit(1).maybeSingle();

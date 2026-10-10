@@ -69,7 +69,7 @@ function homeAddress(entries: Awaited<ReturnType<typeof listKnowledgeEntries>>) 
   )?.value ?? "";
 }
 
-async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan, sharedContext: DecisionContext): Promise<Plan> {
+async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan, sharedContext: DecisionContext, taskInputs: Record<string, string>): Promise<Plan> {
   const [messages, settings] = await Promise.all([
     db.from("messages").select("id,body_text,sent_at,direction,source").eq("owner_id", owner).eq("conversation_id", plan.evidence.conversationId)
       .order("sent_at", { ascending: false }).order("id").limit(16),
@@ -87,7 +87,8 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan,
   const intent = await analyzeCalendarIntent({ ownerId: owner, timezone: settings.data.timezone, messages: evidence });
   const defaults = meetingDefaults[intent.meetingType] ?? meetingDefaults.OTHER;
   const duration = intent.durationMinutes ?? defaults.durationMinutes;
-  const resolvedDate = intent.date ?? resolveRelativeMeetingDate(evidence, settings.data.timezone);
+  const suppliedDate = /^\d{4}-\d{2}-\d{2}$/.test(taskInputs.meeting_date ?? "") ? taskInputs.meeting_date : null;
+  const resolvedDate = intent.date ?? suppliedDate ?? resolveRelativeMeetingDate(evidence, settings.data.timezone);
 
   let preparation: PreparedDecision = {
     status: "needs_input",
@@ -110,7 +111,7 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan,
       intent.questions.length ? `Frågor som behöver klargöras: ${intent.questions.join(" | ")}` : "",
     ].filter(Boolean).join("\n");
     const draft = await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${context}`);
-    return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation };
+    return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation, inputRequirements: [] };
   }
 
   if (!resolvedDate) {
@@ -120,7 +121,7 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan,
       intent.questions.length ? `Be personen om: ${intent.questions.join(" | ")}` : "",
     ].filter(Boolean).join("\n");
     const draft = await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${context}`);
-    return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation };
+    return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation, inputRequirements: [{ key: "meeting_date", label: "vilken dag som passar", description: "Välj den dag du vill att Solvani ska kontrollera i kalendern.", kind: "date", sensitivity: "personal", persistence: "task_only" }] };
   }
 
   const slotsResult = await calendarSuggestions(db, owner, {
@@ -188,7 +189,7 @@ async function meetingPreparation(db: SupabaseClient, owner: string, plan: Plan,
   ].filter(Boolean).join("\n");
 
   const draft = await generateDraft(db, owner, plan, false, `${decisionContextPrompt(sharedContext)}\n${context}`);
-  return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation };
+  return { ...plan, context: sharedContext, draft, originalDraft: draft, preparation, inputRequirements: [] };
 }
 
 async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan, sharedContext: DecisionContext): Promise<Plan> {
@@ -266,9 +267,9 @@ async function researchPreparation(db: SupabaseClient, owner: string, plan: Plan
   }
 }
 
-export async function prepareDecisionPlan(db: SupabaseClient, owner: string, plan: Plan, kind: TaskKind): Promise<Plan> {
+export async function prepareDecisionPlan(db: SupabaseClient, owner: string, plan: Plan, kind: TaskKind, taskInputs: Record<string, string> = {}): Promise<Plan> {
   const sharedContext = await retrieveDecisionContext(db, owner, plan).catch(() => ({ version: "v1" as const, preparedAt: new Date().toISOString(), items: [] }));
-  if (kind === "meeting") return meetingPreparation(db, owner, plan, sharedContext);
+  if (kind === "meeting") return meetingPreparation(db, owner, plan, sharedContext, taskInputs);
   if (kind === "website") return researchPreparation(db, owner, plan, sharedContext);
   // Opening a reply/follow-up decision must be fast and must not spend an AI call
   // before the owner has chosen to ask for a draft. Draft generation remains an
