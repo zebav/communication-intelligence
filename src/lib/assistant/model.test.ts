@@ -1,10 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { approvalBrief, candidateRank, decisionCard, isNoteworthy, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, type Evidence, type Task } from "./model";
+import { approvalBrief, candidateRank, conversationDecisionKey, decisionCard, isNoteworthy, keepCurrentConversationCandidate, makePlan, mayTransition, propose, sendCapability, survivesLowerPrioritySender, taskBucket, type Evidence, type Task } from "./model";
 import { executeApprovedTask } from "./execution";
 
 export const example: Evidence = { messageId: "m1", conversationId: "c1", personId: "p1", personName: "Testkontakt", source: "email", connectionId: "a1", provider: "microsoft-graph", account: "test@example.invalid", title: "Kan du svara?", body: "Kan du granska detta?", sentAt: "2026-09-17T10:00:00Z", direction: "in", lastUserAt: null, lastOtherAt: "2026-09-17T10:00:00Z", classification: "Business", priority: 7, analysis: { requiresReply: true, draftResponse: "Tack, vad behöver du hjälp med?" }, recipient: "contact@example.invalid", version: "1" };
 const task = (): Task => ({ id: "t1", message_id: "m1", kind: "reply", status: "ready", revision: 2, plan: makePlan(example, "reply"), result: {}, created_at: example.sentAt, updated_at: example.sentAt });
 describe("action discovery", () => {
+  it("keeps one current candidate for a conversation burst", () => {
+    const first = makePlan({ ...example, messageId: "m-old", sentAt: "2026-10-01T10:00:00Z" }, "reply");
+    const latest = makePlan({ ...example, messageId: "m-new", sentAt: "2026-10-01T10:05:00Z" }, "meeting");
+    const other = makePlan({ ...example, messageId: "m-other", conversationId: "c-other" }, "reply");
+    const kept = keepCurrentConversationCandidate([{ plan: latest }, { plan: first }, { plan: other }]);
+    expect(kept).toEqual([{ plan: latest }, { plan: other }]);
+    expect(conversationDecisionKey(latest.evidence)).toBe(`conversation:${example.conversationId}`);
+  });
   it("proposes a reply only from analysis evidence", () => expect(propose(example)).toEqual(["reply"]));
   it.each(["Marketing", "Newsletter", "Spam", "Information Only", "Notification", "Receipt / Invoice"])("does not turn %s priority 10 into an action", classification => expect(propose({ ...example, classification, priority: 10 })).toEqual([]));
   it("does not let a wrongly classified commercial newsletter enter the notification views", () => {

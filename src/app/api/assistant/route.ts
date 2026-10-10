@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createMobileClient } from "@/lib/supabase/mobile";
 import { logOperation } from "@/lib/observability";
 import { measureServerTiming, serverTimingHeader, type ServerTiming } from "@/lib/server-timing";
-import { candidateRank, editSchema, isNoteworthy, kinds, makePlan, propose, sendCapability, survivesLowerPrioritySender, type Evidence, type Task } from "@/lib/assistant/model";
+import { candidateRank, conversationDecisionKey, editSchema, isNoteworthy, keepCurrentConversationCandidate, kinds, makePlan, propose, sendCapability, survivesLowerPrioritySender, type Evidence, type Task } from "@/lib/assistant/model";
 import { changeTask, generateDraft, persistDraftAnalysis, readCandidates, readEvidence, readTask, verifiedRecipient, type NotificationPeriod } from "@/lib/assistant/repository";
 import { executeApprovedTask } from "@/lib/assistant/execution";
 import { browserReadiness } from "@/lib/assistant/browser-readiness";
@@ -95,13 +95,15 @@ export async function GET(request: Request) {
       const evidence = rule.evidence && typeof rule.evidence === "object" && !Array.isArray(rule.evidence) ? rule.evidence as Record<string, unknown> : {};
       return evidence.assistant_relevance === "sender_lower_priority" && typeof rule.person_id === "string";
     }).map(rule => `${rule.source}:${rule.person_id}`));
-    const candidates = page.messages.flatMap(e => dismissedMessageIds.has(e.messageId) || ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e)
+    const candidateRows = page.messages.flatMap(e => dismissedMessageIds.has(e.messageId) || ignoredSenders.has(`${e.source}:${e.personId}`) ? [] : propose(e)
       .filter(() => !lowerPrioritySenders.has(`${e.source}:${e.personId}`) || survivesLowerPrioritySender(e))
       .filter(kind => !keys.has(`${e.messageId}:${kind}`))
       .map(kind => ({ messageId: e.messageId, kind, plan: makePlan(e, kind), rank: candidateRank(e, kind) - (lowerPrioritySenders.has(`${e.source}:${e.personId}`) ? 20 : 0) })))
       .sort((a, b) => b.rank - a.rank)
+    const candidates = keepCurrentConversationCandidate(candidateRows)
       .map(({ messageId, kind, plan }) => ({ messageId, kind, plan }));
     const candidateMessageIds = new Set(candidates.map(candidate => candidate.messageId));
+    const candidateConversationKeys = new Set(candidates.map(candidate => conversationDecisionKey(candidate.plan.evidence)));
     // An information thread can contain several imported copies of the same
     // notice. The notification centre should show the latest useful message,
     // not make the owner read the same thread repeatedly. We deliberately use
@@ -112,8 +114,8 @@ export async function GET(request: Request) {
       .filter((e): e is Evidence => !dismissedMessageIds.has(e.messageId) && !candidateMessageIds.has(e.messageId) && !ignoredSenders.has(`${e.source}:${e.personId}`) && (!lowerPrioritySenders.has(`${e.source}:${e.personId}`) || survivesLowerPrioritySender(e)) && isNoteworthy(e))
       .sort((a, b) => b.priority - a.priority || b.sentAt.localeCompare(a.sentAt))
       .filter((e) => {
-        const fallbackTitle = `${e.source}:${e.personId ?? e.personName}:${e.title.trim().toLocaleLowerCase()}`;
-        const key = e.conversationId || fallbackTitle;
+        const key = conversationDecisionKey(e);
+        if (candidateConversationKeys.has(key)) return false;
         if (seenNotes.has(key)) return false;
         seenNotes.add(key);
         return true;

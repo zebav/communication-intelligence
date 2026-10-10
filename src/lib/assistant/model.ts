@@ -56,6 +56,29 @@ export type DecisionCard = {
   targetUrl: string;
 };
 
+/**
+ * One unresolved conversation must have one actionable recommendation. A
+ * provider can deliver several messages in a burst, or replay older messages
+ * during recovery; presenting all of them as separate cards makes the owner
+ * decide the same thing repeatedly. Call this only after candidates have been
+ * ordered by their deterministic rank and recency, so the first candidate is
+ * the best current representative.
+ */
+export function conversationDecisionKey(evidence: Pick<Evidence, "conversationId" | "source" | "personId" | "personName" | "title">) {
+  if (evidence.conversationId) return `conversation:${evidence.conversationId}`;
+  return `fallback:${evidence.source}:${evidence.personId ?? evidence.personName}:${evidence.title.trim().toLocaleLowerCase()}`;
+}
+
+export function keepCurrentConversationCandidate<T extends { plan: Pick<Plan, "evidence"> }>(candidates: T[]) {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const key = conversationDecisionKey(candidate.plan.evidence);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** A compact, deterministic contract shown at the decision point. It is
  * derived only from the stored plan: the owner never approves a fresh model
  * interpretation that differs from what the executor will use. */
