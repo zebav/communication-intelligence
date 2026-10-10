@@ -8,12 +8,21 @@ export type MediaFailure = {
   retryable: boolean;
 };
 
-function messageOf(error: unknown) {
-  return error instanceof Error && error.message ? error.message.slice(0, 120) : "media_worker_failed";
+function safeMediaFailureCode(error: unknown) {
+  const raw = error instanceof Error ? error.message : "";
+  if (["vault_upload_failed", "vault_asset_save_failed", "reconnect_required", "processing_timeout", "connection_unavailable", "encryption_not_configured", "unsupported_provider", "credential_update_failed", "missing_connection", "gmail_message_id_missing", "gmail_attachment_id_missing", "media_queue_unavailable"].includes(raw)) return raw;
+  // Keep only a provider status code. Response text and file identifiers must
+  // never enter the durable lifecycle or operational logs.
+  const providerCode = raw.match(/^(?:gmail_(?:message|attachment)|outlook_attachments|media_fetch|whatsapp_media|audio_transcription)_(400|401|403|408|413|429|5\d\d)$/);
+  if (providerCode) return providerCode[0];
+  if (/^document_analysis_(400|401|403|408|413|429|5\d\d)_[a-z0-9_-]+$/i.test(raw)) return `document_analysis_${raw.split("_")[2]}`;
+  if (/^openai_(400|401|403|408|413|429|5\d\d)_[a-z0-9_-]+$/i.test(raw)) return `openai_${raw.split("_")[1]}`;
+  if (["audio_transcript_empty", "document_analysis_empty", "media_analysis_empty"].includes(raw)) return raw;
+  return "media_worker_failed";
 }
 
 export function classifyMediaFailure(error: unknown): MediaFailure {
-  const code = messageOf(error);
+  const code = safeMediaFailureCode(error);
   if (code === "vault_upload_failed") return { code, stage: "storage", retryable: true };
   if (code === "vault_asset_save_failed") return { code, stage: "persistence", retryable: true };
   if (code === "reconnect_required" || code.includes("connection_") || code.includes("credential_")) return { code, stage: "connection", retryable: false };

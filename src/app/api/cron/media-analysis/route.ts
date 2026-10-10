@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     // scheduled cron intentionally omits it and processes a small fair slice
     // of the global queue, so one owner's backfill cannot dominate a run.
     const result = await processPendingEmailMediaJobs(database, 3, ownerId ?? undefined);
-    logOperation({ route: "/api/cron/media-analysis", operation: "email_media_analysis", outcome: result.failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { owner_scoped: ownerId ? 1 : 0, scanned: result.scanned, processed: result.processed, failed: result.failed } });
+    logOperation({ route: "/api/cron/media-analysis", operation: "email_media_analysis", outcome: result.failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { owner_scoped: ownerId ? 1 : 0, scanned: result.scanned, processed: result.processed, failed: result.failed, failure_codes: result.failureCodes } });
     return NextResponse.json(result);
   } catch (error) {
     logOperation({ route: "/api/cron/media-analysis", operation: "email_media_analysis", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), error });

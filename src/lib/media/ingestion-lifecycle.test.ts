@@ -13,4 +13,8 @@ describe("media ingestion lifecycle", () => {
     expect(mediaFailureUpdate(new Error("reconnect_required"), 1, now)).toMatchObject({ state: "dead_letter", failed_stage: "connection", next_retry_at: null });
     expect(mediaFailureUpdate(new Error("vault_upload_failed"), 3, now)).toMatchObject({ state: "dead_letter", failed_stage: "storage", next_retry_at: null });
   });
+
+  it("never stores unknown worker text as a durable failure code", () => {
+    expect(classifyMediaFailure(new Error("private filename and provider response"))).toEqual({ code: "media_worker_failed", stage: "unknown", retryable: false });
+  });
 });

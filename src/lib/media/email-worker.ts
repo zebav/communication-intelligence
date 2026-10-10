@@ -7,7 +7,7 @@ import { googleGmailConnector } from "@/lib/connectors/google-gmail";
 import { microsoftGraphConnector } from "@/lib/connectors/microsoft-graph";
 import { analyzeStoredMedia } from "@/lib/media/analysis";
 import { isDecorativeEmailSignatureAttachment } from "@/lib/vault/email-attachment-filter";
-import { mediaFailureUpdate } from "@/lib/media/ingestion-lifecycle";
+import { classifyMediaFailure, mediaFailureUpdate } from "@/lib/media/ingestion-lifecycle";
 
 type Credentials = { accessToken: string; refreshToken?: string; tokenType?: string; scope?: string; expiresAt: string };
 export type MediaJob = { id: string; owner_id: string; connection_id: string | null; provider: string; provider_message_id: string; source_message_id: string | null; source_conversation_id: string | null; source_person_id: string | null; attempts: number; source_type?: "email" | "instagram" | "whatsapp"; metadata?: unknown };
@@ -196,9 +196,13 @@ export async function processPendingEmailMediaJobs(database: SupabaseClient, lim
   if (error) throw new Error("media_queue_unavailable");
 
   const results = await Promise.allSettled((jobs ?? []).map((job) => processEmailMediaJob(database, job)));
+  const failureCodes = [...new Set(results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => classifyMediaFailure(result.reason).code))].slice(0, 3);
   return {
     scanned: jobs?.length ?? 0,
     processed: results.filter((result) => result.status === "fulfilled" && result.value.processed).length,
     failed: results.filter((result) => result.status === "rejected").length,
+    failureCodes,
   };
 }
