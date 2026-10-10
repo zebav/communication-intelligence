@@ -3,10 +3,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type IngestionConnection = { id: string; provider: string; account: string; status: string; health: string; lastSyncAt: string | null; lastInboundAt: string | null; needsAttention: boolean };
 export type IngestionHealth = { pendingMedia: number; failedMedia: number; deadLetterMedia: number; retrievalPending: number; retrievalFailed: number; analysisPending: number; vaultRetained: number; oldestPendingAt: string | null; affectedConnectionIds: string[]; connections: IngestionConnection[] };
 
-function ownerScope(query: any, ownerId?: string): any {
-  return ownerId ? query.eq("owner_id", ownerId) : query;
-}
-
 /**
  * Return lifecycle status from database counts rather than an arbitrary page
  * of old jobs. The former implementation could keep surfacing a historical
@@ -14,25 +10,30 @@ function ownerScope(query: any, ownerId?: string): any {
  * limit, which made the UI operationally misleading.
  */
 export async function readDataIngestionHealth(database: SupabaseClient, ownerId?: string): Promise<IngestionHealth> {
-  const count = (filter: (query: any) => any) => filter(ownerScope(database.from("vault_ingestion_jobs").select("id", { count: "exact", head: true }), ownerId));
-  const oldest = ownerScope(database.from("vault_ingestion_jobs").select("created_at"), ownerId)
+  const jobsCount = () => {
+    const query = database.from("vault_ingestion_jobs").select("id", { count: "exact", head: true });
+    return ownerId ? query.eq("owner_id", ownerId) : query;
+  };
+  const oldestBase = database.from("vault_ingestion_jobs").select("created_at");
+  const oldest = (ownerId ? oldestBase.eq("owner_id", ownerId) : oldestBase)
     .in("state", ["pending", "processing"])
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  const affected = ownerScope(database.from("vault_ingestion_jobs").select("connection_id"), ownerId)
+  const affectedBase = database.from("vault_ingestion_jobs").select("connection_id");
+  const affected = (ownerId ? affectedBase.eq("owner_id", ownerId) : affectedBase)
     .in("state", ["failed", "dead_letter"])
     .not("connection_id", "is", null)
     .order("updated_at", { ascending: false })
     .limit(100);
   const [pendingResult, failedResult, deadLetterResult, retrievalPendingResult, retrievalFailedResult, analysisPendingResult, retainedResult, oldestResult, affectedResult] = await Promise.all([
-    count((query) => query.in("state", ["pending", "processing"])),
-    count((query) => query.eq("state", "failed")),
-    count((query) => query.eq("state", "dead_letter")),
-    count((query) => query.in("retrieval_status", ["queued", "fetching"])),
-    count((query) => query.in("retrieval_status", ["failed", "expired"])),
-    count((query) => query.in("analysis_status", ["queued", "processing"])),
-    count((query) => query.eq("vault_status", "retained")),
+    jobsCount().in("state", ["pending", "processing"]),
+    jobsCount().eq("state", "failed"),
+    jobsCount().eq("state", "dead_letter"),
+    jobsCount().in("retrieval_status", ["queued", "fetching"]),
+    jobsCount().in("retrieval_status", ["failed", "expired"]),
+    jobsCount().in("analysis_status", ["queued", "processing"]),
+    jobsCount().eq("vault_status", "retained"),
     oldest,
     affected,
   ]);
