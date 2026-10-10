@@ -7,16 +7,17 @@ import { logOperation } from "@/lib/observability";
 import { ownerIdFromCronHeaders } from "@/lib/cron-owner";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+const maxConnectionsPerPass = 2;
 export async function GET(request: NextRequest) {
   const startedAt = Date.now();
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = createAdminClient();
   const ownerId = ownerIdFromCronHeaders(request.headers);
   // Keep Slack accounts independent and bounded, exactly like the other
-  // source workers. The account with the oldest successful import is next.
+  // source workers. A small batch gives each connected workspace timely turns.
   let connectionQuery = db.from("connections").select("id").eq("provider", "slack").eq("status", "connected").order("last_sync_at", { ascending: true, nullsFirst: true });
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
-  const { data: connections } = await connectionQuery.limit(1);
+  const { data: connections } = await connectionQuery.limit(maxConnectionsPerPass);
   const results = await Promise.allSettled((connections ?? []).map(({ id }) => reconcileSlackConnection(id)));
   const failureCodes = results.filter((result): result is PromiseRejectedResult => result.status === "rejected").map((result) => result.reason instanceof Error ? result.reason.message : "slack_unknown_failure");
   const reconnectRequired = failureCodes.some((code) => /slack_(reconnect_required|invalid_auth|token_revoked|missing_scope|not_authed)/.test(code));

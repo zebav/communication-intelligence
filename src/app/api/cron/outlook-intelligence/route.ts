@@ -15,6 +15,10 @@ import { materializeInboundDecision } from "@/lib/assistant/repository";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+// Two provider calls run concurrently inside the 60-second Vercel window.
+// This services multiple connected accounts without turning one cron tick into
+// an unbounded mailbox fan-out or amplifying provider rate limits.
+const maxConnectionsPerPass = 2;
 
 type EmailProvider = "gmail" | "microsoft-graph";
 
@@ -95,12 +99,12 @@ export async function GET(request: NextRequest) {
   const ownerId = requestedOwner.success ? requestedOwner.data : null;
   const loginTriggered = request.headers.get("x-maintenance-trigger") === "login";
   const provider = requestedProvider(request);
-  // One account per provider pass keeps every run bounded. Ordering by the
-  // oldest successful sync means several connected accounts are serviced in
-  // turn instead of one slow mailbox delaying the rest.
+  // Ordering by the oldest successful sync prevents a second connected mailbox
+  // from waiting through several five-minute passes. The small concurrent
+  // batch still keeps every provider run within the function budget.
   let connectionQuery = supabase.from("connections").select("owner_id,id,provider").eq("provider", provider).eq("status", "connected").order("last_sync_at", { ascending: true, nullsFirst: true });
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
-  const { data: connections, error } = await connectionQuery.limit(1);
+  const { data: connections, error } = await connectionQuery.limit(maxConnectionsPerPass);
   if (error) {
     logOperation({ route: provider === "gmail" ? "/api/cron/gmail-intelligence" : "/api/cron/outlook-intelligence", operation: "email_import_and_analysis", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: "connections_unavailable" });
     return NextResponse.json({ error: "Connections could not be loaded." }, { status: 500 });

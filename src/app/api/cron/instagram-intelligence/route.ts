@@ -10,6 +10,7 @@ import { ownerIdFromCronHeaders } from "@/lib/cron-owner";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+const maxConnectionsPerPass = 2;
 
 function metadataObject(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -20,12 +21,11 @@ export async function GET(request: NextRequest) {
   if (!isAuthorizedCron(request.headers.get("authorization"))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const database = createAdminClient();
   const ownerId = ownerIdFromCronHeaders(request.headers);
-  // Process one least-recently-synced account per pass. This gives the worker a
-  // predictable upper bound and avoids a single provider slowdown consuming
-  // the whole Vercel function window.
+  // Service a small, least-recently-synced batch. Provider calls stay bounded
+  // while a second connected account no longer has to wait for a later cron.
   let connectionQuery = database.from("connections").select("id").eq("provider", instagramConnector.id).eq("status", "connected").order("last_sync_at", { ascending: true, nullsFirst: true });
   if (ownerId) connectionQuery = connectionQuery.eq("owner_id", ownerId);
-  const { data: connections } = await connectionQuery.limit(1);
+  const { data: connections } = await connectionQuery.limit(maxConnectionsPerPass);
   const reconciliation = await Promise.allSettled((connections ?? []).map((connection) => reconcileInstagramConnection(connection.id)));
   const reconciliationFailed = reconciliation.filter((result) => result.status === "rejected").length;
   const reconnectRequired = reconciliation.some((result) => result.status === "rejected" && /instagram_reconciliation_(401|403)$/.test(result.reason instanceof Error ? result.reason.message : ""));
