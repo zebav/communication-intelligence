@@ -93,7 +93,28 @@ export async function reconcileInstagramConnection(connectionId: string) {
   // bounded webhook repair pass; the dedicated intelligence worker will pick
   // up imported messages in its own small batch immediately afterwards.
   const items = (payload.data ?? []).flatMap((thread) => thread.messages?.data ?? []).slice(0, MAX_RECONCILIATION_MESSAGES);
-  for (const item of items) {
+  // Meta returns a short overlapping conversation window. Most scheduled
+  // passes therefore contain messages already received through webhooks or a
+  // prior repair pass. Filter them once up front: resolving a person and
+  // touching a conversation for each duplicate was needless work on every
+  // five-minute run. The unique upsert below remains the final race-safe
+  // guard for a message that arrives concurrently.
+  const externalIds = items.map((item) => item.id?.trim()).filter((id): id is string => Boolean(id));
+  const { data: existingMessages, error: existingMessagesError } = externalIds.length
+    ? await database.from("messages")
+      .select("external_message_id")
+      .eq("owner_id", connection.owner_id)
+      .eq("source", "instagram")
+      .in("external_message_id", externalIds)
+    : { data: [], error: null };
+  if (existingMessagesError) throw existingMessagesError;
+  const existingExternalIds = new Set((existingMessages ?? []).map(({ external_message_id }) => external_message_id));
+  const newItems = items.filter((item) => {
+    const id = item.id?.trim();
+    return Boolean(id && !existingExternalIds.has(id));
+  });
+
+  for (const item of newItems) {
     const externalId = item.id?.trim() ?? "", sender = item.from?.id?.trim() ?? "";
     const direction = sender === accountId ? "out" as const : "in" as const;
     const participantId = direction === "in" ? sender : participantFromTo(item.to);
@@ -148,5 +169,5 @@ export async function reconcileInstagramConnection(connectionId: string) {
     profilesResolved += historical.resolved;
   }
   await database.from("connections").update({ health_status: "healthy", last_sync_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", connection.id);
-  return { imported, scanned: items.length, profileLookups, profilesResolved };
+  return { imported, scanned: items.length, skippedDuplicates: items.length - newItems.length, profileLookups, profilesResolved };
 }
