@@ -27,7 +27,7 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  const affectedBase = database.from("vault_ingestion_jobs").select("connection_id");
+  const affectedBase = database.from("vault_ingestion_jobs").select("connection_id,state,last_error_code");
   const affected = (ownerId ? affectedBase.eq("owner_id", ownerId) : affectedBase)
     .in("state", ["failed", "dead_letter"])
     .not("connection_id", "is", null)
@@ -99,7 +99,14 @@ export async function readDataIngestionHealth(database: SupabaseClient, ownerId?
     analysisPending: analysisPendingResult.count ?? 0,
     vaultRetained: retainedResult.count ?? 0,
     oldestPendingAt: typeof oldestResult.data?.created_at === "string" ? oldestResult.data.created_at : null,
-    affectedConnectionIds: [...new Set(((affectedResult.data ?? []) as Array<{ connection_id: unknown }>).map((item) => item.connection_id).filter((id): id is string => typeof id === "string"))],
+    // A retained terminal media error (for example one malformed audio file)
+    // must not mark an otherwise healthy mailbox or chat connection as broken.
+    // Only an active retry or a credential/access failure degrades the source;
+    // media counts remain visible separately for safe recovery and diagnosis.
+    affectedConnectionIds: [...new Set(((affectedResult.data ?? []) as Array<{ connection_id: unknown; state: unknown; last_error_code: unknown }>)
+      .filter((item) => item.state === "failed" || /(?:reconnect|required|credential|(?:_|^)401(?:_|$)|(?:_|^)403(?:_|$))/i.test(typeof item.last_error_code === "string" ? item.last_error_code : ""))
+      .map((item) => item.connection_id)
+      .filter((id): id is string => typeof id === "string"))],
     connections,
   };
 }
