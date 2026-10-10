@@ -427,19 +427,8 @@ function SyncedInbox({ emails, people, decisions, onDecisionChange, onOpenAssist
   const [approvalTaskId, setApprovalTaskId] = useState("");
   const [insightOpen, setInsightOpen] = useState(false);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
-  const automaticallyPrepared = useRef<Set<string>>(new Set());
   const filtered = prioritizeEmails(category === "All categories" ? emails : category === "Relevant" ? emails.filter((email) => isRelevantEmail(email.classification)) : category === "Filtered out" ? emails.filter((email) => !isRelevantEmail(email.classification)) : emails.filter((email) => email.classification === category));
   const selected = filtered.find((email) => email.id === selectedId) ?? filtered[0];
-  useEffect(() => {
-    if (!selected || selected.analysis || automaticallyPrepared.current.has(selected.id)) return;
-    automaticallyPrepared.current.add(selected.id);
-    setAnalyzing(true);
-    setAnalysisError("");
-    void analyzeEmailWithAI({ messageId: selected.messageId, conversationId: selected.id })
-      .then((result) => { if (result.error) setAnalysisError(result.error); else router.refresh(); })
-      .catch(() => setAnalysisError("Svarsförslaget kunde inte förberedas just nu."))
-      .finally(() => setAnalyzing(false));
-  }, [router, selected]);
   if (!selected) return <div className="page"><PageHeader eyebrow="Live Outlook inbox" title="Inbox" subtitle="Filter synchronized messages by category." /><div className="inbox-head"><select className="filter" aria-label="Email category" value={category} onChange={(event) => setCategory(event.target.value)}>{EMAIL_CATEGORIES.map((item) => <option key={item}>{item}</option>)}</select></div><div className="empty-card">No messages match this category.</div></div>;
   const replyDraft = replyDrafts[selected.id] ?? selected.analysis?.draftResponse ?? "";
   const currentDecision = selected.messageId ? decisions[selected.messageId] : undefined;
