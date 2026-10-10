@@ -9,6 +9,11 @@ function safeQueueFailureCode(code: unknown) {
     case "23505": return "conflict";
     case "23514": return "constraint";
     case "22P02": return "invalid_value";
+    case "42501": return "permission";
+    // PostgREST uses this code when the deployed schema cache cannot match a
+    // submitted field. It is operationally useful but carries no user data.
+    case "PGRST204": return "schema_mismatch";
+    case "42P10": return "conflict_target";
     default: return "write_failed";
   }
 }
