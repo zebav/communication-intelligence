@@ -3,6 +3,8 @@ import {
   automationOperationPath,
   claimAutomationJobs,
   completeAutomationJob,
+  enqueueOwnerMaintenance,
+  newTraceId,
   reclaimStaleAutomationJobs,
   retryStatusFor,
   safeWorkerResult,
@@ -22,6 +24,27 @@ function mailboxProvider(operation: string) {
 }
 
 /**
+ * Keep durable maintenance alive even while its owner is away from the app.
+ * This only queues coalesced, owner-scoped work; each worker still validates
+ * its own connection before it reads a provider or writes any data.
+ */
+async function seedConnectedOwnerMaintenance(database: ReturnType<typeof createAdminClient>) {
+  const { data, error } = await database
+    .from("connections")
+    .select("owner_id")
+    .eq("status", "connected")
+    .limit(100);
+  if (error) return { owners: 0, error: true };
+  const ownerIds = [...new Set((data ?? []).map((row) => row.owner_id).filter((id): id is string => typeof id === "string"))];
+  await Promise.all(ownerIds.map((ownerId) => enqueueOwnerMaintenance(database, {
+    ownerId,
+    trigger: "scheduled",
+    traceId: newTraceId(),
+  })));
+  return { owners: ownerIds.length, error: false };
+}
+
+/**
  * Executes bounded, idempotent maintenance requests queued by a signed-in
  * owner. The direct source crons remain as a recovery path while this queue
  * is rolled out, so a failed dispatch never stops routine imports.
@@ -33,6 +56,7 @@ export async function GET(request: NextRequest) {
   }
 
   const database = createAdminClient();
+  const seeded = await seedConnectedOwnerMaintenance(database);
   const reclaimed = await reclaimStaleAutomationJobs(database);
   const jobs = await claimAutomationJobs(database);
   const results = await Promise.all(jobs.map(async (job) => {
@@ -105,7 +129,7 @@ export async function GET(request: NextRequest) {
     outcome: failed ? "failed" : "completed",
     durationMs: Date.now() - startedAt,
     requestId: request.headers.get("x-vercel-id"),
-    counts: { claimed: jobs.length, completed: results.filter((result) => result.state === "completed").length, retrying: results.filter((result) => result.state === "retrying").length, failed, recovered_stale: reclaimed.retrying, stale_failed: reclaimed.failed },
+    counts: { seeded_owners: seeded.owners, seed_error: seeded.error ? 1 : 0, claimed: jobs.length, completed: results.filter((result) => result.state === "completed").length, retrying: results.filter((result) => result.state === "retrying").length, failed, recovered_stale: reclaimed.retrying, stale_failed: reclaimed.failed },
   });
-  return NextResponse.json({ ok: true, claimed: jobs.length, recovered: reclaimed, results }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, seededOwners: seeded.owners, seedError: seeded.error, claimed: jobs.length, recovered: reclaimed, results }, { headers: { "Cache-Control": "no-store" } });
 }
