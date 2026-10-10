@@ -13,6 +13,7 @@ import { refreshRelationshipIntelligence, relationshipContextForAI } from "@/lib
 import { emailAnalysisRecoveryCandidates } from "@/lib/email-analysis-recovery";
 import { materializeInboundDecision } from "@/lib/assistant/repository";
 import { mapWithConcurrency } from "@/lib/bounded-concurrency";
+import { verifyMailboxSyncResult, type MailboxSyncPayload } from "@/lib/mailbox-sync-result";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -120,17 +121,14 @@ export async function GET(request: NextRequest) {
 
   const syncResults = await mapWithConcurrency(connections ?? [], maxConnectionsPerPass, async (connection) => {
     try {
+      const attemptedAt = Date.now();
       const path = connection.provider === "gmail" ? "/api/connectors/google/sync" : "/api/connectors/microsoft/sync";
       const response = await fetch(new URL(`${path}?connectionId=${encodeURIComponent(connection.id)}`, request.url), { method: "POST", headers: { authorization: request.headers.get("authorization")!, "x-owner-id": connection.owner_id, "x-sync-trigger": loginTriggered ? "automatic" : "background" }, signal: AbortSignal.timeout(45_000) });
-      const payload = await response.json().catch(() => null) as { code?: unknown } | null;
-      // The connector returns only a small, whitelisted code. Persisting that
-      // makes Operations useful without ever copying provider response bodies.
-      const errorCode = typeof payload?.code === "string" && /^outlook_[a-z0-9_]+$/.test(payload.code)
-        ? payload.code
-        : response.ok ? undefined : "outlook_sync_failed";
-      return { ownerId: connection.owner_id, ok: response.ok, errorCode };
+      const payload = await response.json().catch(() => null) as MailboxSyncPayload | null;
+      const verified = verifyMailboxSyncResult(response.ok, payload, attemptedAt, connection.provider);
+      return { ownerId: connection.owner_id, ...verified };
     } catch {
-      return { ownerId: connection.owner_id, ok: false, errorCode: "outlook_worker_unavailable" };
+      return { ownerId: connection.owner_id, ok: false, errorCode: connection.provider === "gmail" ? "gmail_worker_unavailable" : "outlook_worker_unavailable", imported: 0, skipped: false };
     }
   });
 
@@ -169,6 +167,8 @@ export async function GET(request: NextRequest) {
     counts: {
       accounts: syncResults.length,
       synced,
+      imported: syncResults.reduce((total, result) => total + result.imported, 0),
+      skipped: syncResults.filter((result) => result.skipped).length,
       scanned: pending?.length ?? 0,
       eligible: candidates.length,
       analyzed,
@@ -181,7 +181,7 @@ export async function GET(request: NextRequest) {
   // import; otherwise Operations would say "Klar" while the account stays
   // stale indefinitely.
   return NextResponse.json(
-    { ok: outcome === "completed", provider, accounts: syncResults.length, synced, analyzed, analysisLimit: 3, ownerId, loginTriggered, errorCode: outcome === "failed" ? syncResults.find((result) => !result.ok)?.errorCode ?? "email_sync_failed" : undefined },
+    { ok: outcome === "completed", provider, accounts: syncResults.length, synced, imported: syncResults.reduce((total, result) => total + result.imported, 0), skipped: syncResults.filter((result) => result.skipped).length, analyzed, analysisLimit: 3, ownerId, loginTriggered, errorCode: outcome === "failed" ? syncResults.find((result) => !result.ok)?.errorCode ?? "email_sync_failed" : undefined },
     { status: outcome === "completed" ? 200 : 502, headers: { "Cache-Control": "no-store" } },
   );
 }
