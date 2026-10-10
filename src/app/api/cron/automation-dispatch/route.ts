@@ -5,6 +5,7 @@ import {
   completeAutomationJob,
   reclaimStaleAutomationJobs,
   retryStatusFor,
+  safeWorkerResult,
 } from "@/lib/automation-jobs";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 import { logOperation } from "@/lib/observability";
@@ -13,6 +14,12 @@ import { ownerAgentForAutomation } from "@/lib/agents/registry";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+function mailboxProvider(operation: string) {
+  if (operation === "gmail_intelligence") return "gmail";
+  if (operation === "outlook_intelligence") return "microsoft-graph";
+  return null;
+}
 
 /**
  * Executes bounded, idempotent maintenance requests queued by a signed-in
@@ -39,18 +46,34 @@ export async function GET(request: NextRequest) {
         },
         signal: AbortSignal.timeout(50_000),
       });
+      const payload = await response.json().catch(() => null) as { errorCode?: unknown } | null;
+      const result = safeWorkerResult(payload);
       if (response.ok) {
-        await completeAutomationJob(database, job, { status: "completed", httpStatus: response.status });
+        // A mailbox worker returning 200 with no claimed account is not a
+        // successful owner-maintenance pass when an account is connected. It
+        // previously made Operations say "Klar" for stale Gmail/Outlook
+        // inboxes. Retry through the durable backoff instead of hiding it.
+        const provider = mailboxProvider(job.operation);
+        const expected = provider
+          ? await database.from("connections").select("id", { count: "exact", head: true }).eq("owner_id", job.owner_id).eq("provider", provider).eq("status", "connected")
+          : null;
+        const expectedMailboxCount = expected?.count ?? 0;
+        const missingMailboxPass = Boolean(provider && !expected?.error && expectedMailboxCount > 0 && result.accounts === 0);
+        if (missingMailboxPass) {
+          const status = retryStatusFor(job);
+          await completeAutomationJob(database, job, { status, errorCode: "mailbox_sync_no_accounts", httpStatus: response.status, result });
+          return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: status };
+        }
+        await completeAutomationJob(database, job, { status: "completed", httpStatus: response.status, result });
         return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: "completed" as const };
       }
       const status = retryStatusFor(job);
-      const payload = await response.json().catch(() => null) as { errorCode?: unknown } | null;
       // Workers expose only allowlisted, provider-neutral diagnostic codes. Do
       // not persist raw upstream error bodies into the owner-facing job log.
       const errorCode = typeof payload?.errorCode === "string" && /^[a-z0-9_]{3,80}$/.test(payload.errorCode)
         ? payload.errorCode
         : `worker_http_${response.status}`;
-      await completeAutomationJob(database, job, { status, errorCode, httpStatus: response.status });
+      await completeAutomationJob(database, job, { status, errorCode, httpStatus: response.status, result });
       return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: status };
     } catch {
       const status = retryStatusFor(job);

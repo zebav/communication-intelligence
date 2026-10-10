@@ -20,6 +20,7 @@ export const AUTOMATION_OPERATIONS = [
 export type AutomationOperation = typeof AUTOMATION_OPERATIONS[number];
 export type AutomationTrigger = "login" | "scheduled" | "manual_recovery";
 type AutomationStatus = "queued" | "running" | "retrying" | "completed" | "failed";
+export type SafeWorkerResult = { accounts?: number; synced?: number; analyzed?: number };
 
 type AutomationJob = {
   id: string;
@@ -42,6 +43,21 @@ export function traceIdFromHeaders(headers: Headers) {
   return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
     ? value
     : newTraceId();
+}
+
+/**
+ * Keep the durable job log useful without copying provider responses into the
+ * database. These bounded counters are sufficient to distinguish a genuine
+ * mailbox pass from a 200 response that did not claim any account.
+ */
+export function safeWorkerResult(payload: unknown): SafeWorkerResult {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  const result: SafeWorkerResult = {};
+  for (const key of ["accounts", "synced", "analyzed"] as const) {
+    const value = (payload as Record<string, unknown>)[key];
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 10_000) result[key] = value;
+  }
+  return result;
 }
 
 /** Queue at most one run per owner, operation and five-minute window. */
@@ -142,10 +158,10 @@ export async function claimAutomationJobs(database: SupabaseClient, limit = 8): 
 export async function completeAutomationJob(
   database: SupabaseClient,
   job: AutomationJob,
-  input: { status: Extract<AutomationStatus, "completed" | "retrying" | "failed">; errorCode?: string; httpStatus?: number },
+  input: { status: Extract<AutomationStatus, "completed" | "retrying" | "failed">; errorCode?: string; httpStatus?: number; result?: SafeWorkerResult },
 ) {
   const retrying = input.status === "retrying";
-  const result = input.httpStatus == null ? {} : { http_status: input.httpStatus };
+  const result = { ...(input.httpStatus == null ? {} : { http_status: input.httpStatus }), ...(input.result ?? {}) };
   const availableAt = retrying
     ? new Date(Date.now() + Math.min(15 * 60_000, 60_000 * 2 ** Math.max(0, job.attempts - 1))).toISOString()
     : new Date().toISOString();

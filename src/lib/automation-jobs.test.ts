@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTOMATION_OPERATIONS, automationOperationPath, retryStatusFor, staleAutomationStatusFor, traceIdFromHeaders } from "./automation-jobs";
+import { AUTOMATION_OPERATIONS, automationOperationPath, retryStatusFor, safeWorkerResult, staleAutomationStatusFor, traceIdFromHeaders } from "./automation-jobs";
 
 describe("automation job safety", () => {
   it("accepts only a well-formed propagated trace id", () => {
@@ -22,5 +22,10 @@ describe("automation job safety", () => {
   it("routes every queued operation to a bounded existing worker", () => {
     expect(Object.values(automationOperationPath)).toHaveLength(AUTOMATION_OPERATIONS.length);
     expect(Object.values(automationOperationPath).every((path) => path.startsWith("/api/cron/"))).toBe(true);
+  });
+
+  it("persists only bounded, privacy-safe worker counters", () => {
+    expect(safeWorkerResult({ accounts: 2, synced: 2, analyzed: 4, token: "never" })).toEqual({ accounts: 2, synced: 2, analyzed: 4 });
+    expect(safeWorkerResult({ accounts: -1, synced: "2", analyzed: 20_000 })).toEqual({});
   });
 });
