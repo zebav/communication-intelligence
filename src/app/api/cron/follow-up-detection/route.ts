@@ -3,16 +3,17 @@ import { isAuthorizedCron } from "@/lib/cron-auth";
 import { ownerIdFromCronHeaders } from "@/lib/cron-owner";
 import { logOperation } from "@/lib/observability";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { makePlan } from "@/lib/assistant/model";
-import { readEvidence } from "@/lib/assistant/repository";
+import { makePlan, sendCapability, type Task } from "@/lib/assistant/model";
+import { changeTask, generateDraft, readEvidence } from "@/lib/assistant/repository";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
  * Turns already-evidenced, unresolved communication outcomes into an owner
- * decision card. It does not generate a costly draft or contact any provider:
- * the owner opens the card to prepare and approve the exact follow-up.
+ * decision card with a ready-to-review draft. It never contacts a provider:
+ * the owner still approves the exact recipient and text before an external
+ * message can be sent.
  */
 export async function GET(request: NextRequest) {
   const startedAt = Date.now();
@@ -28,6 +29,8 @@ export async function GET(request: NextRequest) {
   const { data: outcomes, error } = await query;
   if (error) return NextResponse.json({ error: "Follow-up outcomes could not be read." }, { status: 503 });
   let created = 0;
+  let prepared = 0;
+  let failed = 0;
   for (const outcome of outcomes ?? []) {
     const { data: existing } = await database.from("assistant_tasks").select("id")
       .eq("owner_id", outcome.owner_id).eq("message_id", outcome.trigger_message_id).eq("kind", "follow_up").maybeSingle();
@@ -35,13 +38,37 @@ export async function GET(request: NextRequest) {
     try {
       const evidence = await readEvidence(database, outcome.owner_id, outcome.trigger_message_id);
       if (evidence.direction !== "out" || (evidence.lastOtherAt && Date.parse(evidence.lastOtherAt) > Date.parse(evidence.sentAt))) continue;
-      const plan = { ...makePlan(evidence, "follow_up"), reason: "Ett tidigare skickat meddelande saknar fortfarande svar. Solvani har förberett ett säkert uppföljningsbeslut; text och mottagare granskas innan utskick." };
-      const { error: insertError } = await database.from("assistant_tasks").insert({ owner_id: outcome.owner_id, message_id: outcome.trigger_message_id, kind: "follow_up", plan });
-      if (!insertError) created += 1;
+      const initialPlan = { ...makePlan(evidence, "follow_up"), reason: "Ett tidigare skickat meddelande saknar fortfarande svar. Solvani har förberett ett säkert uppföljningsbeslut; text och mottagare granskas innan utskick." };
+      const draft = await generateDraft(database, outcome.owner_id, initialPlan, true);
+      const plan = {
+        ...initialPlan,
+        draft,
+        originalDraft: draft,
+        preparation: {
+          status: "ready" as const,
+          summary: "Ett uppföljningsförslag har förberetts från den befintliga konversationen.",
+          preparedAt: new Date().toISOString(),
+        },
+      };
+      const { data: task, error: insertError } = await database.from("assistant_tasks")
+        .insert({ owner_id: outcome.owner_id, message_id: outcome.trigger_message_id, kind: "follow_up", plan })
+        .select("*")
+        .maybeSingle();
+      if (insertError || !task) {
+        failed += 1;
+        continue;
+      }
+      created += 1;
+      prepared += 1;
+      if (!sendCapability(plan, "follow_up")) {
+        await changeTask(database, outcome.owner_id, task as Task, "ready", plan);
+      }
     } catch {
-      // A malformed legacy message is skipped; a later bounded pass can retry.
+      // Do not persist a failed partial task. The bounded worker will retry on
+      // its next pass, while diagnostics retain the failure count.
+      failed += 1;
     }
   }
-  logOperation({ route: "/api/cron/follow-up-detection", operation: "follow_up_detection", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { scanned: outcomes?.length ?? 0, created } });
-  return NextResponse.json({ ok: true, scanned: outcomes?.length ?? 0, created }, { headers: { "Cache-Control": "no-store" } });
+  logOperation({ route: "/api/cron/follow-up-detection", operation: "follow_up_detection", outcome: "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { scanned: outcomes?.length ?? 0, created, prepared, failed } });
+  return NextResponse.json({ ok: true, scanned: outcomes?.length ?? 0, created, prepared, failed }, { headers: { "Cache-Control": "no-store" } });
 }
