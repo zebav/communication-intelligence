@@ -47,6 +47,26 @@ function safeMicrosoftSyncError(reason: string) {
   return { message: "Outlook-importen stoppades innan den var klar. Solvani försöker igen automatiskt och visar en återanslutning endast om behörigheten faktiskt har gått ut.", status: 502, reconnect: false };
 }
 
+/**
+ * Diagnostic codes travel only between Solvani's own workers. Keep this list
+ * deliberately small: raw Graph and database errors can contain private URLs,
+ * identifiers, or implementation details and must never reach the browser.
+ */
+function safeMicrosoftSyncCode(reason: string) {
+  if (reason === "reconnect_required" || reason === "graph_401") return "outlook_reconnect_required";
+  if (reason === "graph_403") return "outlook_access_denied";
+  if (/^graph_(408|429|5\d\d)$/.test(reason)) return "outlook_provider_temporary";
+  if (reason === "invalid_delta_link") return "outlook_delta_cursor_invalid";
+  if (reason === "sync_cursor_save_failed") return "outlook_cursor_save_failed";
+  if (reason === "credential_update_failed") return "outlook_credential_update_failed";
+  if (reason.startsWith("identity_lookup_failed")) return "outlook_identity_lookup_failed";
+  if (reason.startsWith("identity_insert_failed")) return "outlook_identity_save_failed";
+  if (reason === "person_insert_failed") return "outlook_person_save_failed";
+  if (reason === "conversation_save_failed") return "outlook_conversation_save_failed";
+  if (reason === "message_save_failed") return "outlook_message_save_failed";
+  return "outlook_sync_failed";
+}
+
 function jsonError(message: string, status = 500) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -305,6 +325,6 @@ export async function POST(request: NextRequest) {
     }).eq("id", connection.id).eq("owner_id", userId);
     const safeError = safeMicrosoftSyncError(reason);
     logOperation({ route: "/api/connectors/microsoft/sync", operation: "outlook_import", outcome: "failed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), error: reason });
-    return jsonError(safeError.message, safeError.status);
+    return NextResponse.json({ error: safeError.message, code: safeMicrosoftSyncCode(reason) }, { status: safeError.status });
   }
 }

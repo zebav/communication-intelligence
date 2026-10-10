@@ -115,9 +115,15 @@ export async function GET(request: NextRequest) {
     try {
       const path = connection.provider === "gmail" ? "/api/connectors/google/sync" : "/api/connectors/microsoft/sync";
       const response = await fetch(new URL(`${path}?connectionId=${encodeURIComponent(connection.id)}`, request.url), { method: "POST", headers: { authorization: request.headers.get("authorization")!, "x-owner-id": connection.owner_id, "x-sync-trigger": loginTriggered ? "automatic" : "background" }, signal: AbortSignal.timeout(45_000) });
-      return { ownerId: connection.owner_id, ok: response.ok };
+      const payload = await response.json().catch(() => null) as { code?: unknown } | null;
+      // The connector returns only a small, whitelisted code. Persisting that
+      // makes Operations useful without ever copying provider response bodies.
+      const errorCode = typeof payload?.code === "string" && /^outlook_[a-z0-9_]+$/.test(payload.code)
+        ? payload.code
+        : response.ok ? undefined : "outlook_sync_failed";
+      return { ownerId: connection.owner_id, ok: response.ok, errorCode };
     } catch {
-      return { ownerId: connection.owner_id, ok: false };
+      return { ownerId: connection.owner_id, ok: false, errorCode: "outlook_worker_unavailable" };
     }
   });
 
@@ -151,14 +157,14 @@ export async function GET(request: NextRequest) {
     durationMs: Date.now() - startedAt,
     requestId: request.headers.get("x-vercel-id"),
     counts: { accounts: syncResults.length, synced, analyzed, remainingCandidates: Math.max(0, (pending?.length ?? 0) - candidates.length) },
-    error: outcome === "failed" ? "email_sync_failed" : undefined,
+    error: outcome === "failed" ? syncResults.find((result) => !result.ok)?.errorCode ?? "email_sync_failed" : undefined,
   });
   // The automation dispatcher uses the response status as its durable retry
   // signal. Never report a completed job when a connected mailbox failed to
   // import; otherwise Operations would say "Klar" while the account stays
   // stale indefinitely.
   return NextResponse.json(
-    { ok: outcome === "completed", provider, accounts: syncResults.length, synced, analyzed, analysisLimit: 3, ownerId, loginTriggered },
+    { ok: outcome === "completed", provider, accounts: syncResults.length, synced, analyzed, analysisLimit: 3, ownerId, loginTriggered, errorCode: outcome === "failed" ? syncResults.find((result) => !result.ok)?.errorCode ?? "email_sync_failed" : undefined },
     { status: outcome === "completed" ? 200 : 502, headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -44,7 +44,13 @@ export async function GET(request: NextRequest) {
         return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: "completed" as const };
       }
       const status = retryStatusFor(job);
-      await completeAutomationJob(database, job, { status, errorCode: `worker_http_${response.status}`, httpStatus: response.status });
+      const payload = await response.json().catch(() => null) as { errorCode?: unknown } | null;
+      // Workers expose only allowlisted, provider-neutral diagnostic codes. Do
+      // not persist raw upstream error bodies into the owner-facing job log.
+      const errorCode = typeof payload?.errorCode === "string" && /^[a-z0-9_]{3,80}$/.test(payload.errorCode)
+        ? payload.errorCode
+        : `worker_http_${response.status}`;
+      await completeAutomationJob(database, job, { status, errorCode, httpStatus: response.status });
       return { operation: job.operation, agent: ownerAgentForAutomation(job.operation), state: status };
     } catch {
       const status = retryStatusFor(job);
