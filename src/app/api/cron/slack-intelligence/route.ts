@@ -5,6 +5,7 @@ import { reconcileSlackConnection } from "@/lib/connectors/slack-reconciliation"
 import { analyzeIncomingInstagramMessage } from "@/lib/connectors/instagram-intelligence";
 import { logOperation } from "@/lib/observability";
 import { ownerIdFromCronHeaders } from "@/lib/cron-owner";
+import { analysisFailureCode } from "@/lib/connectors/analysis-diagnostics";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 const maxConnectionsPerPass = 2;
@@ -53,14 +54,18 @@ export async function GET(request: NextRequest) {
     source: "slack",
   })));
   const analysisFailed = pendingError ? 1 : analysisResults.filter((result) => result.status === "rejected").length;
+  const firstAnalysisFailure = analysisResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
   const analyzed = analysisResults.filter((result) => result.status === "fulfilled" && result.value.status === "analyzed").length;
   const blockedMedia = analysisResults.filter((result) => result.status === "fulfilled" && result.value.status === "blocked_media").length;
   const failed = results.filter((result) => result.status === "rejected").length + analysisFailed;
-  if (failed && connections?.length) await db.from("connections").update({ health_status: reconnectRequired ? "reconnect_required" : "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
+  const importFailed = results.filter((result) => result.status === "rejected").length;
+  // An AI retry is not a Slack credential or transport outage. Keep the
+  // connection truthful while the durable analysis backlog retries.
+  if (importFailed && connections?.length) await db.from("connections").update({ health_status: reconnectRequired ? "reconnect_required" : "degraded", updated_at: new Date().toISOString() }).in("id", connections.map(({ id }) => id));
   const fulfilled = results.filter((result): result is PromiseFulfilledResult<{ imported: number; readableConversations: number; unavailableConversations: number }> => result.status === "fulfilled");
   const imported = fulfilled.reduce((sum, result) => sum + result.value.imported, 0);
   const unavailableConversations = fulfilled.reduce((sum, result) => sum + result.value.unavailableConversations, 0);
-  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, unavailable_conversations: unavailableConversations, analyzed, blocked_media: blockedMedia, pending: pendingTotal, remaining: Math.max(0, pendingTotal - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : undefined) });
+  logOperation({ route: "/api/cron/slack-intelligence", operation: "slack_import_and_analysis", outcome: failed ? "failed" : "completed", durationMs: Date.now() - startedAt, requestId: request.headers.get("x-vercel-id"), traceId: request.headers.get("x-solvani-trace-id"), counts: { connections: connections?.length ?? 0, imported, unavailable_conversations: unavailableConversations, analyzed, blocked_media: blockedMedia, pending: pendingTotal, remaining: Math.max(0, pendingTotal - analysisCandidates.length), failed }, error: failureCodes[0] ?? (pendingError ? "slack_pending_messages_unavailable" : firstAnalysisFailure ? analysisFailureCode(firstAnalysisFailure.reason) : undefined) });
   // A non-success status is intentional: the durable dispatcher records it as
   // a retry, rather than presenting a failed Slack import as completed.
   return NextResponse.json(
